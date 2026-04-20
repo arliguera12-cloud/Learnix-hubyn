@@ -5,11 +5,12 @@ import re
 import time
 import pytesseract
 from io import BytesIO
+import platform
 
 # --- VERIFICACIÓN DE SEGURIDAD (El Candado) ---
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
     st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
-    st.stop() # Bloquea la ejecución si no hay sesión
+    st.stop()
 
 # --- VERIFICACIÓN DEL CLIENTE ACTIVO ---
 if "cliente_activo" not in st.session_state or not st.session_state.cliente_activo:
@@ -18,13 +19,9 @@ if "cliente_activo" not in st.session_state or not st.session_state.cliente_acti
 
 cliente = st.session_state.cliente_activo
 
-import platform
-
 # --- CONFIGURACIÓN TÉCNICA ---
-# Detecta si estamos en Windows (Local) o en Linux (Nube)
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-# En la nube (Linux), Tesseract se vincula automáticamente gracias a packages.txt
 
 st.set_page_config(page_title="Extraer DTE", layout="wide", page_icon="⚖️")
 
@@ -153,7 +150,7 @@ def extraer_dte_avanzado(f, cliente_activo):
                 texto_raw = texto_prueba
                 t_clean = re.sub(r'\s+', ' ', texto_raw)
 
-            # --- VALIDACIÓN DE CLIENTE ACTIVO (ESCUDO ANTI-INTRUSOS CON COMODÍN) ---
+            # --- VALIDACIÓN DE CLIENTE ACTIVO (ESCUDO ANTI-INTRUSOS) ---
             nit_emisor_limpio = re.sub(r'[^0-9]', '', cliente_activo['nit'])
             dui_emisor_limpio = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
             
@@ -163,7 +160,6 @@ def extraer_dte_avanzado(f, cliente_activo):
             
             es_documento_valido = False
             
-            # CHEAT CODE: Si el NIT del cliente es puro ceros, deja pasar todo.
             if nit_emisor_limpio == "00000000000000":
                 es_documento_valido = True
             elif nit_emisor_limpio in nits_limpios: 
@@ -172,9 +168,8 @@ def extraer_dte_avanzado(f, cliente_activo):
                 es_documento_valido = True
                 
             if not es_documento_valido:
-                return {"error": f"El documento no pertenece al emisor activo ({cliente_activo['nombre']})."}
+                return {"error": f"Documento ajeno al emisor activo ({cliente_activo['nombre']})."}
 
-            # --- LÓGICA ORIGINAL INTACTA ---
             # --- EXTRACCIÓN DEL RECEPTOR ---
             patron_nit_num = r"\b\d{4}-?\d{6}-?\d{3}-?\d{1}\b|\b\d{8}-?\d{1}\b"
             nit_m = re.search(r"N\s*[I1l\|]?\s*T\s*[:]?\s*([\d\-\s]{9,20})", texto_receptor, re.I)
@@ -308,12 +303,12 @@ def extraer_dte_avanzado(f, cliente_activo):
                 "iva_calculado": flag_iva
             }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"Error de lectura: {str(e)}"}
 
 # --- FUNCIÓN DE VENTANA EMERGENTE (MODAL) ---
 @st.dialog("⚠️ Seguro de Calidad de Datos")
 def ventana_descarga(df_resultados, tipo_anexo, nombre_archivo):
-    st.write("Recuerda revisar las alertas de **campos vacíos** o **cálculos manuales** en el Dashboard para mayor seguridad en tus datos antes de enviarlos a Hacienda.")
+    st.write("Recuerda revisar las alertas de **campos vacíos**, **rechazados** o **cálculos manuales** en el Dashboard para mayor seguridad en tus datos antes de enviarlos a Hacienda.")
     st.download_button(
         label=f"📥 Confirmar y Descargar Anexo {tipo_anexo}",
         data=to_excel_hacienda(df_resultados, tipo_anexo),
@@ -340,8 +335,8 @@ with st.sidebar:
     st.header("Carga de Datos")
     archivos = st.file_uploader("Arrastra tus PDFs aquí", type="pdf", accept_multiple_files=True, key=st.session_state.uploader_key)
     
-    if archivos and st.button("🚀 Procesar Documentos", type="primary"):
-        extracted, duplicados_generacion, vacios_deteccion, iva_calculado_files = [], [], [], []
+    if archivos and st.button("🚀 Procesar Documentos", type="primary", width="stretch"):
+        extracted, duplicados_generacion, vacios_deteccion, iva_calculado_files, archivos_rechazados = [], [], [], [], []
         nuevos_archivos = [f for f in archivos if f.name not in st.session_state.archivos_procesados]
 
         if nuevos_archivos:
@@ -358,37 +353,44 @@ with st.sidebar:
                     
                     res = extraer_dte_avanzado(f, cliente)
                     
-                    if "error" not in res:
+                    # --- AQUÍ GUARDAMOS LOS RECHAZADOS EN MEMORIA PARA EL DASHBOARD ---
+                    if "error" in res:
+                        archivos_rechazados.append(f"{f.name} - {res['error']}")
+                        st.session_state.archivos_procesados.add(f.name)
+                    else:
                         campos_criticos = [res['fecha'], res['ctrl'], res['tot']] if res['tipo'] in ["01", "11"] else [res['fecha'], res['nit'], res['nom'], res['ctrl'], res['tot']]
                         if "" in campos_criticos or 0.0 == res['tot']: vacios_deteccion.append(f.name)
                         if res.get('iva_calculado'): iva_calculado_files.append(f.name)
                         
                         codigo_gen = res.get('gen', '')
                         
-                        # --- ESCUDO DOBLE CONTRA DUPLICADOS (Memoria + Lote Actual) ---
                         es_duplicado_memoria = not st.session_state.db.empty and codigo_gen != "" and (st.session_state.db['gen'] == codigo_gen).any()
                         es_duplicado_lote = any(d.get('gen') == codigo_gen for d in extracted) if codigo_gen != "" else False
                         
                         if es_duplicado_memoria or es_duplicado_lote:
                             duplicados_generacion.append(f.name)
-                            st.session_state.archivos_procesados.add(f.name) # Lo marcamos como procesado para que no lo vuelva a leer
+                            st.session_state.archivos_procesados.add(f.name) 
                         else:
                             res["archivo"] = f.name
                             extracted.append(res)
                             st.session_state.archivos_procesados.add(f.name)
-                    else:
-                        st.sidebar.error(f"❌ Error en {f.name}: {res['error']}")
 
                     bar.progress((i + 1) / total_archivos)
                 txt_progreso.success(f"✅ ¡{total_archivos} procesados!")
             
-            st.session_state.reporte_actual = {"duplicados_gen": duplicados_generacion, "vacios": vacios_deteccion, "iva_calc": iva_calculado_files}
+            # --- GUARDAMOS TODO EN EL ESTADO GLOBAL ---
+            st.session_state.reporte_actual = {
+                "duplicados_gen": duplicados_generacion, 
+                "vacios": vacios_deteccion, 
+                "iva_calc": iva_calculado_files,
+                "rechazados": archivos_rechazados
+            }
             if extracted: st.session_state.db = pd.concat([st.session_state.db, pd.DataFrame(extracted)], ignore_index=True)
             time.sleep(0.5)
             st.rerun()
 
     st.divider()
-    if st.button("🧹 Limpiar Memoria y Reiniciar", type="secondary"):
+    if st.button("🧹 Limpiar Memoria y Reiniciar", type="secondary", width="stretch"):
         variables_a_borrar = ['db', 'archivos_procesados', 'reporte_actual']
         for var in variables_a_borrar:
             if var in st.session_state:
@@ -401,28 +403,37 @@ with st.sidebar:
 if st.session_state.reporte_actual:
     rep = st.session_state.reporte_actual
     st.markdown("### 📋 Reporte de Extracción")
-    c1, c2, c3 = st.columns(3)
+    
+    # --- CUATRO COLUMNAS (Incluyendo la nueva de Rechazados) ---
+    c1, c2, c3, c4 = st.columns(4)
     
     with c1:
-        if rep["vacios"]:
-            st.error(f"🚨 **{len(rep['vacios'])} incompletos** (Faltan datos).")
-            with st.expander("Ver lista completa"):
-                st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["vacios"]])}</div>', unsafe_allow_html=True)
-        else: st.success("✅ **0 incompletos** (Datos completos).")
-            
+        if rep.get("rechazados"):
+            st.error(f"🚫 **{len(rep['rechazados'])} Rechazados** (No pertenecen).")
+            with st.expander("Ver lista"):
+                st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["rechazados"]])}</div>', unsafe_allow_html=True)
+        else: st.success("✅ **0 Rechazados**.")
+
     with c2:
-        if rep["duplicados_gen"]:
-            st.error(f"🛑 **{len(rep['duplicados_gen'])} omitidos** (Cód. duplicado).")
-            with st.expander("Ver lista completa"):
-                st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["duplicados_gen"]])}</div>', unsafe_allow_html=True)
-        else: st.success("✅ **0 omitidos** (Sin códigos duplicados).")
+        if rep.get("vacios"):
+            st.error(f"🚨 **{len(rep['vacios'])} Incompletos** (Faltan datos).")
+            with st.expander("Ver lista"):
+                st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["vacios"]])}</div>', unsafe_allow_html=True)
+        else: st.success("✅ **0 Incompletos**.")
             
     with c3:
-        if rep["iva_calc"]:
-            st.info(f"🧮 **{len(rep['iva_calc'])} con IVA Calc.** (Se aplicó 13%).")
-            with st.expander("Ver lista completa"):
+        if rep.get("duplicados_gen"):
+            st.error(f"🛑 **{len(rep['duplicados_gen'])} Omitidos** (Duplicados).")
+            with st.expander("Ver lista"):
+                st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["duplicados_gen"]])}</div>', unsafe_allow_html=True)
+        else: st.success("✅ **0 Omitidos**.")
+            
+    with c4:
+        if rep.get("iva_calc"):
+            st.info(f"🧮 **{len(rep['iva_calc'])} IVA Calc.** (Al 13%).")
+            with st.expander("Ver lista"):
                 st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["iva_calc"]])}</div>', unsafe_allow_html=True)
-        else: st.success("✅ **0 con IVA Calc.** (IVA 100% extraído).")
+        else: st.success("✅ **0 IVA Calc.**.")
     st.divider()
 
 # --- TABLAS DE RESULTADOS ---
