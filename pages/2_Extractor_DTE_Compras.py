@@ -7,6 +7,7 @@ import pytesseract
 import json
 import os
 from io import BytesIO
+import platform
 
 # --- VERIFICACIÓN DE SEGURIDAD ---
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
@@ -19,13 +20,9 @@ if "cliente_activo" not in st.session_state or not st.session_state.cliente_acti
 
 cliente = st.session_state.cliente_activo
 
-import platform
-
 # --- CONFIGURACIÓN TÉCNICA ---
-# Detecta si estamos en Windows (Local) o en Linux (Nube)
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-# En la nube (Linux), Tesseract se vincula automáticamente gracias a packages.txt
 
 st.set_page_config(page_title="Extraer DTE Compras", layout="wide", page_icon="🛒")
 
@@ -98,7 +95,7 @@ PROVEEDORES_RESPALDO = {
     "06140702231050": "BEBIDAS EXCLUSIVAS, S.A. DE C.V.",
     "06142307091063": "CENTROAMERICA COMERCIAL S.A. DE C.V. (DOLLARCITY)",
     "06142212650014": "FARMACIA SAN NICOLAS S.A DE C.V.",
-    "0614167951013": "DISTRIBUIDORA DE ELECTRICIDAD DEL SUR, S.A DE C.V. (DELSUR)",
+    "06141611951013": "DISTRIBUIDORA DE ELECTRICIDAD DEL SUR, S.A DE C.V. (DELSUR)",
     "06142008011037": "COMERCIALIZADORA INTERAMERICANA S.A. DE C.V. (CBC/PEPSI)",
     "06142511041016": "COMERCIAL POZUELO EL SALVADOR, S.A. DE C.V.",
     "06142702061050": "GOOD PRICE, S.A. DE C.V.",
@@ -269,6 +266,11 @@ def extraer_compras_v3(file_bytes, cliente_activo):
                         if fecha and motor == "Nativo": motor = "Nativo + OCR Fecha"
             except: pass
 
+        # --- ESCUDO ANTI-RECEPTOR: AISLAR LA MITAD SUPERIOR (EL EMISOR) ---
+        texto_emisor = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE)\b", texto_completo)[0]
+        if len(texto_emisor) < 50: 
+            texto_emisor = texto_completo
+
         # 4. EXTRACCIÓN PROVEEDOR (LÓGICA CON PRIORIDAD DE BASE DE DATOS)
         nit_prov = ""
         dui_prov = ""
@@ -276,7 +278,12 @@ def extraer_compras_v3(file_bytes, cliente_activo):
         es_nuevo = True
 
         patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
-        nits_encontrados = re.findall(patron_identificadores, texto_completo)
+        
+        # Buscar en el bloque del Emisor primero
+        nits_encontrados = re.findall(patron_identificadores, texto_emisor)
+        if not nits_encontrados: # Si falla, buscar en todo el doc
+            nits_encontrados = re.findall(patron_identificadores, texto_completo)
+            
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
 
         proveedores_json = cargar_proveedores_json()
@@ -288,13 +295,13 @@ def extraer_compras_v3(file_bytes, cliente_activo):
                 nit_prov = n; nom_prov = PROVEEDORES_RESPALDO[n]; es_nuevo = False; break
 
         if not nit_prov:
-            m_emisor = re.search(r"EMISOR[\s\S]{1,250}?(?:NIT|N\s*I\s*T|N\.I\.T)[^\d]*([\d\-\s]{9,17})", texto_completo, re.I)
+            m_emisor = re.search(r"EMISOR[\s\S]{1,250}?(?:NIT|N\s*I\s*T|N\.I\.T)[^\d]*([\d\-\s]{9,17})", texto_emisor, re.I)
             if m_emisor:
                 posible_nit = re.sub(r'[^0-9]', '', m_emisor.group(1))
                 if len(posible_nit) in [9, 14] and posible_nit != nit_receptor_limpio: nit_prov = posible_nit
 
         if not nit_prov:
-            m_nits = re.finditer(r"(?:NIT|N\s*I\s*T)[^\d]*([\d\-\s]{9,17})", texto_completo, re.I)
+            m_nits = re.finditer(r"(?:NIT|N\s*I\s*T)[^\d]*([\d\-\s]{9,17})", texto_emisor, re.I)
             for m in m_nits:
                 posible_nit = re.sub(r'[^0-9]', '', m.group(1))
                 if len(posible_nit) in [9, 14]:
@@ -313,6 +320,7 @@ def extraer_compras_v3(file_bytes, cliente_activo):
             nom_prov = "⚠️ PROVEEDOR NUEVO"
             nombres_receptor = [n for n in cliente_activo['nombre'].split() if len(n) > 3]
             
+            # --- LISTA NEGRA EXTENDIDA PARA LIMPIAR NOMBRES ---
             palabras_basura = [
                 "DOCUMENTO", "CREDITO", "CRÉDITO", "FISCAL", "TRIBUTARIO", "RECEPTOR", "CLIENTE", "EMISOR", 
                 "FACTURACION", "FACTURACIÓN", "COMPROBANTE", "RECEP", "DIRECC", "A QUIEN INTERESE", 
@@ -323,10 +331,11 @@ def extraer_compras_v3(file_bytes, cliente_activo):
                 "KILOMETRO", "CENTRO COMERCIAL", "PLAZA", "MONTE CARMELO", "DEPARTAMENTO", "MUNICIPIO",
                 "GIRO:", "GIRO", "TIPO ESTABLECIMIENTO", "ORDEN DE COMPRA", "TASA MUNICIPAL", "CARGO",
                 "CASA MATRIZ", "SUCURSAL", "AGENCIA", "PAGO DE", "CONCEPTO DE", "COMPAÑIA DE SEGUROS",
-                "PREVIO", "NORMAL", "ANULADO", "SUJETO EXCLUIDO", "EXCLUIDO"
+                "PREVIO", "NORMAL", "ANULADO", "SUJETO EXCLUIDO", "EXCLUIDO",
+                "CAJERO", "TERMINAL", "EFECTIVO", "VUELTO", "CAMBIO", "CONTADO", "TARJETA", "VISA", "MASTERCARD", "CAJA", "VENTA"
             ]
             
-            lineas = texto_completo.split('\n')
+            lineas = texto_emisor.split('\n')
             nit_line_idx = -1
             for i, L in enumerate(lineas):
                 if nit_prov in re.sub(r'[^0-9]', '', L):
@@ -457,7 +466,7 @@ with st.sidebar:
     st.header("Carga de Compras")
     archivos = st.file_uploader("Arrastra facturas de proveedores (PDF)", type="pdf", accept_multiple_files=True, key=st.session_state.comp_uploader_key)
     
-    if archivos and st.button("🚀 Procesar Compras", type="primary"):
+    if archivos and st.button("🚀 Procesar Compras", type="primary", width="stretch"):
         extracted, vacios_deteccion, duplicados, iva_calculado_files, intrusos, invalidos = [], [], [], [], [], []
         nuevos_proveedores = {}
         nuevos_archivos = [f for f in archivos if f.name not in st.session_state.archivos_comp]
@@ -522,7 +531,7 @@ with st.sidebar:
                 else: st.session_state.db_compras = pd.concat([st.session_state.db_compras, new_df], ignore_index=True)
 
     st.divider()
-    if st.button("🧹 Limpiar Memoria Compras", type="secondary"):
+    if st.button("🧹 Limpiar Memoria Compras", type="secondary", width="stretch"):
         for key in ['db_compras', 'archivos_comp', 'reporte_compras']:
             if key in st.session_state: del st.session_state[key]
         st.session_state.comp_uploader_key = str(time.time()); st.rerun()
@@ -577,29 +586,55 @@ if st.session_state.reporte_compras:
                     st.rerun()
         st.divider()
 
-# --- TABLAS DE RESULTADOS ---
+# --- TABLAS DE RESULTADOS Y FILTROS DE BÚSQUEDA ---
 if not st.session_state.db_compras.empty:
     df = st.session_state.db_compras.copy()
+    
+    st.markdown("### 🔍 Filtros de Auditoría Rápida")
+    col_f1, col_f2 = st.columns([2, 1])
+    
+    with col_f1:
+        busqueda_texto = st.text_input("Buscar Proveedor (Nombre, NIT, DUI o UUID) 🔎", placeholder="Ej. FREUND, 0614...")
+    with col_f2:
+        filtro_tipo = st.multiselect("Filtrar por Tipo DTE 📄", options=df['tipo'].unique(), default=df['tipo'].unique())
+        
+    # --- APLICACIÓN EN TIEMPO REAL DE LOS FILTROS ---
+    df_filtrado = df.copy()
+    if busqueda_texto:
+        termino = busqueda_texto.upper()
+        mask = (
+            df_filtrado['nom_prov'].str.contains(termino, case=False, na=False) |
+            df_filtrado['nit_prov'].str.contains(termino, na=False) |
+            df_filtrado['dui_prov'].str.contains(termino, na=False) |
+            df_filtrado['gen'].str.contains(termino, case=False, na=False)
+        )
+        df_filtrado = df_filtrado[mask]
+        
+    if filtro_tipo:
+        df_filtrado = df_filtrado[df_filtrado['tipo'].isin(filtro_tipo)]
+    
+    st.divider()
+
     tab1, tab2 = st.tabs(["📊 F-07 Compras a Contribuyentes", "🔍 Auditoría Total"])
     
     with tab1:
         df_hacienda = pd.DataFrame()
-        df_hacienda["A. Fecha Emisión"] = df["fecha"]
+        df_hacienda["A. Fecha Emisión"] = df_filtrado["fecha"]
         df_hacienda["B. Clase"] = "4"
-        df_hacienda["C. Tipo Doc"] = df["tipo"]
-        df_hacienda["D. Num Documento"] = df["gen"]
-        df_hacienda["E. NIT/NRC Prov"] = df["nit_prov"]
-        df_hacienda["F. Nombre Prov"] = df["nom_prov"]
-        df_hacienda["G. Compra Ext/NS"] = df["exe"]
+        df_hacienda["C. Tipo Doc"] = df_filtrado["tipo"]
+        df_hacienda["D. Num Documento"] = df_filtrado["gen"]
+        df_hacienda["E. NIT/NRC Prov"] = df_filtrado["nit_prov"]
+        df_hacienda["F. Nombre Prov"] = df_filtrado["nom_prov"]
+        df_hacienda["G. Compra Ext/NS"] = df_filtrado["exe"]
         df_hacienda["H. Internacion Ext/NS"] = 0.00
         df_hacienda["I. Importacion Ext/NS"] = 0.00
-        df_hacienda["J. Compra Gravada"] = df["gra"]
+        df_hacienda["J. Compra Gravada"] = df_filtrado["gra"]
         df_hacienda["K. Inter. Gravada Bienes"] = 0.00
         df_hacienda["L. Impor. Gravada Bienes"] = 0.00
         df_hacienda["M. Impor. Gravada Serv"] = 0.00
-        df_hacienda["N. Crédito Fiscal (IVA)"] = df["iva"]
-        df_hacienda["O. Total Compras"] = df["tot"]
-        df_hacienda["P. DUI Prov"] = df["dui_prov"]
+        df_hacienda["N. Crédito Fiscal (IVA)"] = df_filtrado["iva"]
+        df_hacienda["O. Total Compras"] = df_filtrado["tot"]
+        df_hacienda["P. DUI Prov"] = df_filtrado["dui_prov"]
         df_hacienda["Q. Tipo Operacion"] = "1"
         df_hacienda["R. Clasificacion"] = "1"
         df_hacienda["S. Sector"] = "1"
@@ -608,9 +643,10 @@ if not st.session_state.db_compras.empty:
 
         st.dataframe(df_hacienda.style.format({col: "{:.2f}" for col in df_hacienda.columns[6:15]}), hide_index=True, width="stretch")
         
-        if st.button("📥 Generar Excel para Hacienda", type="primary"): 
+        # El Excel descargará únicamente lo que el usuario haya filtrado visualmente
+        if st.button("📥 Generar Excel para Hacienda (Resultados Filtrados)", type="primary"): 
             ventana_descarga_compras(df_hacienda, "F07_Compras_Proveedores.xlsx")
             
     with tab2:
-        st.write(f"📊 Registros en memoria: **{len(df)}**")
-        st.dataframe(df, width="stretch")
+        st.write(f"📊 Registros mostrados: **{len(df_filtrado)}** de **{len(df)}** en memoria.")
+        st.dataframe(df_filtrado, width="stretch")
