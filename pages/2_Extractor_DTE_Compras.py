@@ -95,7 +95,7 @@ PROVEEDORES_RESPALDO = {
     "06140702231050": "BEBIDAS EXCLUSIVAS, S.A. DE C.V.",
     "06142307091063": "CENTROAMERICA COMERCIAL S.A. DE C.V. (DOLLARCITY)",
     "06142212650014": "FARMACIA SAN NICOLAS S.A DE C.V.",
-    "06141611951013": "DISTRIBUIDORA DE ELECTRICIDAD DEL SUR, S.A DE C.V. (DELSUR)",
+    "0614167951013": "DISTRIBUIDORA DE ELECTRICIDAD DEL SUR, S.A DE C.V. (DELSUR)",
     "06142008011037": "COMERCIALIZADORA INTERAMERICANA S.A. DE C.V. (CBC/PEPSI)",
     "06142511041016": "COMERCIAL POZUELO EL SALVADOR, S.A. DE C.V.",
     "06142702061050": "GOOD PRICE, S.A. DE C.V.",
@@ -281,7 +281,7 @@ def extraer_compras_v3(file_bytes, cliente_activo):
         
         # Buscar en el bloque del Emisor primero
         nits_encontrados = re.findall(patron_identificadores, texto_emisor)
-        if not nits_encontrados: # Si falla, buscar en todo el doc
+        if not nits_encontrados: 
             nits_encontrados = re.findall(patron_identificadores, texto_completo)
             
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
@@ -320,59 +320,78 @@ def extraer_compras_v3(file_bytes, cliente_activo):
             nom_prov = "⚠️ PROVEEDOR NUEVO"
             nombres_receptor = [n for n in cliente_activo['nombre'].split() if len(n) > 3]
             
-            # --- LISTA NEGRA EXTENDIDA PARA LIMPIAR NOMBRES ---
+            # --- 1. LISTA NEGRA EXTREMA (ANTI-METADATOS Y DIRECCIONES) ---
             palabras_basura = [
                 "DOCUMENTO", "CREDITO", "CRÉDITO", "FISCAL", "TRIBUTARIO", "RECEPTOR", "CLIENTE", "EMISOR", 
                 "FACTURACION", "FACTURACIÓN", "COMPROBANTE", "RECEP", "DIRECC", "A QUIEN INTERESE", 
                 "NÚMERO DE CONTROL", "NUMERO DE CONTROL", "CÓDIGO", "SELLO", "VERSIÓ", "VERSIÓN", "TIPO DE", 
                 "TRANSMISIÓN", "TRANSMISION", "MODELO", "NÚM.", "NUM.", "INFORMACIÓN", "INFORMACION", 
                 "AQUI CONTENIDA", "AQUÍ CONTENIDA", "VÁLIDO", "VALIDO", "MINISTERIO", "HACIENDA", "PORTAL",
-                "COLONIA", "BOULEVARD", "CALLE", "AVENIDA", "RESIDENCIAL", "BARRIO", "EDIFICIO", "LOCAL", 
-                "KILOMETRO", "CENTRO COMERCIAL", "PLAZA", "MONTE CARMELO", "DEPARTAMENTO", "MUNICIPIO",
+                "COLONIA", "BOULEVARD", "BLVD", "CALLE", "AVENIDA", "RESIDENCIAL", "BARRIO", "EDIFICIO", "LOCAL", 
+                "KILOMETRO", "KM", "CARR.", "CARRETERA", "PANAMERICAN", "CENTRO COMERCIAL", "PLAZA", "DEPARTAMENTO", "MUNICIPIO",
                 "GIRO:", "GIRO", "TIPO ESTABLECIMIENTO", "ORDEN DE COMPRA", "TASA MUNICIPAL", "CARGO",
                 "CASA MATRIZ", "SUCURSAL", "AGENCIA", "PAGO DE", "CONCEPTO DE", "COMPAÑIA DE SEGUROS",
                 "PREVIO", "NORMAL", "ANULADO", "SUJETO EXCLUIDO", "EXCLUIDO",
-                "CAJERO", "TERMINAL", "EFECTIVO", "VUELTO", "CAMBIO", "CONTADO", "TARJETA", "VISA", "MASTERCARD", "CAJA", "VENTA"
+                "CAJERO", "TERMINAL", "EFECTIVO", "VUELTO", "CAMBIO", "CONTADO", "TARJETA", "VISA", "MASTERCARD", "CAJA", "VENTA",
+                "FECHA", "HORA", "EMISIÓN", "EMISION", "GENERACIÓN", "GENERACION", "AM", "PM",
+                "RESOLUCION", "RESOLUCIÓN", "AUTORIZACION", "AUTORIZACIÓN", "CORRELATIVO", "RANGO", "DEL", "AL",
+                "PAGINA", "PÁGINA", "WWW", "HTTP", ".COM", "EMAIL", "CORREO", "TELÉFONO", "TELEFONO", "CELULAR", "PBX", "FAX"
             ]
             
-            lineas = texto_emisor.split('\n')
-            nit_line_idx = -1
-            for i, L in enumerate(lineas):
-                if nit_prov in re.sub(r'[^0-9]', '', L):
-                    nit_line_idx = i; break
+            # --- 2. CAZADOR DE ETIQUETAS EXACTAS (PRIORIDAD 1) ---
+            regex_nombres = r"(?:Nombre, denominaci[oó]n o raz[oó]n social|Nombre o raz[oó]n social|Raz[oó]n social|Nombre comercial|Nombre)\s*[:]?\s*([^\n]+)"
+            m_nombre_exacto = re.search(regex_nombres, texto_emisor, re.I)
             
-            start_idx = max(0, nit_line_idx - 4) if nit_line_idx != -1 else 0
-            end_idx = min(len(lineas), nit_line_idx + 5) if nit_line_idx != -1 else len(lineas)
+            if m_nombre_exacto:
+                clean_name = m_nombre_exacto.group(1).strip()
+                clean_name = re.split(r'\s{4,}|NIT|NRC|Registro|Giro', clean_name, flags=re.I)[0].strip()
+                if clean_name and len(clean_name) > 3 and not any(b in clean_name.upper() for b in palabras_basura):
+                    nom_prov = clean_name.upper()
             
-            for i in range(start_idx, end_idx):
-                L = lineas[i].strip().upper()
-                if not L or len(L) < 5: continue
-                if re.search(r"[A-F0-9]{8}-?[A-F0-9]{4}-?", L, re.I): continue
-                if any(b in L for b in palabras_basura) or any(n in L for n in nombres_receptor): continue
+            # --- 3. BÚSQUEDA LÓGICA POR LÍNEAS (PRIORIDAD 2 - Si no hay etiqueta) ---
+            if nom_prov == "⚠️ PROVEEDOR NUEVO":
+                lineas = texto_emisor.split('\n')
+                nit_line_idx = -1
+                for i, L in enumerate(lineas):
+                    if nit_prov in re.sub(r'[^0-9]', '', L):
+                        nit_line_idx = i; break
                 
-                if re.search(r"^(NOMBRE O RAZ.N SOCIAL|NOMBRE COMERCIAL|NOMBRE)\s*[:]", L):
-                    clean_name = re.sub(r"^(NOMBRE O RAZ.N SOCIAL|NOMBRE COMERCIAL|NOMBRE)\s*[:\s]*", "", L).strip()
-                    clean_name = re.split(r'\s{4,}|NOMBRE|NIT|NRC', clean_name)[0].strip()
-                    if clean_name and len(clean_name) > 3:
-                        nom_prov = clean_name; break
+                start_idx = max(0, nit_line_idx - 4) if nit_line_idx != -1 else 0
+                end_idx = min(len(lineas), nit_line_idx + 5) if nit_line_idx != -1 else len(lineas)
                 
-                es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "SEGUROS", "FARMACIA", "ASOCIACION"])
-                
-                if re.search(r'[A-Z]{5,}', L) and "NIT:" not in L and "NRC:" not in L:
-                    clean_name = re.sub(r"(NOMBRE O RAZ.N SOCIAL|NOMBRE COMERCIAL|NOMBRE)[:\s]*", "", L).strip()
-                    clean_name = re.split(r'\s{4,}|NOMBRE|NIT|NRC', clean_name)[0].strip()
+                for i in range(start_idx, end_idx):
+                    L = lineas[i].strip().upper()
+                    if not L or len(L) < 5: continue
                     
-                    if es_comercial and len(clean_name) < 25 and i > 0:
-                        prev_L = lineas[i-1].strip().upper()
-                        if len(prev_L) > 3 and not any(b in prev_L for b in palabras_basura) and not re.search(r"[A-F0-9]{8}-", prev_L):
-                            clean_name = f"{prev_L} {clean_name}"
+                    # Ignorar si es UUID, tiene formato de fecha/hora, o es 80% números (Ej. Teléfonos largos)
+                    if re.search(r"[A-F0-9]{8}-?[A-F0-9]{4}-?", L, re.I): continue
+                    if re.search(r"\d{2}/\d{2}/\d{4}|\d{2}:\d{2}:\d{2}", L): continue 
+                    num_count = sum(c.isdigit() for c in L)
+                    if num_count / len(L) > 0.5: continue
                     
-                    if clean_name and es_comercial:
-                        nom_prov = clean_name; break
-                    elif clean_name and nom_prov == "⚠️ PROVEEDOR NUEVO":
-                        nom_prov = clean_name
+                    if any(b in L for b in palabras_basura) or any(n in L for n in nombres_receptor): continue
+                    
+                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "SEGUROS", "FARMACIA", "ASOCIACION"])
+                    
+                    if re.search(r'[A-Z]{5,}', L) and "NIT:" not in L and "NRC:" not in L:
+                        clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
+                        
+                        if es_comercial and len(clean_name) < 25 and i > 0:
+                            prev_L = lineas[i-1].strip().upper()
+                            if len(prev_L) > 3 and not any(b in prev_L for b in palabras_basura) and not re.search(r"[A-F0-9]{8}-|\d{2}:\d{2}", prev_L):
+                                clean_name = f"{prev_L} {clean_name}"
+                        
+                        if clean_name and es_comercial:
+                            nom_prov = clean_name; break
+                        elif clean_name and nom_prov == "⚠️ PROVEEDOR NUEVO":
+                            nom_prov = clean_name
 
-            if len(nom_prov) > 60 or nom_prov == "⚠️ PROVEEDOR NUEVO": nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
+            # --- LIMPIEZA FINAL DE PUNTUACIÓN EXTREMA ---
+            if nom_prov != "⚠️ PROVEEDOR NUEVO":
+                nom_prov = re.sub(r"^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$", "", nom_prov).strip()
+
+            if len(nom_prov) > 60 or nom_prov == "⚠️ PROVEEDOR NUEVO": 
+                nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
 
         nit_nuevo = nit_prov
 
