@@ -1,5 +1,6 @@
-streamlit==1.32.0
-pandas
-pdfplumber
-pytesseract
-XlsxWriter
+pymupdf==1.23.8
+opencv-python-headless==4.9.0.80
+pyzbar==0.1.9
+thefuzz==0.22.1
+numpy==1.26.4
+python-Levenshtein==0.25.0
