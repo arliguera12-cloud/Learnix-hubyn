@@ -10,7 +10,7 @@ import platform
 import numpy as np
 
 # --- NUEVAS SÚPER LIBRERÍAS ---
-import fitz  # PyMuPDF: El rey de la lectura espacial
+import fitz  # PyMuPDF: Lectura espacial rápida
 import cv2   # OpenCV: Visión artificial
 from pyzbar.pyzbar import decode # Lector de Códigos QR
 from thefuzz import process      # Lógica difusa (Fuzzy Matching)
@@ -104,9 +104,15 @@ def to_excel_hacienda_compras(df):
 def limpiar_monto(monto_str):
     monto_str = re.sub(r'[^\d.,]', '', str(monto_str))
     if not monto_str: return 0.0
-    if ',' in monto_str and '.' in monto_str: return float(monto_str.replace(',', ''))
-    elif ',' in monto_str: return float(monto_str.replace(',', '.'))
-    return float(monto_str)
+
+    m_sep = re.search(r'([.,])(\d{1,2})$', monto_str)
+    if m_sep:
+        decimales = m_sep.group(2)
+        enteros = re.sub(r'[^\d]', '', monto_str[:m_sep.start()])
+        if not enteros: enteros = "0"
+        return float(f"{enteros}.{decimales}")
+    else:
+        return float(re.sub(r'[^\d]', '', monto_str))
 
 def extraer_y_formatear_fecha(texto):
     meses = {'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06', 'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'}
@@ -132,15 +138,11 @@ def extraer_y_formatear_fecha(texto):
 
 # --- PRE-PROCESAMIENTO DE VISIÓN ARTIFICIAL (OPENCV) ---
 def mejorar_imagen_para_ocr(cv_image):
-    # Convierte a escala de grises
     gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
-    # Desenfoque leve para matar ruido del escáner
-    blur = cv2.GaussianBlur(gray, (3,3), 0)
-    # Binarización de Otsu (Blanco y Negro puro perfecto)
-    _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return thresh
 
-# --- MOTOR PRINCIPAL AUTÓNOMO V4 PRO ---
+# --- MOTOR PRINCIPAL AUTÓNOMO V4 PRO EXTREME ---
 def extraer_compras_v4_pro(file_bytes, cliente_activo):
     motor = "PyMuPDF"
     qr_encontrado = False
@@ -151,25 +153,26 @@ def extraer_compras_v4_pro(file_bytes, cliente_activo):
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         
         for page in doc:
-            # 1. INTENTO DE EXTRACCIÓN DE TEXTO NATIVO CON CUADRANTES
             texto_pagina = page.get_text("text")
             
-            # 2. CAZADOR DE CÓDIGOS QR (NIVEL 1)
-            pix = page.get_pixmap(dpi=200) # Renderizamos la página a imagen
+            # --- CAZADOR DE CÓDIGOS QR ALTA DEFINICIÓN ---
+            pix = page.get_pixmap(dpi=300) 
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             cv_img = np.array(img)[:, :, ::-1].copy()
             
-            codigos_qr = decode(cv_img)
+            gray_qr = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+            codigos_qr = decode(gray_qr)
+            
             for qr in codigos_qr:
                 qr_encontrado = True
                 enlace_qr = qr.data.decode('utf-8')
                 motor = "PyMuPDF + Lector QR"
             
-            # 3. FALLBACK A OCR OPENCV SI NO HAY TEXTO NATIVO
+            # --- FALLBACK A OCR OPENCV SI NO HAY TEXTO NATIVO ---
             if not texto_pagina or len(texto_pagina.strip()) < 50:
                 motor = "OpenCV + Tesseract OCR"
                 img_mejorada = mejorar_imagen_para_ocr(cv_img)
-                texto_pagina = pytesseract.image_to_string(img_mejorada, lang='spa', config='--psm 6')
+                texto_pagina = pytesseract.image_to_string(img_mejorada, lang='spa', config='--psm 4')
                 
             texto_completo += (texto_pagina or "") + "\n"
                 
@@ -203,7 +206,6 @@ def extraer_compras_v4_pro(file_bytes, cliente_activo):
 
         # --- IDENTIFICADORES Y FECHA ---
         gen = ""
-        # Si el QR nos dio el enlace de Hacienda, extraemos el código de generación 100% perfecto
         if qr_encontrado and "codGen=" in enlace_qr:
             gen_match = re.search(r"codGen=([A-F0-9-]+)", enlace_qr)
             if gen_match: gen = gen_match.group(1).upper()
@@ -325,6 +327,7 @@ def extraer_compras_v4_pro(file_bytes, cliente_activo):
                         if clean_name and es_comercial: nom_prov = clean_name; break
                         elif clean_name and nom_prov == "⚠️ PROVEEDOR NUEVO": nom_prov = clean_name
 
+            # LA REGLA DE LA CÚSPIDE
             if nom_prov == "⚠️ PROVEEDOR NUEVO" or "ELECTRÓNICO" in nom_prov:
                 lineas_top = texto_emisor.split('\n')[:10]
                 for L in lineas_top:
@@ -336,8 +339,7 @@ def extraer_compras_v4_pro(file_bytes, cliente_activo):
             if nom_prov != "⚠️ PROVEEDOR NUEVO":
                 nom_prov = re.sub(r"^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$", "", nom_prov).strip()
 
-                # --- EL TOQUE MAESTRO: FUZZY MATCHING (LÓGICA DIFUSA) ---
-                # Compara el nombre extraído con la base de datos. Si se parece en un 88% o más, lo autocorrige.
+                # FUZZY MATCHING (Autocorrector IA)
                 todos_nombres = list(proveedores_json.values()) + list(PROVEEDORES_RESPALDO.values())
                 if todos_nombres:
                     mejor_coincidencia, similitud = process.extractOne(nom_prov, todos_nombres)
