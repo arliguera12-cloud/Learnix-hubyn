@@ -1,4 +1,5 @@
 import streamlit as st
+import pdfplumber
 import pandas as pd
 import re
 import time
@@ -7,14 +8,6 @@ import json
 import os
 from io import BytesIO
 import platform
-import numpy as np
-
-# --- NUEVAS SÚPER LIBRERÍAS ---
-import fitz  # PyMuPDF: Lectura espacial rápida
-import cv2   # OpenCV: Visión artificial
-from pyzbar.pyzbar import decode # Lector de Códigos QR
-from thefuzz import process      # Lógica difusa (Fuzzy Matching)
-from PIL import Image
 
 # --- VERIFICACIÓN DE SEGURIDAD ---
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
@@ -102,7 +95,7 @@ def to_excel_hacienda_compras(df):
     return output.getvalue()
 
 def limpiar_monto(monto_str):
-    """Limpia la basura y corrige errores de formato OCR (ej. 1.057.33 o 1,500,00)"""
+    """Limpia la basura y corrige errores de formato (ej. 1.057.33 o 1,500,00)"""
     monto_str = re.sub(r'[^\d.,]', '', str(monto_str))
     if not monto_str: return 0.0
 
@@ -116,13 +109,14 @@ def limpiar_monto(monto_str):
         return float(re.sub(r'[^\d]', '', monto_str))
 
 def extraer_y_formatear_fecha(texto):
-    meses = {'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06', 'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'}
-    alfa_matches = re.finditer(r"\b(\d{1,2})\s*(?:de\s*|/|-)?\s*([a-zA-Z]{3,})\s*(?:de\s*|/|-)?\s*(\d{4})\b", texto, re.I)
-    for m_alfa in alfa_matches:
-        d, mes_str, y = m_alfa.groups()
-        if int(y) < 2023: continue 
-        for key, value in meses.items():
-            if mes_str.upper().startswith(key): return f"{int(d):02d}/{value}/{y}"
+    """Cazador de fechas ultra-elástico"""
+    # 1. Buscar Formato Hacienda (YYYY-MM-DD)
+    m_hacienda = re.search(r"\b(20[2-3][0-9])\s*-\s*(0[1-9]|1[0-2])\s*-\s*([0-2][0-9]|3[0-1])\b", texto)
+    if m_hacienda:
+        y, m, d = m_hacienda.groups()
+        return f"{int(d):02d}/{int(m):02d}/{y}"
+
+    # 2. Formato normal (DD/MM/YYYY o DD-MM-YYYY)
     num_matches = re.finditer(r"\b(\d{1,4})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(\d{1,4})\b", texto)
     for m_num in num_matches:
         p1, p2, p3 = m_num.groups()
@@ -135,79 +129,43 @@ def extraer_y_formatear_fecha(texto):
         if int(y) < 2023: continue 
         if int(m) > 12 or int(d) > 31: continue 
         return f"{int(d):02d}/{int(m):02d}/{y}"
+        
+    # 3. Formato alfanumérico (DD de MES de YYYY)
+    meses = {'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06', 'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'}
+    alfa_matches = re.finditer(r"\b(\d{1,2})\s*(?:de\s*|/|-)?\s*([a-zA-Z]{3,})\s*(?:de\s*|/|-)?\s*(\d{4})\b", texto, re.I)
+    for m_alfa in alfa_matches:
+        d, mes_str, y = m_alfa.groups()
+        if int(y) < 2023: continue 
+        for key, value in meses.items():
+            if mes_str.upper().startswith(key): return f"{int(d):02d}/{value}/{y}"
+            
     return ""
 
-def mejorar_imagen_para_ocr(cv_image):
-    """Visión Artificial Pura: Blanco y negro extremo sin desenfoques destructivos."""
-    gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    return thresh
-
-# --- MOTOR PRINCIPAL AUTÓNOMO V5 SUPREME ---
-def extraer_compras_v5_supreme(file_bytes, cliente_activo):
-    motor = ""
-    qr_encontrado = False
-    enlace_qr = ""
-    gen = ""
-    fecha = ""
-    texto_completo = ""
+# --- MOTOR CLÁSICO REVITALIZADO (PDFPLUMBER + TESSERACT) ---
+def extraer_compras_v6_clasico(file_bytes, cliente_activo):
+    motor = "Nativo"
     
     try:
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        
-        for page in doc:
-            # ---------------------------------------------------------
-            # PRIORIDAD 1: EL ESCÁNER QR (La Verdad Absoluta)
-            # ---------------------------------------------------------
-            pix = page.get_pixmap(dpi=300) 
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            cv_img = np.array(img)[:, :, ::-1].copy()
-            
-            gray_qr = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-            codigos_qr = decode(gray_qr)
-            
-            for qr in codigos_qr:
-                qr_encontrado = True
-                enlace_qr = qr.data.decode('utf-8')
+        texto_completo = ""
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages:
+                texto_pagina = page.extract_text()
                 
-                # Extraer Generación del QR
-                gen_match = re.search(r"codGen=([A-F0-9-]+)", enlace_qr, re.I)
-                if gen_match: gen = gen_match.group(1).upper()
+                # Si está vacío (es una imagen), activamos el OCR básico
+                if not texto_pagina or len(texto_pagina.strip()) < 50:
+                    motor = "ICR (OCR)"
+                    img = page.to_image(resolution=300)
+                    texto_pagina = pytesseract.image_to_string(img.original, lang='spa')
+                    
+                texto_completo += (texto_pagina or "") + "\n"
                 
-                # Extraer Fecha del QR (Formato YYYY-MM-DD -> DD/MM/YYYY)
-                fecha_match = re.search(r"fechaEmi=([0-9]{4}-[0-9]{2}-[0-9]{2})", enlace_qr, re.I)
-                if fecha_match:
-                    f_parts = fecha_match.group(1).split('-')
-                    fecha = f"{f_parts[2]}/{f_parts[1]}/{f_parts[0]}"
-                
-                break # Solo necesitamos leer un QR por documento
-            
-            # ---------------------------------------------------------
-            # PRIORIDAD 2: EXTRACCIÓN DE TEXTO (Nativo vs OCR)
-            # ---------------------------------------------------------
-            texto_pagina = page.get_text("text")
-            
-            if len(texto_pagina.strip()) > 50:
-                motor = "PyMuPDF Nativo"
-            else:
-                # Si el PDF es una foto o un escaneo plano, entra el OCR
-                motor = "OpenCV + OCR"
-                img_mejorada = mejorar_imagen_para_ocr(cv_img)
-                # --psm 4 asume una sola columna de texto de varios tamaños, ideal para facturas
-                texto_pagina = pytesseract.image_to_string(img_mejorada, lang='spa', config='--psm 4')
-                
-            texto_completo += (texto_pagina or "") + "\n"
-                
-        doc.close()
-        if qr_encontrado: motor += " + QR Activo"
-
-        # ---------------------------------------------------------
-        # PRIORIDAD 3: LIMPIEZA Y PARSEO DE TEXTO
-        # ---------------------------------------------------------
+        # Limpieza básica
         t_clean = re.sub(r'\s+', ' ', texto_completo)
         t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
 
-        # Filtro de Tipo (Anexo F-07 solo permite 03, 05, 06)
+        # ---------------------------------------------------------
+        # 1. FILTRO DE TIPO DE DOCUMENTO
+        # ---------------------------------------------------------
         m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_spaces)
         tipo = "01"
         if m_ctrl:
@@ -218,7 +176,9 @@ def extraer_compras_v5_supreme(file_bytes, cliente_activo):
         if not m_ctrl: return {"error_tipo": "No se detectó un Número de Control DTE válido."}
         if tipo not in ["03", "05", "06"]: return {"error_tipo": f"El documento es DTE-{tipo}. Solo se admiten 03, 05 y 06."}
 
-        # Verificación del Escudo Anti-Intrusos
+        # ---------------------------------------------------------
+        # 2. VERIFICACIÓN DE INTRUSOS
+        # ---------------------------------------------------------
         nit_receptor_limpio = re.sub(r'[^0-9]', '', cliente_activo['nit'])
         dui_receptor_limpio = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
         texto_solo_numeros = re.sub(r'[^0-9]', '', t_clean)
@@ -230,32 +190,35 @@ def extraer_compras_v5_supreme(file_bytes, cliente_activo):
             
         if not es_documento_valido: return {"error_intruso": f"Documento ajeno al cliente activo."}
 
-        # Fallbacks de Identificadores (Si el QR estaba roto o ausente)
-        if not gen:
-            gen_m = re.search(r"(?:C[OÓ]DIGO\s*DE\s*GENERACI[OÓ]N|C[OÓ]D\.\s*GENERACI[OÓ]N)[^\w]*([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})", texto_completo, re.I)
-            if gen_m:
-                raw_gen = gen_m.group(1).upper().replace("-", "")
-                gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
-            else:
-                uuids = re.findall(r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})", t_no_spaces)
-                if uuids:
-                    for u in uuids:
-                        if not re.search(r"SELLO.*?RECEPC.*?{}".format(u), t_no_spaces):
-                            raw_gen = u.replace("-", "")
-                            gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
-                            break
-                    if not gen:
-                        raw_gen = uuids[0].replace("-", "")
-                        gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
+        # ---------------------------------------------------------
+        # 3. IDENTIFICADORES Y FECHA (Cazadores Elásticos)
+        # ---------------------------------------------------------
+        gen = ""
+        # Regex elástico (permite espacios entre los bloques del UUID)
+        uuid_elastico = r"([A-F0-9]{8}\s*-?\s*[A-F0-9]{4}\s*-?\s*[A-F0-9]{4}\s*-?\s*[A-F0-9]{4}\s*-?\s*[A-F0-9]{12})"
+        
+        gen_m = re.search(r"(?:C[OÓ]DIGO\s*DE\s*GENERACI[OÓ]N|GENERACI[OÓ]N)[^\w]*" + uuid_elastico, texto_completo, re.I)
+        if gen_m:
+            raw_gen = re.sub(r'[^A-F0-9]', '', gen_m.group(1).upper())
+            gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
+        else:
+            uuids = re.findall(uuid_elastico, t_clean, re.I)
+            for u in uuids:
+                raw_u = re.sub(r'[^A-F0-9]', '', u.upper())
+                # Evitar que atrape el Sello de Recepción por error
+                if len(raw_u) == 32 and not re.search(r"SELLO.*?RECEPC.*?" + u[:8], t_clean, re.I):
+                    gen = f"{raw_u[:8]}-{raw_u[8:12]}-{raw_u[12:16]}-{raw_u[16:20]}-{raw_u[20:]}"
+                    break
 
-        if not fecha:
-            fecha = extraer_y_formatear_fecha(t_clean)
+        fecha = extraer_y_formatear_fecha(t_clean)
 
-        # Cortar la mitad del receptor para no ensuciar el NIT del proveedor
+        # ---------------------------------------------------------
+        # 4. EXTRACCIÓN PROVEEDOR
+        # ---------------------------------------------------------
+        # Escudo Anti-Receptor
         texto_emisor = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE)\b", texto_completo)[0]
         if len(texto_emisor) < 50: texto_emisor = texto_completo
 
-        # EXTRACCIÓN DE PROVEEDOR
         nit_prov = ""
         dui_prov = ""
         nom_prov = "⚠️ PROVEEDOR NUEVO"
@@ -310,6 +273,7 @@ def extraer_compras_v5_supreme(file_bytes, cliente_activo):
                 "PAGINA", "PÁGINA", "WWW", "HTTP", ".COM", "EMAIL", "CORREO", "TELÉFONO", "TELEFONO", "CELULAR", "PBX", "FAX"
             ]
             
+            # Busqueda por etiqueta
             regex_nombres = r"(?:Nombre, denominaci[oó]n o raz[oó]n social|Nombre o raz[oó]n social|Raz[oó]n social|Nombre comercial|Nombre)\s*[:]?\s*([^\n]+)"
             m_nombre_exacto = re.search(regex_nombres, texto_emisor, re.I)
             
@@ -319,6 +283,7 @@ def extraer_compras_v5_supreme(file_bytes, cliente_activo):
                 if clean_name and len(clean_name) > 3 and not any(b in clean_name.upper() for b in palabras_basura):
                     nom_prov = clean_name.upper()
             
+            # Búsqueda por líneas (Proximidad al NIT)
             if nom_prov == "⚠️ PROVEEDOR NUEVO":
                 lineas = texto_emisor.split('\n')
                 nit_line_idx = -1
@@ -360,20 +325,13 @@ def extraer_compras_v5_supreme(file_bytes, cliente_activo):
             if nom_prov != "⚠️ PROVEEDOR NUEVO":
                 nom_prov = re.sub(r"^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$", "", nom_prov).strip()
 
-                # Autocorrector con Inteligencia Artificial (Fuzzy Matching)
-                todos_nombres = list(proveedores_json.values()) + list(PROVEEDORES_RESPALDO.values())
-                if todos_nombres:
-                    mejor_coincidencia, similitud = process.extractOne(nom_prov, todos_nombres)
-                    if similitud >= 88:
-                        nom_prov = mejor_coincidencia
-
             if len(nom_prov) > 60 or nom_prov == "⚠️ PROVEEDOR NUEVO": 
                 nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
 
         nit_nuevo = nit_prov
 
         # ---------------------------------------------------------
-        # PRIORIDAD 4: EL CEREBRO MATEMÁTICO (Auditoría Final)
+        # 5. CEREBRO MATEMÁTICO (Auditoría Final)
         # ---------------------------------------------------------
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
@@ -408,14 +366,12 @@ def extraer_compras_v5_supreme(file_bytes, cliente_activo):
                 if val_g >= val_t: continue
                 for val_i in valores:
                     if val_i >= val_g: continue
-                    # Comprobación Matemática: Gravado + IVA + Exento + Percibido - Retenido = Total
                     if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
                         if abs(round((val_g + val_i + e + perc - ret), 2) - round(val_t, 2)) <= 0.05:
                             g, i, t = val_g, val_i, val_t
                             encontrado = True
                             break
 
-        # Si la combinación exacta falla, intentamos cazar los montos por sus etiquetas
         if not encontrado:
             m_g = re.search(r"(?:Suma Total de Operaciones|Sub-Total|Sub Total|Sumatoria de ventas|Ventas Gravadas|Subtotal-?)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
             if m_g: g = limpiar_monto(m_g.group(1))
@@ -437,7 +393,7 @@ def extraer_compras_v5_supreme(file_bytes, cliente_activo):
         return {
             "fecha": fecha, "nit_prov": nit_prov, "dui_prov": dui_prov, "nom_prov": nom_prov, "tipo": tipo, "gen": gen, 
             "exe": e, "gra": g, "iva": i, "ret": ret, "perc": perc, "tot": t, "estado": "✅ OK", "iva_calc": iva_calculado,
-            "es_nuevo": es_nuevo, "nit_nuevo": nit_nuevo, "motor": motor, "qr_ok": qr_encontrado
+            "es_nuevo": es_nuevo, "nit_nuevo": nit_nuevo, "motor": motor
         }
     except Exception as err: 
         return {"error": str(err)}
@@ -449,7 +405,7 @@ def ventana_descarga_compras(df_resultados, nombre_archivo):
 
 # --- UI PRINCIPAL ---
 st.markdown("<h2 style='font-family: Courier New, monospace; color: #003057; letter-spacing: 2px; margin-bottom: 0px; padding-bottom: 0px;'>YN</h2>", unsafe_allow_html=True)
-st.title("🛒 Extractor DTE (Compras V5 Supreme)")
+st.title("🛒 Extractor DTE (Compras)")
 
 st.markdown(f"""
 <div class="alerta-activo">
@@ -481,10 +437,10 @@ with st.sidebar:
                         m, s = divmod(int(((time.time() - t_inicio) / idx) * (total - idx)), 60)
                         txt_progreso.markdown(f"📄 **Procesando:** {idx+1} de {total}<br>⏳ **Restante:** {m:02d}:{s:02d}", unsafe_allow_html=True)
                     else:
-                        txt_progreso.markdown(f"📄 **Procesando:** 1 de {total}<br>⏳ Encendiendo motores IA...", unsafe_allow_html=True)
+                        txt_progreso.markdown(f"📄 **Procesando:** 1 de {total}<br>⏳ Extrayendo datos...", unsafe_allow_html=True)
                     
                     file_bytes = f.read()
-                    res = extraer_compras_v5_supreme(file_bytes, cliente)
+                    res = extraer_compras_v6_clasico(file_bytes, cliente)
                     
                     codigo_gen = res.get('gen', '')
                     es_duplicado_memoria = not st.session_state.db_compras.empty and codigo_gen != "" and (st.session_state.db_compras['gen'] == codigo_gen).any()
@@ -567,8 +523,8 @@ if st.session_state.reporte_compras:
     st.divider()
 
     if rep.get("nuevos_proveedores"):
-        st.markdown("### ✨ Guardado Rápido de Proveedores (Autocorrector IA Activado)")
-        st.info("Revisa y guarda los nombres. En futuras subidas, si el escáner falla, la IA usará Fuzzy Matching (similitud) para autocorregir nombres basados en este directorio.")
+        st.markdown("### ✨ Guardado Rápido de Proveedores (Modo Aprendizaje)")
+        st.info("Revisa el nombre, corrígelo si es necesario y guárdalo para actualizar la tabla al instante.")
         
         for nit, nombre_sug in list(rep["nuevos_proveedores"].items()):
             col1, col2, col3 = st.columns([2, 5, 2])
