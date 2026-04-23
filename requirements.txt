@@ -1,6 +1,10 @@
-pymupdf==1.23.8
-opencv-python-headless==4.9.0.80
-pyzbar==0.1.9
-thefuzz==0.22.1
-numpy==1.26.4
-python-Levenshtein==0.25.0
+streamlit
+pandas
+pdfplumber
+pytesseract
+XlsxWriter
+PyMuPDF
+opencv-python-headless
+pyzbar
+thefuzz
+Levenshtein
