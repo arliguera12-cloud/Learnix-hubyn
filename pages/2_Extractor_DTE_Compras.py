@@ -1,5 +1,4 @@
 import streamlit as st
-import pdfplumber
 import pandas as pd
 import re
 import time
@@ -8,6 +7,14 @@ import json
 import os
 from io import BytesIO
 import platform
+import numpy as np
+
+# --- NUEVAS SÚPER LIBRERÍAS ---
+import fitz  # PyMuPDF: El rey de la lectura espacial
+import cv2   # OpenCV: Visión artificial
+from pyzbar.pyzbar import decode # Lector de Códigos QR
+from thefuzz import process      # Lógica difusa (Fuzzy Matching)
+from PIL import Image
 
 # --- VERIFICACIÓN DE SEGURIDAD ---
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
@@ -26,84 +33,37 @@ if platform.system() == "Windows":
 
 st.set_page_config(page_title="Extraer DTE Compras", layout="wide", page_icon="🛒")
 
-# --- DISEÑO MODO OSCURO Y PESTAÑAS (ESTILO VENTAS) ---
 estilo_custom = """
 <style>
     [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background-color: #000000 !important; }
     [data-testid="stSidebar"] { background-color: #161616 !important; border-right: 1px solid #333333; }
     h1, h2, h3, h4, h5, h6, p, label, span { color: #F7F5EE !important; }
     [data-testid="stDataFrame"] span { color: inherit !important; }
-    
-    div.stButton > button[kind="primary"], div.stDownloadButton > button[kind="primary"] { 
-        background-color: #003057 !important; border: 1px solid #00407A !important; border-radius: 6px; transition: 0.3s;
-    }
+    div.stButton > button[kind="primary"], div.stDownloadButton > button[kind="primary"] { background-color: #003057 !important; border: 1px solid #00407A !important; border-radius: 6px; transition: 0.3s; }
     div.stButton > button[kind="primary"] *, div.stDownloadButton > button[kind="primary"] * { color: #FFFFFF !important; font-weight: bold !important; }
     div.stButton > button[kind="primary"]:hover, div.stDownloadButton > button[kind="primary"]:hover { background-color: #00407A !important; }
-    
     div.stButton > button[kind="secondary"] { background-color: #2A2A2A !important; border: 1px solid #555555 !important; border-radius: 6px; }
     div.stButton > button[kind="secondary"] * { color: #FFFFFF !important; font-weight: bold !important; }
-
     div[data-testid="stAlert"] { min-height: 80px; display: flex; align-items: center; }
     .stAlert * { color: inherit !important; }
-    
-    .scroll-list {
-        max-height: 150px; overflow-y: auto; padding: 10px;
-        background-color: #111111; border-radius: 5px; border: 1px solid #333;
-        font-family: monospace; font-size: 13px; color: #66ff66;
-    }
-    
+    .scroll-list { max-height: 150px; overflow-y: auto; padding: 10px; background-color: #111111; border-radius: 5px; border: 1px solid #333; font-family: monospace; font-size: 13px; color: #66ff66; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { color: #4DA8DA !important; border-bottom-color: #4DA8DA !important; }
     .stTabs [data-baseweb="tab-list"] button { color: #777777 !important; }
     [data-testid="stStatusWidget"], [data-testid="stExpander"] { background-color: #161616 !important; border: 1px solid #444444 !important; border-radius: 6px; }
-
     .alerta-activo { padding: 10px; border-radius: 6px; border-left: 4px solid #00407A; background-color: #111111; color: white; margin-bottom: 15px; font-size: 14px; }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
 
-# --- MEGA-DICCIONARIO DE PROVEEDORES ---
 PROVEEDORES_RESPALDO = {
     "06141603991030": "PRICESMART EL SALVADOR, S.A. DE C.V.",
     "06142810921030": "SERVICIOS FINANCIEROS, S.A. DE C.V.",
-    "06142108061015": "MAK MEATS, S.A. DE C.V.",
-    "06141512201045": "DELIVERY HERO EL SALVADOR (PEDIDOSYA)",
-    "06141905991030": "UNIGAS DE EL SALVADOR, S.A DE C.V.",
-    "06142904720020": "TIENDA MORENA S.A DE C.V.",
-    "06143008161116": "MARZAURI, S.A. DE C.V. (PUERTO PLAZA)",
-    "06142609111020": "DISTRIBUIDORA AXBEN, S.A. DE C.V.",
-    "05092506721016": "PEDRO RAMIREZ RAMIREZ",
-    "05090706851019": "FRANCISCO MELARA (LACTEOS CARMENCITA)",
-    "06142101881394": "KARLA GUADALUPE VASQUEZ HERNANDEZ",
-    "06142308031030": "PAPELERA SALVADOREÑA RZ, S.A. DE C.V.",
-    "05092209761017": "ROBERTO CARLOS BOLAÑOS BONILLA",
     "06141101690011": "CALLEJA, S.A. DE C.V. (SUPER SELECTOS)",
-    "06142704071095": "BELCA EL SALVADOR, S.A. DE C.V.",
-    "06140607101084": "DISTRIBUCION SALVADOREÑA, S.A. DE C.V.",
-    "06141503071023": "GRUHERCA SA DE CV",
-    "06140902840024": "LACTEOS DEL CORRAL, S.A. DE C.V.",
-    "02040305560017": "GIRON SANTOS RICARDO ERNESTO (SHELL)",
-    "06141106071025": "FARMACIAS EUROPEAS, S.A. DE C.V. (FARMAVALUE)",
-    "06142310750039": "HOSPITAL DE DIAGNOSTICO S.A DE C.V.",
-    "06142709760012": "OMNISPORT, S.A. DE C.V.",
-    "06140905981011": "SERVICIOS TECNICOS MEDICOS, S.A. DE C.V.",
-    "06142801031030": "SALON & BEAUTY CONCEPTS, S.A. DE C.V.",
-    "06143107971090": "OPERADORA DEL SUR S.A. DE C.V. (DESPENSA DE DON JUAN)",
-    "06141909001034": "RAMIREZ VENTURA S.A. DE C.V.",
-    "96422206810012": "TROPIGAS DE EL SALVADOR, S.A.", 
-    "06142206810012": "TROPIGAS DE EL SALVADOR, S.A.",
-    "06141811971019": "MULTI-TECNOLOGIA, S.A. DE C.V.",
-    "06140702231050": "BEBIDAS EXCLUSIVAS, S.A. DE C.V.",
     "06142307091063": "CENTROAMERICA COMERCIAL S.A. DE C.V. (DOLLARCITY)",
     "06142212650014": "FARMACIA SAN NICOLAS S.A DE C.V.",
     "0614167951013": "DISTRIBUIDORA DE ELECTRICIDAD DEL SUR, S.A DE C.V. (DELSUR)",
     "06142008011037": "COMERCIALIZADORA INTERAMERICANA S.A. DE C.V. (CBC/PEPSI)",
-    "06142511041016": "COMERCIAL POZUELO EL SALVADOR, S.A. DE C.V.",
-    "06142702061050": "GOOD PRICE, S.A. DE C.V.",
-    "05112811590018": "BENJAMIN MOLINA VILANOVA (TEXACO)",
-    "06142803730056": "ASEGURADORA AGRICOLA COMERCIAL, S.A. (ACSA)",
-    "06142212991016": "ASEGURADORA ABANK, S.A., SEGUROS DE PERSONAS",
-    "06142811081044": "ASSA COMPAÑIA DE SEGUROS, S.A.",
-    "06142903850011": "SEGUROS ATLANTIDA, S.A."
+    "96422206810012": "TROPIGAS DE EL SALVADOR, S.A."
 }
 
 def cargar_proveedores_json():
@@ -127,23 +87,18 @@ def to_excel_hacienda_compras(df):
         df.to_excel(writer, index=False, header=False, sheet_name='Compras_F07')
         workbook = writer.book
         worksheet = writer.sheets['Compras_F07']
-        
         fmt_texto = workbook.add_format({'num_format': '@'}) 
         fmt_num_izq = workbook.add_format({'num_format': '0.00', 'align': 'left'})
-        
-        def get_max_len(col_idx):
-            return max(df.iloc[:, col_idx].astype(str).map(len).max() if not df.empty else 15, 15) + 2
-
-        worksheet.set_column(0, 0, 10, fmt_texto)               # A: Fecha
-        worksheet.set_column(1, 1, 1, fmt_texto)                # B: Clase
-        worksheet.set_column(2, 2, 2, fmt_texto)                # C: Tipo Doc
-        worksheet.set_column(3, 3, get_max_len(3), fmt_texto)   # D: Num Doc
-        worksheet.set_column(4, 4, 14, fmt_texto)               # E: NIT
-        worksheet.set_column(5, 5, get_max_len(5), fmt_texto)   # F: Nombre Prov
-        worksheet.set_column(6, 14, 10.71, fmt_num_izq)         # G a O: Montos
-        worksheet.set_column(15, 15, 9, fmt_texto)              # P: DUI
-        worksheet.set_column(16, 20, 1, fmt_texto)              # Q a U: Fijas
-
+        def get_max_len(col_idx): return max(df.iloc[:, col_idx].astype(str).map(len).max() if not df.empty else 15, 15) + 2
+        worksheet.set_column(0, 0, 10, fmt_texto)
+        worksheet.set_column(1, 1, 1, fmt_texto)
+        worksheet.set_column(2, 2, 2, fmt_texto)
+        worksheet.set_column(3, 3, get_max_len(3), fmt_texto)
+        worksheet.set_column(4, 4, 14, fmt_texto)
+        worksheet.set_column(5, 5, get_max_len(5), fmt_texto)
+        worksheet.set_column(6, 14, 10.71, fmt_num_izq)
+        worksheet.set_column(15, 15, 9, fmt_texto)
+        worksheet.set_column(16, 20, 1, fmt_texto)
     return output.getvalue()
 
 def limpiar_monto(monto_str):
@@ -153,18 +108,14 @@ def limpiar_monto(monto_str):
     elif ',' in monto_str: return float(monto_str.replace(',', '.'))
     return float(monto_str)
 
-# --- CAZADOR DE FECHAS SUPREMO ---
 def extraer_y_formatear_fecha(texto):
-    meses = {'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06',
-             'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'}
-    
+    meses = {'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06', 'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'}
     alfa_matches = re.finditer(r"\b(\d{1,2})\s*(?:de\s*|/|-)?\s*([a-zA-Z]{3,})\s*(?:de\s*|/|-)?\s*(\d{4})\b", texto, re.I)
     for m_alfa in alfa_matches:
         d, mes_str, y = m_alfa.groups()
         if int(y) < 2023: continue 
         for key, value in meses.items():
             if mes_str.upper().startswith(key): return f"{int(d):02d}/{value}/{y}"
-
     num_matches = re.finditer(r"\b(\d{1,4})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(\d{1,4})\b", texto)
     for m_num in num_matches:
         p1, p2, p3 = m_num.groups()
@@ -174,42 +125,59 @@ def extraer_y_formatear_fecha(texto):
             if len(y) == 2: y = f"20{y}"
             if int(m) > 12 and int(d) <= 12: m, d = d, m
         else: continue
-        
         if int(y) < 2023: continue 
         if int(m) > 12 or int(d) > 31: continue 
         return f"{int(d):02d}/{int(m):02d}/{y}"
-
-    nums = re.findall(r"\b\d{1,4}\b", texto)
-    for i, n in enumerate(nums):
-        if len(n) == 4 and 2023 <= int(n) <= 2030:
-            vecinos = nums[max(0, i-4):i] + nums[i+1:i+5]
-            dm = [v for v in vecinos if len(v) in [1, 2] and 0 < int(v) <= 31]
-            if len(dm) >= 2:
-                n1, n2 = dm[0], dm[1]
-                if int(n1) > 12: d, m = n1, n2
-                elif int(n2) > 12: d, m = n2, n1
-                else: d, m = n1, n2
-                return f"{int(d):02d}/{int(m):02d}/{n}"
     return ""
 
-# --- MOTOR PRINCIPAL AUTÓNOMO ---
-def extraer_compras_v3(file_bytes, cliente_activo):
-    motor = "Nativo"
+# --- PRE-PROCESAMIENTO DE VISIÓN ARTIFICIAL (OPENCV) ---
+def mejorar_imagen_para_ocr(cv_image):
+    # Convierte a escala de grises
+    gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+    # Desenfoque leve para matar ruido del escáner
+    blur = cv2.GaussianBlur(gray, (3,3), 0)
+    # Binarización de Otsu (Blanco y Negro puro perfecto)
+    _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return thresh
+
+# --- MOTOR PRINCIPAL AUTÓNOMO V4 PRO ---
+def extraer_compras_v4_pro(file_bytes, cliente_activo):
+    motor = "PyMuPDF"
+    qr_encontrado = False
+    enlace_qr = ""
+    
     try:
         texto_completo = ""
-        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
-            for page in pdf.pages:
-                texto_pagina = page.extract_text()
-                if not texto_pagina or len(texto_pagina.strip()) < 50:
-                    img = page.to_image(resolution=300)
-                    texto_pagina = pytesseract.image_to_string(img.original, lang='spa')
-                    motor = "ICR (OCR)"
-                texto_completo += (texto_pagina or "") + "\n"
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        
+        for page in doc:
+            # 1. INTENTO DE EXTRACCIÓN DE TEXTO NATIVO CON CUADRANTES
+            texto_pagina = page.get_text("text")
+            
+            # 2. CAZADOR DE CÓDIGOS QR (NIVEL 1)
+            pix = page.get_pixmap(dpi=200) # Renderizamos la página a imagen
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            cv_img = np.array(img)[:, :, ::-1].copy()
+            
+            codigos_qr = decode(cv_img)
+            for qr in codigos_qr:
+                qr_encontrado = True
+                enlace_qr = qr.data.decode('utf-8')
+                motor = "PyMuPDF + Lector QR"
+            
+            # 3. FALLBACK A OCR OPENCV SI NO HAY TEXTO NATIVO
+            if not texto_pagina or len(texto_pagina.strip()) < 50:
+                motor = "OpenCV + Tesseract OCR"
+                img_mejorada = mejorar_imagen_para_ocr(cv_img)
+                texto_pagina = pytesseract.image_to_string(img_mejorada, lang='spa', config='--psm 6')
                 
+            texto_completo += (texto_pagina or "") + "\n"
+                
+        doc.close()
         t_clean = re.sub(r'\s+', ' ', texto_completo)
         t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
 
-        # 1. FILTRO DE NÚMERO DE CONTROL Y TIPO
+        # --- FILTRO TIPO Y CONTROL ---
         m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_spaces)
         tipo = "01"
         if m_ctrl:
@@ -219,9 +187,9 @@ def extraer_compras_v3(file_bytes, cliente_activo):
         else: ctrl = ""
             
         if not ctrl: return {"error_tipo": "No se detectó un Número de Control DTE válido."}
-        if tipo not in ["03", "05", "06"]: return {"error_tipo": f"El documento es tipo DTE-{tipo}. Solo se admiten 03, 05 y 06 para el Anexo F-07."}
+        if tipo not in ["03", "05", "06"]: return {"error_tipo": f"El documento es DTE-{tipo}. Solo se admiten 03, 05 y 06."}
 
-        # 2. VERIFICAR INTRUSOS
+        # --- VERIFICAR INTRUSOS ---
         nit_receptor_limpio = re.sub(r'[^0-9]', '', cliente_activo['nit'])
         dui_receptor_limpio = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
         texto_solo_numeros = re.sub(r'[^0-9]', '', t_clean)
@@ -231,59 +199,47 @@ def extraer_compras_v3(file_bytes, cliente_activo):
         elif len(nit_receptor_limpio) >= 9 and nit_receptor_limpio in texto_solo_numeros: es_documento_valido = True
         elif len(dui_receptor_limpio) >= 8 and dui_receptor_limpio in texto_solo_numeros: es_documento_valido = True
             
-        if not es_documento_valido: return {"error_intruso": f"Este documento no le pertenece al cliente activo."}
+        if not es_documento_valido: return {"error_intruso": f"Documento ajeno al cliente activo."}
 
-        # 3. IDENTIFICADORES Y FECHA
+        # --- IDENTIFICADORES Y FECHA ---
         gen = ""
-        gen_m = re.search(r"(?:C[OÓ]DIGO\s*DE\s*GENERACI[OÓ]N|C[OÓ]D\.\s*GENERACI[OÓ]N)[^\w]*([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})", texto_completo, re.I)
-        if gen_m:
-            raw_gen = gen_m.group(1).upper().replace("-", "")
-            gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
-        else:
-            uuids = re.findall(r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})", t_no_spaces)
-            if uuids:
-                 for u in uuids:
-                     if not re.search(r"SELLO.*?RECEPC.*?{}".format(u), t_no_spaces):
-                         raw_gen = u.replace("-", "")
-                         gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
-                         break
-                 if not gen:
-                     raw_gen = uuids[0].replace("-", "")
-                     gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
+        # Si el QR nos dio el enlace de Hacienda, extraemos el código de generación 100% perfecto
+        if qr_encontrado and "codGen=" in enlace_qr:
+            gen_match = re.search(r"codGen=([A-F0-9-]+)", enlace_qr)
+            if gen_match: gen = gen_match.group(1).upper()
+            
+        if not gen:
+            gen_m = re.search(r"(?:C[OÓ]DIGO\s*DE\s*GENERACI[OÓ]N|C[OÓ]D\.\s*GENERACI[OÓ]N)[^\w]*([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})", texto_completo, re.I)
+            if gen_m:
+                raw_gen = gen_m.group(1).upper().replace("-", "")
+                gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
+            else:
+                uuids = re.findall(r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})", t_no_spaces)
+                if uuids:
+                    for u in uuids:
+                        if not re.search(r"SELLO.*?RECEPC.*?{}".format(u), t_no_spaces):
+                            raw_gen = u.replace("-", "")
+                            gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
+                            break
+                    if not gen:
+                        raw_gen = uuids[0].replace("-", "")
+                        gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
 
         fecha = extraer_y_formatear_fecha(t_clean)
-        if not fecha:
-            try:
-                with pdfplumber.open(BytesIO(file_bytes)) as pdf_temp:
-                    if len(pdf_temp.pages) > 0:
-                        p0 = pdf_temp.pages[0]
-                        crop_box = (0, 0, p0.width, p0.height * 0.50)
-                        top_img = p0.crop(crop_box).to_image(resolution=300)
-                        config_ocr = r'--oem 3 --psm 6'
-                        ocr_top = pytesseract.image_to_string(top_img.original, lang='spa', config=config_ocr)
-                        ocr_top_clean = re.sub(r'\s+', ' ', ocr_top)
-                        fecha = extraer_y_formatear_fecha(ocr_top_clean)
-                        if fecha and motor == "Nativo": motor = "Nativo + OCR Fecha"
-            except: pass
 
-        # --- ESCUDO ANTI-RECEPTOR: AISLAR LA MITAD SUPERIOR (EL EMISOR) ---
+        # --- ESCUDO ANTI-RECEPTOR ---
         texto_emisor = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE)\b", texto_completo)[0]
-        if len(texto_emisor) < 50: 
-            texto_emisor = texto_completo
+        if len(texto_emisor) < 50: texto_emisor = texto_completo
 
-        # 4. EXTRACCIÓN PROVEEDOR (LÓGICA CON PRIORIDAD DE BASE DE DATOS)
+        # --- EXTRACCIÓN PROVEEDOR ---
         nit_prov = ""
         dui_prov = ""
         nom_prov = "⚠️ PROVEEDOR NUEVO"
         es_nuevo = True
 
         patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
-        
-        # Buscar en el bloque del Emisor primero
         nits_encontrados = re.findall(patron_identificadores, texto_emisor)
-        if not nits_encontrados: 
-            nits_encontrados = re.findall(patron_identificadores, texto_completo)
-            
+        if not nits_encontrados: nits_encontrados = re.findall(patron_identificadores, texto_completo)
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
 
         proveedores_json = cargar_proveedores_json()
@@ -300,14 +256,6 @@ def extraer_compras_v3(file_bytes, cliente_activo):
                 posible_nit = re.sub(r'[^0-9]', '', m_emisor.group(1))
                 if len(posible_nit) in [9, 14] and posible_nit != nit_receptor_limpio: nit_prov = posible_nit
 
-        if not nit_prov:
-            m_nits = re.finditer(r"(?:NIT|N\s*I\s*T)[^\d]*([\d\-\s]{9,17})", texto_emisor, re.I)
-            for m in m_nits:
-                posible_nit = re.sub(r'[^0-9]', '', m.group(1))
-                if len(posible_nit) in [9, 14]:
-                    if nit_receptor_limpio == "00000000000000": nit_prov = posible_nit; break
-                    elif posible_nit != nit_receptor_limpio and posible_nit != dui_receptor_limpio: nit_prov = posible_nit; break
-
         if not nit_prov and nits_limpios:
             if nit_receptor_limpio == "00000000000000": nit_prov = nits_limpios[0]
             else:
@@ -320,9 +268,9 @@ def extraer_compras_v3(file_bytes, cliente_activo):
             nom_prov = "⚠️ PROVEEDOR NUEVO"
             nombres_receptor = [n for n in cliente_activo['nombre'].split() if len(n) > 3]
             
-            # --- 1. LISTA NEGRA EXTREMA (ANTI-METADATOS Y DIRECCIONES) ---
             palabras_basura = [
-                "DOCUMENTO", "CREDITO", "CRÉDITO", "FISCAL", "TRIBUTARIO", "RECEPTOR", "CLIENTE", "EMISOR", 
+                "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "ELECTRONICO", "REPRESENTACIÓN", "REPRESENTACION", "IMPRESA", "DTE",
+                "CREDITO", "CRÉDITO", "FISCAL", "RECEPTOR", "CLIENTE", "EMISOR", "FACTURA", "CONSUMIDOR", "FINAL",
                 "FACTURACION", "FACTURACIÓN", "COMPROBANTE", "RECEP", "DIRECC", "A QUIEN INTERESE", 
                 "NÚMERO DE CONTROL", "NUMERO DE CONTROL", "CÓDIGO", "SELLO", "VERSIÓ", "VERSIÓN", "TIPO DE", 
                 "TRANSMISIÓN", "TRANSMISION", "MODELO", "NÚM.", "NUM.", "INFORMACIÓN", "INFORMACION", 
@@ -338,7 +286,6 @@ def extraer_compras_v3(file_bytes, cliente_activo):
                 "PAGINA", "PÁGINA", "WWW", "HTTP", ".COM", "EMAIL", "CORREO", "TELÉFONO", "TELEFONO", "CELULAR", "PBX", "FAX"
             ]
             
-            # --- 2. CAZADOR DE ETIQUETAS EXACTAS (PRIORIDAD 1) ---
             regex_nombres = r"(?:Nombre, denominaci[oó]n o raz[oó]n social|Nombre o raz[oó]n social|Raz[oó]n social|Nombre comercial|Nombre)\s*[:]?\s*([^\n]+)"
             m_nombre_exacto = re.search(regex_nombres, texto_emisor, re.I)
             
@@ -348,7 +295,6 @@ def extraer_compras_v3(file_bytes, cliente_activo):
                 if clean_name and len(clean_name) > 3 and not any(b in clean_name.upper() for b in palabras_basura):
                     nom_prov = clean_name.upper()
             
-            # --- 3. BÚSQUEDA LÓGICA POR LÍNEAS (PRIORIDAD 2 - Si no hay etiqueta) ---
             if nom_prov == "⚠️ PROVEEDOR NUEVO":
                 lineas = texto_emisor.split('\n')
                 nit_line_idx = -1
@@ -362,40 +308,48 @@ def extraer_compras_v3(file_bytes, cliente_activo):
                 for i in range(start_idx, end_idx):
                     L = lineas[i].strip().upper()
                     if not L or len(L) < 5: continue
-                    
-                    # Ignorar si es UUID, tiene formato de fecha/hora, o es 80% números (Ej. Teléfonos largos)
                     if re.search(r"[A-F0-9]{8}-?[A-F0-9]{4}-?", L, re.I): continue
                     if re.search(r"\d{2}/\d{2}/\d{4}|\d{2}:\d{2}:\d{2}", L): continue 
-                    num_count = sum(c.isdigit() for c in L)
-                    if num_count / len(L) > 0.5: continue
-                    
+                    if sum(c.isdigit() for c in L) / len(L) > 0.5: continue
                     if any(b in L for b in palabras_basura) or any(n in L for n in nombres_receptor): continue
                     
-                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "SEGUROS", "FARMACIA", "ASOCIACION"])
+                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "SEGUROS", "FARMACIA", "ASOCIACION", "GRUPO"])
                     
                     if re.search(r'[A-Z]{5,}', L) and "NIT:" not in L and "NRC:" not in L:
                         clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
-                        
                         if es_comercial and len(clean_name) < 25 and i > 0:
                             prev_L = lineas[i-1].strip().upper()
                             if len(prev_L) > 3 and not any(b in prev_L for b in palabras_basura) and not re.search(r"[A-F0-9]{8}-|\d{2}:\d{2}", prev_L):
                                 clean_name = f"{prev_L} {clean_name}"
                         
-                        if clean_name and es_comercial:
-                            nom_prov = clean_name; break
-                        elif clean_name and nom_prov == "⚠️ PROVEEDOR NUEVO":
-                            nom_prov = clean_name
+                        if clean_name and es_comercial: nom_prov = clean_name; break
+                        elif clean_name and nom_prov == "⚠️ PROVEEDOR NUEVO": nom_prov = clean_name
 
-            # --- LIMPIEZA FINAL DE PUNTUACIÓN EXTREMA ---
+            if nom_prov == "⚠️ PROVEEDOR NUEVO" or "ELECTRÓNICO" in nom_prov:
+                lineas_top = texto_emisor.split('\n')[:10]
+                for L in lineas_top:
+                    L = L.strip().upper()
+                    if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3 or any(b in L for b in palabras_basura): continue
+                    clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
+                    if clean_name: nom_prov = clean_name; break
+
             if nom_prov != "⚠️ PROVEEDOR NUEVO":
                 nom_prov = re.sub(r"^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$", "", nom_prov).strip()
+
+                # --- EL TOQUE MAESTRO: FUZZY MATCHING (LÓGICA DIFUSA) ---
+                # Compara el nombre extraído con la base de datos. Si se parece en un 88% o más, lo autocorrige.
+                todos_nombres = list(proveedores_json.values()) + list(PROVEEDORES_RESPALDO.values())
+                if todos_nombres:
+                    mejor_coincidencia, similitud = process.extractOne(nom_prov, todos_nombres)
+                    if similitud >= 88:
+                        nom_prov = mejor_coincidencia
 
             if len(nom_prov) > 60 or nom_prov == "⚠️ PROVEEDOR NUEVO": 
                 nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
 
         nit_nuevo = nit_prov
 
-        # 5. CEREBRO MATEMÁTICO AUTÓNOMO
+        # --- CEREBRO MATEMÁTICO ---
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
         
@@ -456,7 +410,7 @@ def extraer_compras_v3(file_bytes, cliente_activo):
         return {
             "fecha": fecha, "nit_prov": nit_prov, "dui_prov": dui_prov, "nom_prov": nom_prov, "tipo": tipo, "gen": gen, 
             "exe": e, "gra": g, "iva": i, "ret": ret, "perc": perc, "tot": t, "estado": "✅ OK", "iva_calc": iva_calculado,
-            "es_nuevo": es_nuevo, "nit_nuevo": nit_nuevo, "motor": motor
+            "es_nuevo": es_nuevo, "nit_nuevo": nit_nuevo, "motor": motor, "qr_ok": qr_encontrado
         }
     except Exception as err: 
         return {"error": str(err)}
@@ -468,7 +422,7 @@ def ventana_descarga_compras(df_resultados, nombre_archivo):
 
 # --- UI PRINCIPAL ---
 st.markdown("<h2 style='font-family: Courier New, monospace; color: #003057; letter-spacing: 2px; margin-bottom: 0px; padding-bottom: 0px;'>YN</h2>", unsafe_allow_html=True)
-st.title("🛒 Extractor DTE (Compras)")
+st.title("🛒 Extractor DTE (Compras V4 Pro)")
 
 st.markdown(f"""
 <div class="alerta-activo">
@@ -500,10 +454,10 @@ with st.sidebar:
                         m, s = divmod(int(((time.time() - t_inicio) / idx) * (total - idx)), 60)
                         txt_progreso.markdown(f"📄 **Procesando:** {idx+1} de {total}<br>⏳ **Restante:** {m:02d}:{s:02d}", unsafe_allow_html=True)
                     else:
-                        txt_progreso.markdown(f"📄 **Procesando:** 1 de {total}<br>⏳ Calculando...", unsafe_allow_html=True)
+                        txt_progreso.markdown(f"📄 **Procesando:** 1 de {total}<br>⏳ Encendiendo motores IA...", unsafe_allow_html=True)
                     
                     file_bytes = f.read()
-                    res = extraer_compras_v3(file_bytes, cliente)
+                    res = extraer_compras_v4_pro(file_bytes, cliente)
                     
                     codigo_gen = res.get('gen', '')
                     es_duplicado_memoria = not st.session_state.db_compras.empty and codigo_gen != "" and (st.session_state.db_compras['gen'] == codigo_gen).any()
@@ -586,8 +540,8 @@ if st.session_state.reporte_compras:
     st.divider()
 
     if rep.get("nuevos_proveedores"):
-        st.markdown("### ✨ Guardado Rápido de Proveedores (Modo Aprendizaje)")
-        st.info("Hemos detectado proveedores nuevos en esta carga. Revisa el nombre, corrígelo si es necesario y guárdalo para actualizar la tabla al instante.")
+        st.markdown("### ✨ Guardado Rápido de Proveedores (Autocorrector IA Activado)")
+        st.info("Revisa y guarda los nombres. En futuras subidas, si el escáner falla, la IA usará Fuzzy Matching (similitud) para autocorregir nombres basados en este directorio.")
         
         for nit, nombre_sug in list(rep["nuevos_proveedores"].items()):
             col1, col2, col3 = st.columns([2, 5, 2])
@@ -617,7 +571,6 @@ if not st.session_state.db_compras.empty:
     with col_f2:
         filtro_tipo = st.multiselect("Filtrar por Tipo DTE 📄", options=df['tipo'].unique(), default=df['tipo'].unique())
         
-    # --- APLICACIÓN EN TIEMPO REAL DE LOS FILTROS ---
     df_filtrado = df.copy()
     if busqueda_texto:
         termino = busqueda_texto.upper()
@@ -662,7 +615,6 @@ if not st.session_state.db_compras.empty:
 
         st.dataframe(df_hacienda.style.format({col: "{:.2f}" for col in df_hacienda.columns[6:15]}), hide_index=True, width="stretch")
         
-        # El Excel descargará únicamente lo que el usuario haya filtrado visualmente
         if st.button("📥 Generar Excel para Hacienda (Resultados Filtrados)", type="primary"): 
             ventana_descarga_compras(df_hacienda, "F07_Compras_Proveedores.xlsx")
             
