@@ -95,10 +95,8 @@ def to_excel_hacienda_compras(df):
     return output.getvalue()
 
 def limpiar_monto(monto_str):
-    """Limpia la basura y corrige errores de formato (ej. 1.057.33 o 1,500,00)"""
     monto_str = re.sub(r'[^\d.,]', '', str(monto_str))
     if not monto_str: return 0.0
-
     m_sep = re.search(r'([.,])(\d{1,2})$', monto_str)
     if m_sep:
         decimales = m_sep.group(2)
@@ -109,14 +107,29 @@ def limpiar_monto(monto_str):
         return float(re.sub(r'[^\d]', '', monto_str))
 
 def extraer_y_formatear_fecha(texto):
-    """Cazador de fechas ultra-elástico"""
-    # 1. Buscar Formato Hacienda (YYYY-MM-DD)
+    """Cazador de fechas: Prioridad a etiquetas explícitas (Solución PriceSmart)"""
+    # 1. Búsqueda explícita de etiqueta "Fecha de Emisión" o similar
+    m_expl = re.search(r"(?:FECHA|FECHA\s*DE\s*EMISI[OÓ]N)[^\d]*(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})", texto, re.I)
+    if m_expl:
+        d, m, y = re.split(r'[\/\-\.]', m_expl.group(1))
+        return f"{int(d):02d}/{int(m):02d}/{y}"
+
+    # 2. Formato estándar Hacienda
     m_hacienda = re.search(r"\b(20[2-3][0-9])\s*-\s*(0[1-9]|1[0-2])\s*-\s*([0-2][0-9]|3[0-1])\b", texto)
     if m_hacienda:
         y, m, d = m_hacienda.groups()
         return f"{int(d):02d}/{int(m):02d}/{y}"
 
-    # 2. Formato normal (DD/MM/YYYY o DD-MM-YYYY)
+    # 3. Formato alfanumérico
+    meses = {'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06', 'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'}
+    alfa_matches = re.finditer(r"\b(\d{1,2})\s*(?:de\s*|/|-)?\s*([a-zA-Z]{3,})\s*(?:de\s*|/|-)?\s*(\d{4})\b", texto, re.I)
+    for m_alfa in alfa_matches:
+        d, mes_str, y = m_alfa.groups()
+        if int(y) < 2023: continue 
+        for key, value in meses.items():
+            if mes_str.upper().startswith(key): return f"{int(d):02d}/{value}/{y}"
+
+    # 4. Fallback numérico general
     num_matches = re.finditer(r"\b(\d{1,4})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(\d{1,4})\b", texto)
     for m_num in num_matches:
         p1, p2, p3 = m_num.groups()
@@ -129,56 +142,35 @@ def extraer_y_formatear_fecha(texto):
         if int(y) < 2023: continue 
         if int(m) > 12 or int(d) > 31: continue 
         return f"{int(d):02d}/{int(m):02d}/{y}"
-        
-    # 3. Formato alfanumérico (DD de MES de YYYY)
-    meses = {'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06', 'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'}
-    alfa_matches = re.finditer(r"\b(\d{1,2})\s*(?:de\s*|/|-)?\s*([a-zA-Z]{3,})\s*(?:de\s*|/|-)?\s*(\d{4})\b", texto, re.I)
-    for m_alfa in alfa_matches:
-        d, mes_str, y = m_alfa.groups()
-        if int(y) < 2023: continue 
-        for key, value in meses.items():
-            if mes_str.upper().startswith(key): return f"{int(d):02d}/{value}/{y}"
-            
     return ""
 
-# --- MOTOR CLÁSICO REVITALIZADO (PDFPLUMBER + TESSERACT) ---
-def extraer_compras_v6_clasico(file_bytes, cliente_activo):
+def extraer_compras_v3(file_bytes, cliente_activo):
     motor = "Nativo"
-    
     try:
         texto_completo = ""
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
                 texto_pagina = page.extract_text()
-                
-                # Si está vacío (es una imagen), activamos el OCR básico
                 if not texto_pagina or len(texto_pagina.strip()) < 50:
-                    motor = "ICR (OCR)"
                     img = page.to_image(resolution=300)
                     texto_pagina = pytesseract.image_to_string(img.original, lang='spa')
-                    
+                    motor = "ICR (OCR)"
                 texto_completo += (texto_pagina or "") + "\n"
                 
-        # Limpieza básica
         t_clean = re.sub(r'\s+', ' ', texto_completo)
         t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
 
-        # ---------------------------------------------------------
-        # 1. FILTRO DE TIPO DE DOCUMENTO
-        # ---------------------------------------------------------
         m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_spaces)
         tipo = "01"
         if m_ctrl:
             ctrl = m_ctrl.group(1).replace("O", "0")
             m_tipo = re.search(r"DTE-(\d{2})", ctrl)
             if m_tipo: tipo = m_tipo.group(1)
+        else: ctrl = ""
             
-        if not m_ctrl: return {"error_tipo": "No se detectó un Número de Control DTE válido."}
-        if tipo not in ["03", "05", "06"]: return {"error_tipo": f"El documento es DTE-{tipo}. Solo se admiten 03, 05 y 06."}
+        if not ctrl: return {"error_tipo": "No se detectó un Número de Control DTE válido."}
+        if tipo not in ["03", "05", "06"]: return {"error_tipo": f"El documento es tipo DTE-{tipo}. Solo se admiten 03, 05 y 06 para el Anexo F-07."}
 
-        # ---------------------------------------------------------
-        # 2. VERIFICACIÓN DE INTRUSOS
-        # ---------------------------------------------------------
         nit_receptor_limpio = re.sub(r'[^0-9]', '', cliente_activo['nit'])
         dui_receptor_limpio = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
         texto_solo_numeros = re.sub(r'[^0-9]', '', t_clean)
@@ -188,16 +180,12 @@ def extraer_compras_v6_clasico(file_bytes, cliente_activo):
         elif len(nit_receptor_limpio) >= 9 and nit_receptor_limpio in texto_solo_numeros: es_documento_valido = True
         elif len(dui_receptor_limpio) >= 8 and dui_receptor_limpio in texto_solo_numeros: es_documento_valido = True
             
-        if not es_documento_valido: return {"error_intruso": f"Documento ajeno al cliente activo."}
+        if not es_documento_valido: return {"error_intruso": f"Este documento no le pertenece al cliente activo."}
 
-        # ---------------------------------------------------------
-        # 3. IDENTIFICADORES Y FECHA (Cazadores Elásticos)
-        # ---------------------------------------------------------
         gen = ""
-        # Regex elástico (permite espacios entre los bloques del UUID)
+        # Cazador Elástico de UUIDs
         uuid_elastico = r"([A-F0-9]{8}\s*-?\s*[A-F0-9]{4}\s*-?\s*[A-F0-9]{4}\s*-?\s*[A-F0-9]{4}\s*-?\s*[A-F0-9]{12})"
-        
-        gen_m = re.search(r"(?:C[OÓ]DIGO\s*DE\s*GENERACI[OÓ]N|GENERACI[OÓ]N)[^\w]*" + uuid_elastico, texto_completo, re.I)
+        gen_m = re.search(r"(?:C[OÓ]DIGO\s*DE\s*GENERACI[OÓ]N|C[OÓ]D\.\s*GENERACI[OÓ]N)[^\w]*" + uuid_elastico, texto_completo, re.I)
         if gen_m:
             raw_gen = re.sub(r'[^A-F0-9]', '', gen_m.group(1).upper())
             gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
@@ -205,134 +193,119 @@ def extraer_compras_v6_clasico(file_bytes, cliente_activo):
             uuids = re.findall(uuid_elastico, t_clean, re.I)
             for u in uuids:
                 raw_u = re.sub(r'[^A-F0-9]', '', u.upper())
-                # Evitar que atrape el Sello de Recepción por error
                 if len(raw_u) == 32 and not re.search(r"SELLO.*?RECEPC.*?" + u[:8], t_clean, re.I):
                     gen = f"{raw_u[:8]}-{raw_u[8:12]}-{raw_u[12:16]}-{raw_u[16:20]}-{raw_u[20:]}"
                     break
 
         fecha = extraer_y_formatear_fecha(t_clean)
+        if not fecha:
+            try:
+                with pdfplumber.open(BytesIO(file_bytes)) as pdf_temp:
+                    if len(pdf_temp.pages) > 0:
+                        p0 = pdf_temp.pages[0]
+                        crop_box = (0, 0, p0.width, p0.height * 0.50)
+                        top_img = p0.crop(crop_box).to_image(resolution=300)
+                        config_ocr = r'--oem 3 --psm 6'
+                        ocr_top = pytesseract.image_to_string(top_img.original, lang='spa', config=config_ocr)
+                        ocr_top_clean = re.sub(r'\s+', ' ', ocr_top)
+                        fecha = extraer_y_formatear_fecha(ocr_top_clean)
+                        if fecha and motor == "Nativo": motor = "Nativo + OCR Fecha"
+            except: pass
 
-        # ---------------------------------------------------------
-        # 4. EXTRACCIÓN PROVEEDOR
-        # ---------------------------------------------------------
-        # Escudo Anti-Receptor
-        texto_emisor = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE)\b", texto_completo)[0]
-        if len(texto_emisor) < 50: texto_emisor = texto_completo
-
+        # --- EXTRACCIÓN DE PROVEEDOR (Solución al "Entrenador") ---
         nit_prov = ""
         dui_prov = ""
         nom_prov = "⚠️ PROVEEDOR NUEVO"
         es_nuevo = True
 
-        patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
-        nits_encontrados = re.findall(patron_identificadores, texto_emisor)
-        if not nits_encontrados: nits_encontrados = re.findall(patron_identificadores, texto_completo)
-        nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
+        # 1. Buscar explícitamente en el bloque "EMISOR" primero
+        m_emisor_block = re.search(r"EMISOR[\s\S]{1,300}?(?:NIT|N\s*I\s*T)[^\d]*([\d\-\s]{9,17})", texto_completo, re.I)
+        if m_emisor_block:
+            posible_nit = re.sub(r'[^0-9]', '', m_emisor_block.group(1))
+            if len(posible_nit) in [9, 14]:
+                nit_prov = posible_nit
 
-        proveedores_json = cargar_proveedores_json()
-
-        for n in nits_limpios:
-            if n in proveedores_json:
-                nit_prov = n; nom_prov = proveedores_json[n]; es_nuevo = False; break
-            elif n in PROVEEDORES_RESPALDO:
-                nit_prov = n; nom_prov = PROVEEDORES_RESPALDO[n]; es_nuevo = False; break
-
+        # 2. Si no lo halla por bloque, usar lógica de exclusión o posición
         if not nit_prov:
-            m_emisor = re.search(r"EMISOR[\s\S]{1,250}?(?:NIT|N\s*I\s*T|N\.I\.T)[^\d]*([\d\-\s]{9,17})", texto_emisor, re.I)
-            if m_emisor:
-                posible_nit = re.sub(r'[^0-9]', '', m_emisor.group(1))
-                if len(posible_nit) in [9, 14] and posible_nit != nit_receptor_limpio: nit_prov = posible_nit
-
-        if not nit_prov and nits_limpios:
-            if nit_receptor_limpio == "00000000000000": nit_prov = nits_limpios[0]
-            else:
-                for n in nits_limpios:
-                    if n != nit_receptor_limpio and n != dui_receptor_limpio: nit_prov = n; break
+            patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
+            nits_encontrados = re.findall(patron_identificadores, texto_completo)
+            nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
+            
+            for n in nits_limpios:
+                # Lógica para Cliente Real
+                if nit_receptor_limpio != "00000000000000" and n != nit_receptor_limpio and n != dui_receptor_limpio:
+                    nit_prov = n; break
+                # Lógica para Entrenador (Asumimos el primer NIT del documento)
+                elif nit_receptor_limpio == "00000000000000":
+                    nit_prov = n; break
 
         if len(nit_prov) == 9: dui_prov = nit_prov
+
+        proveedores_json = cargar_proveedores_json()
+        if nit_prov in proveedores_json:
+            nom_prov = proveedores_json[nit_prov]; es_nuevo = False
+        elif nit_prov in PROVEEDORES_RESPALDO:
+            nom_prov = PROVEEDORES_RESPALDO[nit_prov]; es_nuevo = False
 
         if es_nuevo and nit_prov:
             nom_prov = "⚠️ PROVEEDOR NUEVO"
             nombres_receptor = [n for n in cliente_activo['nombre'].split() if len(n) > 3]
             
             palabras_basura = [
-                "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "ELECTRONICO", "REPRESENTACIÓN", "REPRESENTACION", "IMPRESA", "DTE",
-                "CREDITO", "CRÉDITO", "FISCAL", "RECEPTOR", "CLIENTE", "EMISOR", "FACTURA", "CONSUMIDOR", "FINAL",
+                "DOCUMENTO", "CREDITO", "CRÉDITO", "FISCAL", "TRIBUTARIO", "RECEPTOR", "CLIENTE", "EMISOR", 
                 "FACTURACION", "FACTURACIÓN", "COMPROBANTE", "RECEP", "DIRECC", "A QUIEN INTERESE", 
                 "NÚMERO DE CONTROL", "NUMERO DE CONTROL", "CÓDIGO", "SELLO", "VERSIÓ", "VERSIÓN", "TIPO DE", 
                 "TRANSMISIÓN", "TRANSMISION", "MODELO", "NÚM.", "NUM.", "INFORMACIÓN", "INFORMACION", 
                 "AQUI CONTENIDA", "AQUÍ CONTENIDA", "VÁLIDO", "VALIDO", "MINISTERIO", "HACIENDA", "PORTAL",
-                "COLONIA", "BOULEVARD", "BLVD", "CALLE", "AVENIDA", "RESIDENCIAL", "BARRIO", "EDIFICIO", "LOCAL", 
-                "KILOMETRO", "KM", "CARR.", "CARRETERA", "PANAMERICAN", "CENTRO COMERCIAL", "PLAZA", "DEPARTAMENTO", "MUNICIPIO",
+                "COLONIA", "BOULEVARD", "CALLE", "AVENIDA", "RESIDENCIAL", "BARRIO", "EDIFICIO", "LOCAL", 
+                "KILOMETRO", "CENTRO COMERCIAL", "PLAZA", "MONTE CARMELO", "DEPARTAMENTO", "MUNICIPIO",
                 "GIRO:", "GIRO", "TIPO ESTABLECIMIENTO", "ORDEN DE COMPRA", "TASA MUNICIPAL", "CARGO",
                 "CASA MATRIZ", "SUCURSAL", "AGENCIA", "PAGO DE", "CONCEPTO DE", "COMPAÑIA DE SEGUROS",
-                "PREVIO", "NORMAL", "ANULADO", "SUJETO EXCLUIDO", "EXCLUIDO",
-                "CAJERO", "TERMINAL", "EFECTIVO", "VUELTO", "CAMBIO", "CONTADO", "TARJETA", "VISA", "MASTERCARD", "CAJA", "VENTA",
-                "FECHA", "HORA", "EMISIÓN", "EMISION", "GENERACIÓN", "GENERACION", "AM", "PM",
-                "RESOLUCION", "RESOLUCIÓN", "AUTORIZACION", "AUTORIZACIÓN", "CORRELATIVO", "RANGO", "DEL", "AL",
-                "PAGINA", "PÁGINA", "WWW", "HTTP", ".COM", "EMAIL", "CORREO", "TELÉFONO", "TELEFONO", "CELULAR", "PBX", "FAX"
+                "PREVIO", "NORMAL", "ANULADO", "SUJETO EXCLUIDO", "EXCLUIDO"
             ]
             
-            # Busqueda por etiqueta
-            regex_nombres = r"(?:Nombre, denominaci[oó]n o raz[oó]n social|Nombre o raz[oó]n social|Raz[oó]n social|Nombre comercial|Nombre)\s*[:]?\s*([^\n]+)"
-            m_nombre_exacto = re.search(regex_nombres, texto_emisor, re.I)
+            lineas = texto_completo.split('\n')
+            nit_line_idx = -1
+            for i, L in enumerate(lineas):
+                if nit_prov in re.sub(r'[^0-9]', '', L):
+                    nit_line_idx = i; break
             
-            if m_nombre_exacto:
-                clean_name = m_nombre_exacto.group(1).strip()
-                clean_name = re.split(r'\s{4,}|NIT|NRC|Registro|Giro', clean_name, flags=re.I)[0].strip()
-                if clean_name and len(clean_name) > 3 and not any(b in clean_name.upper() for b in palabras_basura):
-                    nom_prov = clean_name.upper()
+            start_idx = max(0, nit_line_idx - 4) if nit_line_idx != -1 else 0
+            end_idx = min(len(lineas), nit_line_idx + 5) if nit_line_idx != -1 else len(lineas)
             
-            # Búsqueda por líneas (Proximidad al NIT)
-            if nom_prov == "⚠️ PROVEEDOR NUEVO":
-                lineas = texto_emisor.split('\n')
-                nit_line_idx = -1
-                for i, L in enumerate(lineas):
-                    if nit_prov in re.sub(r'[^0-9]', '', L):
-                        nit_line_idx = i; break
+            for i in range(start_idx, end_idx):
+                L = lineas[i].strip().upper()
+                if not L or len(L) < 5: continue
+                if re.search(r"[A-F0-9]{8}-?[A-F0-9]{4}-?", L, re.I): continue
+                if any(b in L for b in palabras_basura) or any(n in L for n in nombres_receptor): continue
                 
-                start_idx = max(0, nit_line_idx - 4) if nit_line_idx != -1 else 0
-                end_idx = min(len(lineas), nit_line_idx + 5) if nit_line_idx != -1 else len(lineas)
+                if re.search(r"^(NOMBRE O RAZ.N SOCIAL|NOMBRE COMERCIAL|NOMBRE)\s*[:]", L):
+                    clean_name = re.sub(r"^(NOMBRE O RAZ.N SOCIAL|NOMBRE COMERCIAL|NOMBRE)\s*[:\s]*", "", L).strip()
+                    clean_name = re.split(r'\s{4,}|NOMBRE|NIT|NRC', clean_name)[0].strip()
+                    if clean_name and len(clean_name) > 3:
+                        nom_prov = clean_name; break
                 
-                for i in range(start_idx, end_idx):
-                    L = lineas[i].strip().upper()
-                    if not L or len(L) < 5: continue
-                    if re.search(r"[A-F0-9]{8}-?[A-F0-9]{4}-?", L, re.I): continue
-                    if re.search(r"\d{2}/\d{2}/\d{4}|\d{2}:\d{2}:\d{2}", L): continue 
-                    if sum(c.isdigit() for c in L) / len(L) > 0.5: continue
-                    if any(b in L for b in palabras_basura) or any(n in L for n in nombres_receptor): continue
+                es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "SEGUROS", "FARMACIA", "ASOCIACION"])
+                
+                if re.search(r'[A-Z]{5,}', L) and "NIT:" not in L and "NRC:" not in L:
+                    clean_name = re.sub(r"(NOMBRE O RAZ.N SOCIAL|NOMBRE COMERCIAL|NOMBRE)[:\s]*", "", L).strip()
+                    clean_name = re.split(r'\s{4,}|NOMBRE|NIT|NRC', clean_name)[0].strip()
                     
-                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "SEGUROS", "FARMACIA", "ASOCIACION", "GRUPO"])
+                    if es_comercial and len(clean_name) < 25 and i > 0:
+                        prev_L = lineas[i-1].strip().upper()
+                        if len(prev_L) > 3 and not any(b in prev_L for b in palabras_basura) and not re.search(r"[A-F0-9]{8}-", prev_L):
+                            clean_name = f"{prev_L} {clean_name}"
                     
-                    if re.search(r'[A-Z]{5,}', L) and "NIT:" not in L and "NRC:" not in L:
-                        clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
-                        if es_comercial and len(clean_name) < 25 and i > 0:
-                            prev_L = lineas[i-1].strip().upper()
-                            if len(prev_L) > 3 and not any(b in prev_L for b in palabras_basura) and not re.search(r"[A-F0-9]{8}-|\d{2}:\d{2}", prev_L):
-                                clean_name = f"{prev_L} {clean_name}"
-                        
-                        if clean_name and es_comercial: nom_prov = clean_name; break
-                        elif clean_name and nom_prov == "⚠️ PROVEEDOR NUEVO": nom_prov = clean_name
+                    if clean_name and es_comercial:
+                        nom_prov = clean_name; break
+                    elif clean_name and nom_prov == "⚠️ PROVEEDOR NUEVO":
+                        nom_prov = clean_name
 
-            if nom_prov == "⚠️ PROVEEDOR NUEVO" or "ELECTRÓNICO" in nom_prov:
-                lineas_top = texto_emisor.split('\n')[:10]
-                for L in lineas_top:
-                    L = L.strip().upper()
-                    if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3 or any(b in L for b in palabras_basura): continue
-                    clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
-                    if clean_name: nom_prov = clean_name; break
-
-            if nom_prov != "⚠️ PROVEEDOR NUEVO":
-                nom_prov = re.sub(r"^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$", "", nom_prov).strip()
-
-            if len(nom_prov) > 60 or nom_prov == "⚠️ PROVEEDOR NUEVO": 
-                nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
+            if len(nom_prov) > 60 or nom_prov == "⚠️ PROVEEDOR NUEVO": nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
 
         nit_nuevo = nit_prov
 
-        # ---------------------------------------------------------
-        # 5. CEREBRO MATEMÁTICO (Auditoría Final)
-        # ---------------------------------------------------------
+        # 5. CEREBRO MATEMÁTICO AUTÓNOMO
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
         
@@ -437,10 +410,10 @@ with st.sidebar:
                         m, s = divmod(int(((time.time() - t_inicio) / idx) * (total - idx)), 60)
                         txt_progreso.markdown(f"📄 **Procesando:** {idx+1} de {total}<br>⏳ **Restante:** {m:02d}:{s:02d}", unsafe_allow_html=True)
                     else:
-                        txt_progreso.markdown(f"📄 **Procesando:** 1 de {total}<br>⏳ Extrayendo datos...", unsafe_allow_html=True)
+                        txt_progreso.markdown(f"📄 **Procesando:** 1 de {total}<br>⏳ Calculando...", unsafe_allow_html=True)
                     
                     file_bytes = f.read()
-                    res = extraer_compras_v6_clasico(file_bytes, cliente)
+                    res = extraer_compras_v3(file_bytes, cliente)
                     
                     codigo_gen = res.get('gen', '')
                     es_duplicado_memoria = not st.session_state.db_compras.empty and codigo_gen != "" and (st.session_state.db_compras['gen'] == codigo_gen).any()
@@ -523,7 +496,7 @@ if st.session_state.reporte_compras:
     st.divider()
 
     if rep.get("nuevos_proveedores"):
-        st.markdown("### ✨ Guardado Rápido de Proveedores (Modo Aprendizaje)")
+        st.markdown("### ✨ Guardado Rápido de Proveedores")
         st.info("Revisa el nombre, corrígelo si es necesario y guárdalo para actualizar la tabla al instante.")
         
         for nit, nombre_sug in list(rep["nuevos_proveedores"].items()):
