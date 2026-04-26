@@ -4,19 +4,28 @@ import os
 
 # --- SEGURIDAD ---
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
-    st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
+    st.warning("⚠️ Acceso denegado. Por favor, inicia sesión.")
     st.stop()
 
-# --- SIMULADOR DE BASE DE DATOS DE CLIENTES ---
+# --- LECTOR DE BASE DE DATOS ULTRA SEGURO ---
 def cargar_clientes():
     archivo = "data/clientes.json"
+    db_segura = {}
+    
     if os.path.exists(archivo):
         try:
             with open(archivo, "r", encoding="utf-8") as f: 
-                return json.load(f)
+                raw_db = json.load(f)
+                # Filtro de seguridad: Reconstruye el JSON viejo al formato nuevo
+                for key, val in raw_db.items():
+                    if isinstance(val, dict):
+                        db_segura[key] = val
+                    elif isinstance(val, str):
+                        db_segura[key] = {"nombre": val, "nit": key, "dui": ""}
+                if db_segura: return db_segura
         except: pass
     
-    # Si no hay base de datos aún, cargamos estos 3 de prueba (Mockup)
+    # Fallback si está vacío
     return {
         "00000000000000": {"nombre": "ENTRENO (Modo Pruebas)", "nit": "00000000000000", "dui": ""},
         "06141234567890": {"nombre": "FARMACIA SAN NICOLÁS S.A DE C.V.", "nit": "06141234567890", "dui": ""},
@@ -24,7 +33,7 @@ def cargar_clientes():
     }
 
 clientes_db = cargar_clientes()
-lista_opciones = ["Selecciona una empresa..."] + [f"{datos['nombre']} (NIT: {nit})" for nit, datos in clientes_db.items()]
+lista_opciones = ["Selecciona una empresa..."] + [f"{datos.get('nombre', 'Sin Nombre')} (NIT: {nit})" for nit, datos in clientes_db.items()]
 
 # --- DISEÑO DEL HUB ---
 usuario = st.session_state.get("usuario_actual", "Contador").upper()
@@ -35,17 +44,25 @@ st.markdown("<p style='text-align: center; color: #888888; font-size: 16px;'>Sel
 # --- SELECTOR DE ESPACIO DE TRABAJO ---
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
-    # Mostramos el menú desplegable
     cliente_seleccionado = st.selectbox("🏢 Cliente Activo:", options=lista_opciones, label_visibility="collapsed")
     
     if cliente_seleccionado != "Selecciona una empresa...":
-        # Extraemos el NIT de la opción seleccionada y configuramos la memoria global
         nit_seleccionado = cliente_seleccionado.split("NIT: ")[1].replace(")", "")
-        st.session_state.cliente_activo = clientes_db[nit_seleccionado]
+        datos_crudos = clientes_db[nit_seleccionado]
+        
+        # --- PARCHE AL KEYERROR ---
+        # Forzamos que siempre exista 'nit', 'nombre' y 'dui' en la memoria
+        cliente_seguro = {
+            "nombre": datos_crudos.get("nombre", "Cliente Desconocido"),
+            "nit": datos_crudos.get("nit", nit_seleccionado), 
+            "dui": datos_crudos.get("dui", "")
+        }
+        
+        st.session_state.cliente_activo = cliente_seguro
         
         st.markdown(f"""
         <div style="background-color: #003057; border-left: 4px solid #00E5FF; padding: 10px; border-radius: 5px; color: white; text-align: center; font-size: 14px;">
-            ✅ Entorno configurado para: <strong>{st.session_state.cliente_activo['nombre']}</strong>
+            ✅ Entorno configurado para: <strong>{cliente_seguro['nombre']}</strong>
         </div>
         """, unsafe_allow_html=True)
     else:
