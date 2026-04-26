@@ -1,25 +1,70 @@
 import streamlit as st
+import json
+import os
 
 # --- SEGURIDAD ---
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
-    st.warning("⚠️ Acceso denegado. Por favor, inicia sesión.")
+    st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
     st.stop()
+
+# --- SIMULADOR DE BASE DE DATOS DE CLIENTES ---
+def cargar_clientes():
+    archivo = "data/clientes.json"
+    if os.path.exists(archivo):
+        try:
+            with open(archivo, "r", encoding="utf-8") as f: 
+                return json.load(f)
+        except: pass
+    
+    # Si no hay base de datos aún, cargamos estos 3 de prueba (Mockup)
+    return {
+        "00000000000000": {"nombre": "ENTRENO (Modo Pruebas)", "nit": "00000000000000", "dui": ""},
+        "06141234567890": {"nombre": "FARMACIA SAN NICOLÁS S.A DE C.V.", "nit": "06141234567890", "dui": ""},
+        "06140987654321": {"nombre": "CONSTRUCTORA EL SALVADOR", "nit": "06140987654321", "dui": ""}
+    }
+
+clientes_db = cargar_clientes()
+lista_opciones = ["Selecciona una empresa..."] + [f"{datos['nombre']} (NIT: {nit})" for nit, datos in clientes_db.items()]
 
 # --- DISEÑO DEL HUB ---
 usuario = st.session_state.get("usuario_actual", "Contador").upper()
 
 st.markdown(f"<h1 style='text-align: center; color: #F7F5EE; margin-bottom: 0px;'>Bienvenido, {usuario} 👋</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #888888; font-size: 18px;'>Selecciona un módulo en el menú lateral o explora tus herramientas:</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #888888; font-size: 16px;'>Selecciona tu Espacio de Trabajo para comenzar:</p>", unsafe_allow_html=True)
+
+# --- SELECTOR DE ESPACIO DE TRABAJO ---
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    # Mostramos el menú desplegable
+    cliente_seleccionado = st.selectbox("🏢 Cliente Activo:", options=lista_opciones, label_visibility="collapsed")
+    
+    if cliente_seleccionado != "Selecciona una empresa...":
+        # Extraemos el NIT de la opción seleccionada y configuramos la memoria global
+        nit_seleccionado = cliente_seleccionado.split("NIT: ")[1].replace(")", "")
+        st.session_state.cliente_activo = clientes_db[nit_seleccionado]
+        
+        st.markdown(f"""
+        <div style="background-color: #003057; border-left: 4px solid #00E5FF; padding: 10px; border-radius: 5px; color: white; text-align: center; font-size: 14px;">
+            ✅ Entorno configurado para: <strong>{st.session_state.cliente_activo['nombre']}</strong>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="background-color: #1a1a1a; border: 1px solid #333; padding: 10px; border-radius: 5px; color: #888; text-align: center; font-size: 14px;">
+            👆 Por favor, selecciona una empresa de tu portafolio.
+        </div>
+        """, unsafe_allow_html=True)
+
 st.divider()
 
-# --- CSS PARA LAS TARJETAS (ESTILO ILOVEPDF DARK) ---
+# --- CSS PARA LAS TARJETAS ---
 css = """
 <style>
 .grid-container {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 20px;
-    padding: 20px 0px;
+    padding: 10px 0px;
 }
 .card {
     background-color: #161616;
@@ -58,7 +103,7 @@ css = """
 """
 st.markdown(css, unsafe_allow_html=True)
 
-# --- ESTRUCTURA HTML SIN SANGRÍAS (El truco para que funcione) ---
+# --- ESTRUCTURA HTML DE TARJETAS ---
 html_tarjetas = """
 <div class="grid-container">
 <div class="card ventas">
@@ -84,5 +129,3 @@ html_tarjetas = """
 </div>
 """
 st.markdown(html_tarjetas, unsafe_allow_html=True)
-
-st.markdown("<br><p style='text-align: center; color: #555555; font-size: 14px;'>👈 Utiliza el panel izquierdo para seleccionar a tu cliente activo y navegar a las herramientas.</p>", unsafe_allow_html=True)
