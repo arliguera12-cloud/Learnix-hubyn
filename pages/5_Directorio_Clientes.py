@@ -2,170 +2,113 @@ import streamlit as st
 import json
 import os
 import pandas as pd
-import re
-import time
 
-st.set_page_config(page_title="Directorio de Clientes", layout="wide", page_icon="👥")
+# --- SEGURIDAD ---
+if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
+    st.warning("⚠️ Acceso denegado. Por favor, inicia sesión.")
+    st.stop()
 
-# --- DISEÑO MODO OSCURO ---
+st.set_page_config(page_title="Directorio Clientes", layout="wide", page_icon="👥")
+
 estilo_custom = """
 <style>
     [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background-color: #000000 !important; }
     [data-testid="stSidebar"] { background-color: #161616 !important; border-right: 1px solid #333333; }
     h1, h2, h3, h4, h5, h6, p, label, span { color: #F7F5EE !important; }
-    [data-testid="stDataFrame"] span { color: inherit !important; }
-    
-    div.stButton > button[kind="primary"] { 
-        background-color: #003057 !important; border: 1px solid #00407A !important; border-radius: 6px; transition: 0.3s;
-    }
+    div.stButton > button[kind="primary"] { background-color: #003057 !important; border: 1px solid #00407A !important; border-radius: 6px; }
     div.stButton > button[kind="primary"] * { color: #FFFFFF !important; font-weight: bold !important; }
     div.stButton > button[kind="primary"]:hover { background-color: #00407A !important; }
-    
-    div.stButton > button[kind="secondary"] { background-color: #2A2A2A !important; border: 1px solid #555555 !important; border-radius: 6px; }
-    div.stButton > button[kind="secondary"] * { color: #FFFFFF !important; font-weight: bold !important; }
-    
-    .alerta-activo {
-        padding: 15px; border-radius: 8px; border-left: 5px solid #00E5FF;
-        background-color: #001f3f; color: white; margin-bottom: 20px;
-    }
+    .alerta-activo { padding: 15px; border-radius: 8px; border-left: 5px solid #00E5FF; background-color: #111111; margin-bottom: 20px; }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
 
-# --- RUTAS Y FUNCIONES DE BASE DE DATOS ---
+st.markdown("<h2 style='font-family: Courier New, monospace; color: #003057; letter-spacing: 2px; margin-bottom: 0px;'>YN</h2>", unsafe_allow_html=True)
+st.title("👥 Directorio de Clientes (Portafolio)")
+st.write("Administra las empresas que auditas. Estos datos se usarán en el Dashboard principal.")
+
+# --- MANEJO DE BASE DE DATOS SEGURA ---
 ARCHIVO_CLIENTES = "data/clientes.json"
 
 def cargar_clientes():
-    if not os.path.exists("data"):
-        os.makedirs("data")
-    if not os.path.exists(ARCHIVO_CLIENTES):
-        with open(ARCHIVO_CLIENTES, "w", encoding="utf-8") as f:
-            json.dump({}, f)
-    with open(ARCHIVO_CLIENTES, "r", encoding="utf-8") as f:
-        try: return json.load(f)
-        except: return {}
+    db_segura = {}
+    if os.path.exists(ARCHIVO_CLIENTES):
+        try:
+            with open(ARCHIVO_CLIENTES, "r", encoding="utf-8") as f:
+                raw_db = json.load(f)
+                for key, val in raw_db.items():
+                    if isinstance(val, dict): db_segura[key] = val
+                    elif isinstance(val, str): db_segura[key] = {"nombre": val, "nit": key, "dui": ""}
+                return db_segura
+        except: pass
+    return {}
 
-def guardar_clientes(clientes):
+def guardar_clientes(db):
+    if not os.path.exists("data"): os.makedirs("data")
     with open(ARCHIVO_CLIENTES, "w", encoding="utf-8") as f:
-        json.dump(clientes, f, indent=4, ensure_ascii=False)
+        json.dump(db, f, indent=4, ensure_ascii=False)
 
-def limpiar_numero(numero_bruto):
-    return re.sub(r'[^0-9]', '', str(numero_bruto))
+clientes = cargar_clientes()
 
-# --- INICIALIZACIÓN DE ESTADO GLOBAL ---
-if "cliente_activo" not in st.session_state:
-    st.session_state.cliente_activo = None
-
-db_clientes = cargar_clientes()
-
-# --- ENCABEZADO ---
-st.markdown("<h2 style='font-family: Courier New, monospace; color: #003057; letter-spacing: 2px; margin-bottom: 0px; padding-bottom: 0px;'>YN</h2>", unsafe_allow_html=True)
-st.title("👥 Directorio de Clientes")
-st.write("Administra los perfiles fiscales. El cliente activo será usado por los módulos de Ventas y Compras.")
-
-# --- SECCIÓN: CLIENTE ACTIVO ---
-if st.session_state.cliente_activo:
-    c_activo = st.session_state.cliente_activo
+# --- MOSTRAR CLIENTE ACTIVO CON LECTURA SEGURA ---
+c_activo = st.session_state.get('cliente_activo')
+if c_activo:
+    # Usamos .get() para evitar KeyErrors si el JSON es viejo
+    nombre_seguro = c_activo.get('nombre', 'Sin Nombre')
+    nit_seguro = c_activo.get('nit', 'N/A')
+    dui_seguro = c_activo.get('dui', 'N/A')
+    
     st.markdown(f"""
     <div class="alerta-activo">
-        <h4 style='margin-top:0px; color:#00E5FF;'>🟢 Cliente Activo Actual</h4>
-        <strong>Nombre:</strong> {c_activo['nombre']} <br>
-        <strong>NIT:</strong> {c_activo['nit']} &nbsp;&nbsp;|&nbsp;&nbsp; <strong>DUI:</strong> {c_activo.get('dui', 'N/A')} &nbsp;&nbsp;|&nbsp;&nbsp; <strong>NRC:</strong> {c_activo['nrc']}
+        <h4 style="margin:0; color:#00E5FF;">🏢 Cliente Seleccionado Actualmente</h4>
+        <p style="margin:5px 0 0 0; color:#aaa;"><strong>Nombre:</strong> {nombre_seguro}</p>
+        <p style="margin:0; color:#aaa;"><strong>NIT:</strong> {nit_seguro} &nbsp;&nbsp;|&nbsp;&nbsp; <strong>DUI:</strong> {dui_seguro}</p>
     </div>
     """, unsafe_allow_html=True)
 else:
-    st.warning("⚠️ No hay ningún cliente activo. Selecciona uno para poder usar los extractores.")
+    st.info("No hay ningún cliente activo. Ve al Dashboard para seleccionar uno.")
 
 st.divider()
 
-# --- PESTAÑAS DE ADMINISTRACIÓN ---
-tab1, tab2, tab3 = st.tabs(["🎯 Seleccionar Cliente", "➕ Nuevo Cliente", "📋 Ver Base de Datos"])
+# --- UI GESTIÓN DE PORTAFOLIO ---
+col1, col2 = st.columns([1, 2])
 
-# PESTAÑA 1: SELECCIONAR CLIENTE
-with tab1:
-    if not db_clientes:
-        st.info("La base de datos está vacía. Ve a la pestaña 'Nuevo Cliente'.")
-    else:
-        st.subheader("Activar Entorno de Trabajo")
-        opciones = [f"{datos['nombre']} (NIT: {nit})" for nit, datos in db_clientes.items()]
-        seleccion = st.selectbox("Selecciona el cliente que deseas procesar:", ["-- Seleccione --"] + opciones)
-        
-        if st.button("Activar Cliente", type="primary") and seleccion != "-- Seleccione --":
-            nit_seleccionado = seleccion.split("NIT: ")[1].replace(")", "").strip()
-            st.session_state.cliente_activo = {
-                "nit": nit_seleccionado,
-                "nombre": db_clientes[nit_seleccionado]["nombre"],
-                "nrc": db_clientes[nit_seleccionado]["nrc"],
-                "dui": db_clientes[nit_seleccionado].get("dui", "")
-            }
-            st.success(f"¡Entorno configurado para: {db_clientes[nit_seleccionado]['nombre']}!")
-            time.sleep(0.5)
-            st.rerun()
-
-# PESTAÑA 2: AGREGAR CLIENTE
-with tab2:
-    st.subheader("Crear Nuevo Perfil Fiscal")
+with col1:
+    st.subheader("➕ Agregar Nueva Empresa")
     with st.form("form_nuevo_cliente", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            nuevo_nit = st.text_input("NIT (Obligatorio)*")
-            nuevo_dui = st.text_input("DUI (Si está homologado con el NIT)")
-            nuevo_nrc = st.text_input("NRC")
-        with col2:
-            nuevo_nombre = st.text_input("Nombre Legal o Razón Social (Obligatorio)*")
-            nueva_actividad = st.text_input("Actividad Económica")
-            
-        submit_btn = st.form_submit_button("💾 Guardar Cliente", type="primary")
+        nuevo_nit = st.text_input("NIT (Sin guiones, ej: 06141234567890)*")
+        nuevo_dui = st.text_input("DUI (Opcional, sin guiones)")
+        nuevo_nombre = st.text_input("Razón Social o Nombre Completo*")
         
-        if submit_btn:
+        if st.form_submit_button("Guardar en Portafolio", type="primary", use_container_width=True):
             if not nuevo_nit or not nuevo_nombre:
                 st.error("El NIT y el Nombre son obligatorios.")
             else:
-                nit_limpio = limpiar_numero(nuevo_nit)
-                dui_limpio = limpiar_numero(nuevo_dui)
-                
-                if nit_limpio in db_clientes:
-                    st.error("❌ Este NIT ya existe en la base de datos.")
-                else:
-                    db_clientes[nit_limpio] = {
-                        "nombre": nuevo_nombre.strip().upper(),
-                        "nrc": nuevo_nrc.strip(),
-                        "dui": dui_limpio,
-                        "actividad": nueva_actividad.strip().upper()
-                    }
-                    guardar_clientes(db_clientes)
-                    st.success("✅ ¡Cliente guardado exitosamente!")
-                    time.sleep(0.5)
-                    st.rerun()
+                clientes[nuevo_nit] = {
+                    "nombre": nuevo_nombre.strip().upper(),
+                    "nit": nuevo_nit.strip(),
+                    "dui": nuevo_dui.strip()
+                }
+                guardar_clientes(clientes)
+                st.success(f"Empresa '{nuevo_nombre}' agregada con éxito.")
+                st.rerun()
 
-# PESTAÑA 3: VER DIRECTORIO
-with tab3:
-    st.subheader("Directorio General")
-    if db_clientes:
-        lista_datos = []
-        for nit, datos in db_clientes.items():
-            lista_datos.append({
-                "NIT": nit,
-                "DUI": datos.get("dui", ""),
-                "Nombre / Razón Social": datos["nombre"],
-                "NRC": datos["nrc"],
-                "Actividad": datos["actividad"]
-            })
-            
-        df_clientes = pd.DataFrame(lista_datos)
-        # REEMPLAZO APLICADO AQUÍ
-        st.dataframe(df_clientes, width="stretch", hide_index=True)
+with col2:
+    st.subheader("📋 Tu Portafolio Actual")
+    if clientes:
+        # Convertimos a DataFrame para verlo bonito
+        df_clientes = pd.DataFrame.from_dict(clientes, orient='index')
+        st.dataframe(df_clientes, use_container_width=True)
         
-        st.write("---")
-        st.markdown("#### 🗑️ Zona de Eliminación")
-        nit_borrar = st.selectbox("Selecciona un cliente para eliminar:", ["-- Ninguno --"] + list(db_clientes.keys()))
-        if st.button("Eliminar Cliente", type="secondary") and nit_borrar != "-- Ninguno --":
-            del db_clientes[nit_borrar]
-            guardar_clientes(db_clientes)
-            if st.session_state.cliente_activo and st.session_state.cliente_activo["nit"] == nit_borrar:
-                st.session_state.cliente_activo = None
-            st.success("Cliente eliminado del directorio.")
-            time.sleep(0.5)
-            st.rerun()
+        with st.expander("🗑️ Zona de Peligro (Eliminar Empresa)"):
+            nit_eliminar = st.selectbox("Selecciona el NIT a eliminar:", options=[""] + list(clientes.keys()))
+            if st.button("Eliminar Permanentemente", type="secondary"):
+                if nit_eliminar:
+                    del clientes[nit_eliminar]
+                    guardar_clientes(clientes)
+                    if c_activo and c_activo.get('nit') == nit_eliminar:
+                        st.session_state.cliente_activo = None
+                    st.success("Empresa eliminada del portafolio.")
+                    st.rerun()
     else:
-        st.info("No hay clientes registrados aún.")
+        st.info("Tu portafolio está vacío. Agrega tu primera empresa a la izquierda.")
