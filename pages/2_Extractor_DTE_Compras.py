@@ -109,23 +109,28 @@ def limpiar_monto(monto_str):
         return float(re.sub(r'[^\d]', '', monto_str))
 
 def extraer_y_formatear_fecha(texto):
-    """Cazador de Fechas Elástico y Tabular (Solución PriceSmart)"""
+    """Cazador de Fechas Nivel Dios (Especial Tablas y PriceSmart)"""
     
-    # 1. Búsqueda explícita de etiqueta (Formato normal)
-    m_expl = re.search(r"(?:FECHA|FECHA\s*DE\s*EMISI[OÓ]N)[^\d]*(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})", texto, re.I)
+    # 1. Búsqueda explícita (Etiquetas directas)
+    m_expl = re.search(r"(?:FECHA\s*DE\s*EMISI[OÓ]N|FECHA\s*DE\s*GENERACI[OÓ]N|FECHA)[^\d]*(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})", texto, re.I)
     if m_expl:
-        d, m, y = re.split(r'[\/\-\.]', m_expl.group(1))
+        d, m, y = m_expl.groups()
         return f"{int(d):02d}/{int(m):02d}/{y}"
 
-    # 2. Formato Tabular (PriceSmart: DIA MES AÑO \n 02 03 2026)
-    m_tabla = re.search(r"\b(\d{1,2})\s+(\d{1,2})\s+(20[2-3]\d)\b", texto)
-    if m_tabla:
-        d, m, y = m_tabla.groups()
-        if int(m) <= 12 and int(d) <= 31: 
-            return f"{int(d):02d}/{int(m):02d}/{y}"
+    # 2. Formato Tabular PriceSmart (Lectura Vertical)
+    m_vertical = re.search(r"D[IÍ]A[^\d]*(\d{1,2})[^\d]*MES[^\d]*(\d{1,2})[^\d]*A[ÑN]O[^\d]*(20[2-3]\d)", texto, re.I)
+    if m_vertical:
+        d, m, y = m_vertical.groups()
+        if int(m) <= 12 and int(d) <= 31: return f"{int(d):02d}/{int(m):02d}/{y}"
+        
+    # 2.1 Formato Tabular PriceSmart (Lectura Horizontal)
+    m_horizontal = re.search(r"A[ÑN]O[\s\S]{0,20}?(\d{1,2})[\s\-\|\_]+(\d{1,2})[\s\-\|\_]+(20[2-3]\d)", texto, re.I)
+    if m_horizontal:
+        d, m, y = m_horizontal.groups()
+        if int(m) <= 12 and int(d) <= 31: return f"{int(d):02d}/{int(m):02d}/{y}"
 
     # 3. Formato estándar Hacienda (YYYY-MM-DD)
-    m_hacienda = re.search(r"\b(20[2-3][0-9])\s*-\s*(0[1-9]|1[0-2])\s*-\s*([0-2][0-9]|3[0-1])\b", texto)
+    m_hacienda = re.search(r"\b(20[2-3]\d)\s*[\-\/]\s*(0[1-9]|1[0-2])\s*[\-\/]\s*([0-2]\d|3[0-1])\b", texto)
     if m_hacienda:
         y, m, d = m_hacienda.groups()
         return f"{int(d):02d}/{int(m):02d}/{y}"
@@ -139,7 +144,13 @@ def extraer_y_formatear_fecha(texto):
         for key, value in meses.items():
             if mes_str.upper().startswith(key): return f"{int(d):02d}/{value}/{y}"
 
-    # 5. Fallback numérico general (DD/MM/YYYY)
+    # 5. Formato suelto con espacios (último recurso)
+    m_suelto = re.search(r"\b(0[1-9]|[12]\d|3[01])\s+(0[1-9]|1[0-2])\s+(20[2-3]\d)\b", texto)
+    if m_suelto:
+        d, m, y = m_suelto.groups()
+        return f"{int(d):02d}/{int(m):02d}/{y}"
+
+    # 6. Fallback numérico general (DD/MM/YYYY)
     num_matches = re.finditer(r"\b(\d{1,4})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(\d{1,4})\b", texto)
     for m_num in num_matches:
         p1, p2, p3 = m_num.groups()
@@ -325,6 +336,7 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                         if clean_name and es_comercial: nom_prov = clean_name; break
                         elif clean_name and nom_prov == "⚠️ PROVEEDOR NUEVO": nom_prov = clean_name
 
+            # --- LA REGLA DE LA CÚSPIDE ---
             if nom_prov == "⚠️ PROVEEDOR NUEVO" or "ELECTRÓNICO" in nom_prov:
                 lineas_top = texto_emisor.split('\n')[:10]
                 for L in lineas_top:
