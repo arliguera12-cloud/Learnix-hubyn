@@ -11,12 +11,10 @@ if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
 def cargar_clientes():
     archivo = "data/clientes.json"
     db_segura = {}
-    
     if os.path.exists(archivo):
         try:
             with open(archivo, "r", encoding="utf-8") as f: 
                 raw_db = json.load(f)
-                # Filtro de seguridad: Reconstruye el JSON viejo al formato nuevo
                 for key, val in raw_db.items():
                     if isinstance(val, dict):
                         db_segura[key] = val
@@ -25,7 +23,6 @@ def cargar_clientes():
                 if db_segura: return db_segura
         except: pass
     
-    # Fallback si está vacío
     return {
         "00000000000000": {"nombre": "ENTRENO (Modo Pruebas)", "nit": "00000000000000", "dui": ""},
         "06141234567890": {"nombre": "FARMACIA SAN NICOLÁS S.A DE C.V.", "nit": "06141234567890", "dui": ""},
@@ -34,6 +31,15 @@ def cargar_clientes():
 
 clientes_db = cargar_clientes()
 lista_opciones = ["Selecciona una empresa..."] + [f"{datos.get('nombre', 'Sin Nombre')} (NIT: {nit})" for nit, datos in clientes_db.items()]
+
+# --- LÓGICA DE MEMORIA PARA EL SELECTOR ---
+index_defecto = 0
+if "cliente_activo" in st.session_state and st.session_state.cliente_activo:
+    nit_memoria = st.session_state.cliente_activo.get("nit", "")
+    for i, opcion in enumerate(lista_opciones):
+        if f"NIT: {nit_memoria}" in opcion:
+            index_defecto = i
+            break
 
 # --- DISEÑO DEL HUB ---
 usuario = st.session_state.get("usuario_actual", "Contador").upper()
@@ -44,14 +50,13 @@ st.markdown("<p style='text-align: center; color: #888888; font-size: 16px;'>Sel
 # --- SELECTOR DE ESPACIO DE TRABAJO ---
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
-    cliente_seleccionado = st.selectbox("🏢 Cliente Activo:", options=lista_opciones, label_visibility="collapsed")
+    # Ahora le pasamos el "index_defecto" para que no se reinicie
+    cliente_seleccionado = st.selectbox("🏢 Cliente Activo:", options=lista_opciones, index=index_defecto, label_visibility="collapsed")
     
     if cliente_seleccionado != "Selecciona una empresa...":
         nit_seleccionado = cliente_seleccionado.split("NIT: ")[1].replace(")", "")
         datos_crudos = clientes_db[nit_seleccionado]
         
-        # --- PARCHE AL KEYERROR ---
-        # Forzamos que siempre exista 'nit', 'nombre' y 'dui' en la memoria
         cliente_seguro = {
             "nombre": datos_crudos.get("nombre", "Cliente Desconocido"),
             "nit": datos_crudos.get("nit", nit_seleccionado), 
@@ -66,6 +71,7 @@ with col2:
         </div>
         """, unsafe_allow_html=True)
     else:
+        st.session_state.cliente_activo = None
         st.markdown("""
         <div style="background-color: #1a1a1a; border: 1px solid #333; padding: 10px; border-radius: 5px; color: #888; text-align: center; font-size: 14px;">
             👆 Por favor, selecciona una empresa de tu portafolio.
@@ -74,7 +80,7 @@ with col2:
 
 st.divider()
 
-# --- CSS PARA LAS TARJETAS ---
+# --- CSS Y ESTRUCTURA DE TARJETAS ---
 css = """
 <style>
 .grid-container {
@@ -99,28 +105,13 @@ css = """
 .card.compras:hover { border-color: #00E5FF; }
 .card.retenciones:hover { border-color: #8C52FF; }
 .card.sujetos:hover { border-color: #666D57; }
-
-.card-icon {
-    font-size: 40px;
-    margin-bottom: 15px;
-}
-.card-title {
-    color: #FFFFFF;
-    font-size: 18px;
-    font-weight: bold;
-    margin-bottom: 10px;
-    letter-spacing: 0.5px;
-}
-.card-desc {
-    color: #888888;
-    font-size: 14px;
-    line-height: 1.5;
-}
+.card-icon { font-size: 40px; margin-bottom: 15px; }
+.card-title { color: #FFFFFF; font-size: 18px; font-weight: bold; margin-bottom: 10px; letter-spacing: 0.5px; }
+.card-desc { color: #888888; font-size: 14px; line-height: 1.5; }
 </style>
 """
 st.markdown(css, unsafe_allow_html=True)
 
-# --- ESTRUCTURA HTML DE TARJETAS ---
 html_tarjetas = """
 <div class="grid-container">
 <div class="card ventas">
