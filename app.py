@@ -116,6 +116,10 @@ def mostrar_registro_login():
 if not st.session_state["autenticado"]:
     mostrar_registro_login()
 else:
+    # --- LA CONEXIÓN DEL NUEVO DASHBOARD ---
+    # default=True hace que esta sea la pantalla de aterrizaje oficial
+    page_inicio = st.Page("pages/0_Dashboard_Inicio.py", title="Dashboard Hub", icon="🏠", default=True)
+
     # Definición de rutas EXACTAS según tu carpeta 'pages'
     page_ventas = st.Page("pages/1_Extractor_DTE_Ventas.py", title="Extractor DTE Ventas", icon="📈")
     page_compras = st.Page("pages/2_Extractor_DTE_Compras.py", title="Extractor DTE Compras", icon="🛒")
@@ -127,6 +131,9 @@ else:
     
     # Menú lateral organizado por categorías
     nav = st.navigation({
+        "🚀 Inicio": [
+            page_inicio
+        ],
         "⚙️ Módulos de Procesamiento": [
             page_ventas, 
             page_compras,
