@@ -22,34 +22,14 @@ st.markdown(estilo_custom, unsafe_allow_html=True)
 
 ARCHIVO_PROVEEDORES = "data/proveedores.json"
 
-# Proveedores base para iniciar la base de datos
-PROVEEDORES_INICIALES = {
-    "06141603991030": "PRICESMART EL SALVADOR, S.A. DE C.V.",
-    "06142810921030": "SERVICIOS FINANCIEROS, S.A. DE C.V.",
-    "06142108061015": "MAK MEATS, S.A. DE C.V.",
-    "06141512201045": "DELIVERY HERO EL SALVADOR (PEDIDOSYA)",
-    "06141905991030": "UNIGAS DE EL SALVADOR, S.A DE C.V.",
-    "06142904720020": "TIENDA MORENA S.A DE C.V.",
-    "06143008161116": "MARZAURI, S.A. DE C.V. (PUERTO PLAZA)",
-    "06142609111020": "DISTRIBUIDORA AXBEN, S.A. DE C.V.",
-    "05092506721016": "PEDRO RAMIREZ RAMIREZ",
-    "05090706851019": "FRANCISCO MELARA (LACTEOS CARMENCITA)",
-    "06142101881394": "KARLA GUADALUPE VASQUEZ HERNANDEZ",
-    "06142308031030": "PAPELERA SALVADOREÑA RZ, S.A. DE C.V.",
-    "05092209761017": "ROBERTO CARLOS BOLAÑOS BONILLA",
-    "06141101690011": "CALLEJA, S.A. DE C.V. (SUPER SELECTOS)",
-    "06142704071095": "BELCA EL SALVADOR, S.A. DE C.V.",
-    "06140607101084": "DISTRIBUCION SALVADOREÑA, S.A. DE C.V.",
-    "06141503071023": "GRUHERCA SA DE CV",
-    "06140902840024": "LACTEOS DEL CORRAL, S.A. DE C.V."
-}
-
 def cargar_proveedores():
-    if not os.path.exists("data"): os.makedirs("data")
+    if not os.path.exists("data"): 
+        os.makedirs("data")
     if not os.path.exists(ARCHIVO_PROVEEDORES):
+        # Si no existe, crea un archivo vacío
         with open(ARCHIVO_PROVEEDORES, "w", encoding="utf-8") as f:
-            json.dump(PROVEEDORES_INICIALES, f, indent=4, ensure_ascii=False)
-        return PROVEEDORES_INICIALES.copy()
+            json.dump({}, f, indent=4, ensure_ascii=False)
+        return {}
     
     with open(ARCHIVO_PROVEEDORES, "r", encoding="utf-8") as f:
         try: return json.load(f)
@@ -69,8 +49,10 @@ st.title("🏢 Directorio de Proveedores")
 st.write("Base de datos maestra (Vendor Master Data). Los extractores usarán esta lista para bautizar automáticamente a los proveedores usando su NIT.")
 st.divider()
 
-tab1, tab2 = st.tabs(["➕ Agregar / Actualizar", "📋 Ver Base de Datos"])
+# --- NUEVA ESTRUCTURA DE 3 PESTAÑAS ---
+tab1, tab2, tab3 = st.tabs(["➕ Agregar / Actualizar", "📋 Ver Base de Datos", "🚀 Carga Masiva (Excel/CSV)"])
 
+# PESTAÑA 1: AGREGAR MANUAL
 with tab1:
     with st.form("form_proveedor", clear_on_submit=True):
         col1, col2 = st.columns(2)
@@ -90,11 +72,12 @@ with tab1:
                 time.sleep(1)
                 st.rerun()
 
+# PESTAÑA 2: VER Y ELIMINAR
 with tab2:
     if db_proveedores:
         df_prov = pd.DataFrame(list(db_proveedores.items()), columns=["NIT / DUI", "Nombre Registrado"])
-        # REEMPLAZO APLICADO AQUÍ
-        st.dataframe(df_prov, width="stretch", hide_index=True)
+        # Usamos use_container_width para que se estire correctamente en Streamlit
+        st.dataframe(df_prov, use_container_width=True, hide_index=True)
         
         st.write("---")
         st.markdown("#### 🗑️ Eliminar Proveedor")
@@ -106,4 +89,48 @@ with tab2:
             time.sleep(1)
             st.rerun()
     else:
-        st.info("No hay proveedores.")
+        st.info("No hay proveedores registrados.")
+
+# PESTAÑA 3: CARGA MASIVA (NUEVO)
+with tab3:
+    st.subheader("Subir Catálogo Completo desde tu Despacho")
+    st.write("Sube un archivo **Excel** o **CSV**. El sistema extraerá los NITs y los guardará para que la IA sea más rápida.")
+    archivo_subido = st.file_uploader("Selecciona tu archivo", type=["xlsx", "csv"])
+    
+    if archivo_subido:
+        try:
+            if archivo_subido.name.endswith('.csv'): 
+                df_import = pd.read_csv(archivo_subido)
+            else: 
+                df_import = pd.read_excel(archivo_subido)
+            
+            st.write("Vista previa del documento:")
+            st.dataframe(df_import.head(), use_container_width=True)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                col_nits = st.selectbox("¿Qué columna tiene los NITs?", df_import.columns)
+            with col2:
+                col_noms = st.selectbox("¿Qué columna tiene los Nombres Comerciales?", df_import.columns)
+            
+            if st.button("🚀 Inyectar al Cerebro Central", type="primary"):
+                nuevos_agregados = 0
+                for index, row in df_import.iterrows():
+                    nit_raw = str(row[col_nits])
+                    nom_raw = str(row[col_noms])
+                    
+                    if pd.isna(row[col_nits]) or pd.isna(row[col_noms]): 
+                        continue
+                        
+                    nit_cln = limpiar_numero(nit_raw)
+                    if nit_cln and nom_raw and nom_raw.lower() != "nan":
+                        db_proveedores[nit_cln] = nom_raw.strip().upper()
+                        nuevos_agregados += 1
+                
+                guardar_proveedores(db_proveedores)
+                st.success(f"🎉 ¡Éxito! Se inyectaron/actualizaron {nuevos_agregados} proveedores. La IA ahora los reconocerá al instante.")
+                time.sleep(2)
+                st.rerun()
+                
+        except Exception as e:
+            st.error(f"Ocurrió un error al leer el archivo: {e}")
