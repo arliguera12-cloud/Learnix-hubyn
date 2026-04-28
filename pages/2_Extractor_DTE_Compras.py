@@ -355,10 +355,23 @@ if st.session_state.cola_revision:
     col_img, col_form = st.columns([1.5, 1]) # Columnas más anchas para el PDF
     
     with col_img:
-        # --- NUEVO VISOR DE PDF iFRAME ---
-        base64_pdf = base64.b64encode(item_actual["bytes"]).decode('utf-8')
-        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}#toolbar=1&navpanes=0&scrollbar=1" width="100%" height="600px" type="application/pdf"></iframe>'
-        st.markdown(pdf_display, unsafe_allow_html=True)
+        try:
+            with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
+                # 1. Mostramos la imagen nítida (A prueba de bloqueos de Chrome)
+                img = pdf.pages[0].to_image(resolution=300).original
+                st.image(img, caption=f"📄 Vista Previa: {item_actual['archivo']}", use_container_width=True)
+                
+                # 2. Extraemos el texto crudo para que el contador pueda COPIAR y PEGAR
+                texto_crudo = ""
+                for page in pdf.pages:
+                    texto_crudo += (page.extract_text(layout=False) or "") + "\n"
+                
+                st.markdown("📝 **Texto extraído (Selecciona y copia lo que necesites):**")
+                # Esta caja permite seleccionar texto libremente
+                st.text_area("Texto de la factura", value=texto_crudo.strip(), height=200, label_visibility="collapsed")
+                
+        except Exception as e:
+            st.error("No se pudo cargar la vista previa de la imagen.")
             
     with col_form:
         st.markdown("### ✍️ Corrección Rápida")
