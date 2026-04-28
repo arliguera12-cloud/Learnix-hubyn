@@ -6,6 +6,7 @@ import time
 import pytesseract
 import json
 import os
+import gc # <-- NUEVO: Recolector de Basura para la Memoria RAM
 from io import BytesIO
 import platform
 
@@ -48,17 +49,6 @@ estilo_custom = """
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
-
-PROVEEDORES_RESPALDO = {
-    "06141603991030": "PRICESMART EL SALVADOR, S.A. DE C.V.",
-    "06142810921030": "SERVICIOS FINANCIEROS, S.A. DE C.V.",
-    "06141101690011": "CALLEJA, S.A. DE C.V. (SUPER SELECTOS)",
-    "06142307091063": "CENTROAMERICA COMERCIAL S.A. DE C.V. (DOLLARCITY)",
-    "06142212650014": "FARMACIA SAN NICOLAS S.A DE C.V.",
-    "0614167951013": "DISTRIBUIDORA DE ELECTRICIDAD DEL SUR, S.A DE C.V. (DELSUR)",
-    "06142008011037": "COMERCIALIZADORA INTERAMERICANA S.A. DE C.V. (CBC/PEPSI)",
-    "96422206810012": "TROPIGAS DE EL SALVADOR, S.A."
-}
 
 def cargar_proveedores_json():
     archivo = "data/proveedores.json"
@@ -236,13 +226,12 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         if not nits_encontrados: nits_encontrados = re.findall(patron_identificadores, texto_completo)
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
 
+        # --- CONEXIÓN AL CEREBRO CENTRAL ---
         proveedores_json = cargar_proveedores_json()
 
         for n in nits_limpios:
             if n in proveedores_json:
                 nit_prov = n; nom_prov = proveedores_json[n]; es_nuevo = False; break
-            elif n in PROVEEDORES_RESPALDO:
-                nit_prov = n; nom_prov = PROVEEDORES_RESPALDO[n]; es_nuevo = False; break
 
         if not nit_prov:
             m_emisor = re.search(r"EMISOR[\s\S]{1,250}?(?:NIT|N\s*I\s*T|N\.I\.T)[^\d]*([\d\-\s]{9,17})", texto_emisor, re.I)
@@ -415,7 +404,6 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# INICIALIZACIÓN DE VARIABLES GLOBALES (INCLUYENDO COLA HITL)
 if 'cola_revision' not in st.session_state: st.session_state.cola_revision = []
 if 'comp_uploader_key' not in st.session_state: st.session_state.comp_uploader_key = str(time.time())
 if 'db_compras' not in st.session_state: st.session_state.db_compras = pd.DataFrame()
@@ -426,7 +414,7 @@ with st.sidebar:
     st.header("Carga de Compras")
     archivos = st.file_uploader("Arrastra facturas de proveedores (PDF)", type="pdf", accept_multiple_files=True, key=st.session_state.comp_uploader_key)
     
-    if archivos and st.button("🚀 Procesar Compras", type="primary", width="stretch"):
+    if archivos and st.button("🚀 Procesar Compras", type="primary", use_container_width=True):
         extracted, duplicados, iva_calculado_files, intrusos, invalidos = [], [], [], [], []
         nuevos_proveedores = {}
         nuevos_archivos = [f for f in archivos if f.name not in st.session_state.archivos_comp]
@@ -437,6 +425,10 @@ with st.sidebar:
                 t_inicio, total = time.time(), len(nuevos_archivos)
                 
                 for idx, f in enumerate(nuevos_archivos):
+                    # --- RECOLECTOR DE BASURA (Evita el Network Error por falta de RAM) ---
+                    if idx > 0 and idx % 50 == 0:
+                        gc.collect()
+
                     if idx > 0:
                         m, s = divmod(int(((time.time() - t_inicio) / idx) * (total - idx)), 60)
                         txt_progreso.markdown(f"📄 **Procesando:** {idx+1} de {total}<br>⏳ **Restante:** {m:02d}:{s:02d}", unsafe_allow_html=True)
@@ -463,8 +455,6 @@ with st.sidebar:
                         fecha_str = str(res.get('fecha', '')).strip()
                         nom_prov_str = str(res.get('nom_prov', '')).strip()
                         
-                        # --- MAGIA HITL: DETECCIÓN DE FACTURAS REBELDES ---
-                        # Si falta Fecha, Control, Total o el Nombre está vacío/desconocido, va a revisión.
                         if res.get('tot', 0.0) == 0.0 or not res.get('gen') or not fecha_str or nom_prov_str == "ESCRIBE EL NOMBRE AQUÍ" or nom_prov_str == "": 
                             st.session_state.cola_revision.append({
                                 "archivo": f.name,
@@ -472,7 +462,6 @@ with st.sidebar:
                                 "datos": res
                             })
                         else:
-                            # Si está perfecta, va directo al Excel
                             if res.get('iva_calc'): iva_calculado_files.append(f.name)
                             if res.get("es_nuevo") and res.get("nit_nuevo"): nuevos_proveedores[res["nit_nuevo"]] = res["nom_prov"]
                             res["archivo"] = f.name
@@ -497,45 +486,41 @@ with st.sidebar:
                 else: st.session_state.db_compras = pd.concat([st.session_state.db_compras, new_df], ignore_index=True)
 
     st.divider()
-    if st.button("🧹 Limpiar Memoria Compras", type="secondary", width="stretch"):
+    if st.button("🧹 Limpiar Memoria Compras", type="secondary", use_container_width=True):
         for key in ['db_compras', 'archivos_comp', 'reporte_compras', 'cola_revision']:
             if key in st.session_state: del st.session_state[key]
         st.session_state.comp_uploader_key = str(time.time()); st.rerun()
 
-# --- 🚨 MÓDULO HITL (HUMAN-IN-THE-LOOP) 🚨 ---
-# Si hay facturas en la cola, secuestramos la pantalla hasta que el humano las resuelva.
+# --- 🚨 MÓDULO HITL (HUMAN-IN-THE-LOOP) MEJORADO 🚨 ---
 if st.session_state.cola_revision:
     st.markdown("""
     <div class="inbox-revision">
         <h3 style="margin-top:0px; color:#ffaa00;">📥 Bandeja de Revisión Manual</h3>
-        <p style="color:#aaa; margin-bottom:0px;">La Inteligencia Artificial encontró datos borrosos o incompletos. Por favor, ayúdala a rellenar los campos vacíos mirando la factura original.</p>
+        <p style="color:#aaa; margin-bottom:0px;">La Inteligencia Artificial encontró datos borrosos o incompletos. Ayúdala a rellenar los campos vacíos.</p>
     </div>
     """, unsafe_allow_html=True)
     
     total_cola = len(st.session_state.cola_revision)
     st.info(f"Quedan **{total_cola}** documento(s) por revisar.")
     
-    # Extraemos solo el primero de la fila
     item_actual = st.session_state.cola_revision[0]
     datos_actuales = item_actual["datos"]
     
-    # Diseño de doble columna (Foto a la izq, Formulario a la der)
     col_img, col_form = st.columns([1.2, 1])
     
     with col_img:
         try:
             with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
-                # Mostramos la primera página del PDF defectuoso para que el humano la vea
-                img = pdf.pages[0].to_image(resolution=150).original
-                st.image(img, caption=f"📄 Vista Previa: {item_actual['archivo']}", use_container_width=True)
+                # --- ACTUALIZACIÓN A 300 DPI Y ZOOM ---
+                img = pdf.pages[0].to_image(resolution=300).original
+                st.markdown("🔍 *Pasa el cursor sobre la imagen y haz clic en el botón de flechas arriba a la derecha para verla en pantalla completa y hacer Zoom.*")
+                st.image(img, caption=f"📄 Vista Previa (Alta Resolución): {item_actual['archivo']}", use_container_width=True)
         except Exception as e:
             st.error("No se pudo cargar la vista previa del PDF.")
             
     with col_form:
         st.markdown("### ✍️ Corrección Rápida")
         with st.form(key=f"form_revision_{item_actual['archivo']}"):
-            
-            # Ponemos los datos que la IA SÍ encontró, y dejamos vacíos los que fallaron
             f_fecha = st.text_input("📅 Fecha de Emisión (DD/MM/YYYY) *", value=datos_actuales.get("fecha", ""))
             f_gen = st.text_input("🔑 Código de Generación (UUID) *", value=datos_actuales.get("gen", ""))
             
@@ -549,7 +534,6 @@ if st.session_state.cola_revision:
             c_btn1, c_btn2 = st.columns(2)
             
             with c_btn1:
-                # Si le da Guardar, actualizamos el JSON e inyectamos al DataFrame oficial
                 if st.form_submit_button("✅ Aprobar y Guardar", type="primary", use_container_width=True):
                     if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
                         st.error("Por favor rellena todos los campos con (*) para continuar.")
@@ -559,7 +543,6 @@ if st.session_state.cola_revision:
                         datos_actuales["nom_prov"] = f_nom.upper()
                         datos_actuales["tot"] = f_tot
                         
-                        # Si el total fue manual, autocalculamos el IVA
                         if f_tot > 0 and datos_actuales["iva"] == 0:
                             datos_actuales["gra"] = round(f_tot / 1.13, 2)
                             datos_actuales["iva"] = round(f_tot - datos_actuales["gra"], 2)
@@ -571,20 +554,17 @@ if st.session_state.cola_revision:
                         if st.session_state.db_compras.empty: st.session_state.db_compras = nuevo_df
                         else: st.session_state.db_compras = pd.concat([st.session_state.db_compras, nuevo_df], ignore_index=True)
                         
-                        st.session_state.cola_revision.pop(0) # Lo sacamos de la cola
-                        st.rerun() # Recargamos para mostrar el siguiente
+                        st.session_state.cola_revision.pop(0)
+                        st.rerun()
                         
             with c_btn2:
-                # Si la factura es ilegible, simplemente la tira a la basura y sigue con la otra
                 if st.form_submit_button("🗑️ Descartar Archivo", use_container_width=True):
                     st.session_state.cola_revision.pop(0)
                     st.rerun()
                     
-    # Congelamos la ejecución aquí. El usuario NO puede ver las tablas finales 
-    # ni exportar a Excel hasta que su Bandeja de Revisión esté en cero.
     st.stop() 
 
-# --- DASHBOARD DE RESULTADOS (Solo se muestra cuando la Bandeja HITL está vacía) ---
+# --- DASHBOARD DE RESULTADOS ---
 if st.session_state.reporte_compras:
     rep = st.session_state.reporte_compras
     st.markdown("### 📋 Alertas de Procesamiento Automático")
@@ -683,11 +663,11 @@ if not st.session_state.db_compras.empty:
         df_hacienda["T. Tipo Costo/Gasto"] = "1"
         df_hacienda["U. Num Anexo"] = "3"
 
-        st.dataframe(df_hacienda.style.format({col: "{:.2f}" for col in df_hacienda.columns[6:15]}), hide_index=True, width="stretch")
+        st.dataframe(df_hacienda.style.format({col: "{:.2f}" for col in df_hacienda.columns[6:15]}), hide_index=True, use_container_width=True)
         
         if st.button("📥 Generar Excel para Hacienda (Resultados Filtrados)", type="primary"): 
             ventana_descarga_compras(df_hacienda, "F07_Compras_Proveedores.xlsx")
             
     with tab2:
         st.write(f"📊 Registros listos: **{len(df_filtrado)}** de **{len(df)}** procesados.")
-        st.dataframe(df_filtrado, width="stretch")
+        st.dataframe(df_filtrado, use_container_width=True)
