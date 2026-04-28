@@ -6,7 +6,8 @@ import time
 import pytesseract
 import json
 import os
-import gc # <-- NUEVO: Recolector de Basura para la Memoria RAM
+import gc
+import base64
 from io import BytesIO
 import platform
 
@@ -88,7 +89,6 @@ def to_excel_hacienda_compras(df):
 def limpiar_monto(monto_str):
     monto_str = re.sub(r'[^\d.,]', '', str(monto_str))
     if not monto_str: return 0.0
-
     m_sep = re.search(r'([.,])(\d{1,2})$', monto_str)
     if m_sep:
         decimales = m_sep.group(2)
@@ -100,50 +100,11 @@ def limpiar_monto(monto_str):
 
 def extraer_y_formatear_fecha(texto):
     m_expl = re.search(r"(?:FECHA\s*DE\s*EMISI[OÓ]N|FECHA\s*DE\s*GENERACI[OÓ]N|FECHA)[^\d]*(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})", texto, re.I)
-    if m_expl:
-        d, m, y = m_expl.groups()
-        return f"{int(d):02d}/{int(m):02d}/{y}"
-
-    m_vertical = re.search(r"D[IÍ]A[^\d]*(\d{1,2})[^\d]*MES[^\d]*(\d{1,2})[^\d]*A[ÑN]O[^\d]*(20[2-3]\d)", texto, re.I)
-    if m_vertical:
-        d, m, y = m_vertical.groups()
-        if int(m) <= 12 and int(d) <= 31: return f"{int(d):02d}/{int(m):02d}/{y}"
-        
-    m_horizontal = re.search(r"A[ÑN]O[\s\S]{0,20}?(\d{1,2})[\s\-\|\_]+(\d{1,2})[\s\-\|\_]+(20[2-3]\d)", texto, re.I)
-    if m_horizontal:
-        d, m, y = m_horizontal.groups()
-        if int(m) <= 12 and int(d) <= 31: return f"{int(d):02d}/{int(m):02d}/{y}"
-
+    if m_expl: return f"{int(m_expl.group(1)):02d}/{int(m_expl.group(2)):02d}/{m_expl.group(3)}"
     m_hacienda = re.search(r"\b(20[2-3]\d)\s*[\-\/]\s*(0[1-9]|1[0-2])\s*[\-\/]\s*([0-2]\d|3[0-1])\b", texto)
-    if m_hacienda:
-        y, m, d = m_hacienda.groups()
-        return f"{int(d):02d}/{int(m):02d}/{y}"
-
-    meses = {'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06', 'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'}
-    alfa_matches = re.finditer(r"\b(\d{1,2})\s*(?:de\s*|/|-)?\s*([a-zA-Z]{3,})\s*(?:de\s*|/|-)?\s*(\d{4})\b", texto, re.I)
-    for m_alfa in alfa_matches:
-        d, mes_str, y = m_alfa.groups()
-        if int(y) < 2023: continue 
-        for key, value in meses.items():
-            if mes_str.upper().startswith(key): return f"{int(d):02d}/{value}/{y}"
-
-    m_suelto = re.search(r"\b(0[1-9]|[12]\d|3[01])\s+(0[1-9]|1[0-2])\s+(20[2-3]\d)\b", texto)
-    if m_suelto:
-        d, m, y = m_suelto.groups()
-        return f"{int(d):02d}/{int(m):02d}/{y}"
-
-    num_matches = re.finditer(r"\b(\d{1,4})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(\d{1,4})\b", texto)
-    for m_num in num_matches:
-        p1, p2, p3 = m_num.groups()
-        if len(p1) == 4: y, m, d = p1, p2, p3
-        elif len(p3) == 4 or len(p3) == 2: 
-            d, m, y = p1, p2, p3
-            if len(y) == 2: y = f"20{y}"
-            if int(m) > 12 and int(d) <= 12: m, d = d, m
-        else: continue
-        if int(y) < 2023: continue 
-        if int(m) > 12 or int(d) > 31: continue 
-        return f"{int(d):02d}/{int(m):02d}/{y}"
+    if m_hacienda: return f"{int(m_hacienda.group(3)):02d}/{int(m_hacienda.group(2)):02d}/{m_hacienda.group(1)}"
+    m_suelto = re.search(r"\b(0[1-9]|[12]\d|3[01])\s*[\/\-\.]\s*(0[1-9]|1[0-2])\s*[\/\-\.]\s*(20[2-3]\d)\b", texto)
+    if m_suelto: return f"{int(m_suelto.group(1)):02d}/{int(m_suelto.group(2)):02d}/{m_suelto.group(3)}"
     return ""
 
 def extraer_compras_nativo_pro(file_bytes, cliente_activo):
@@ -152,13 +113,11 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         texto_completo = ""
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
-                texto_pagina = page.extract_text()
-                if not texto_pagina or len(texto_pagina.strip()) < 50:
-                    img = page.to_image(resolution=300)
-                    texto_pagina = pytesseract.image_to_string(img.original, lang='spa')
-                    motor = "ICR (OCR Básico)"
+                texto_pagina = page.extract_text(layout=False) # Layout false evita mezclar columnas en algunos casos
                 texto_completo += (texto_pagina or "") + "\n"
                 
+        if len(texto_completo.strip()) < 50: return {"error": "El PDF parece ser una imagen sin texto incrustado."}
+
         t_clean = re.sub(r'\s+', ' ', texto_completo)
         t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
 
@@ -175,216 +134,96 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
 
         nit_receptor_limpio = re.sub(r'[^0-9]', '', cliente_activo['nit'])
         dui_receptor_limpio = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
-        texto_solo_numeros = re.sub(r'[^0-9]', '', t_clean)
         
-        es_documento_valido = False
-        if nit_receptor_limpio == "00000000000000": es_documento_valido = True
-        elif len(nit_receptor_limpio) >= 9 and nit_receptor_limpio in texto_solo_numeros: es_documento_valido = True
-        elif len(dui_receptor_limpio) >= 8 and dui_receptor_limpio in texto_solo_numeros: es_documento_valido = True
-            
-        if not es_documento_valido: return {"error_intruso": f"Este documento no le pertenece al cliente activo."}
-
+        # --- NUEVA EXTRACCIÓN DE UUID AGRESIVA ---
         gen = ""
-        fecha = ""
-        
-        m_url_fecha = re.search(r"FECHAEMI[=%]([0-9]{4}-[0-9]{2}-[0-9]{2})", t_no_spaces)
-        if m_url_fecha:
-            f_parts = m_url_fecha.group(1).split('-')
-            fecha = f"{f_parts[2]}/{f_parts[1]}/{f_parts[0]}"
-            
         m_url_gen = re.search(r"CODGEN=([A-F0-9-]+)", t_no_spaces)
         if m_url_gen:
             gen = m_url_gen.group(1).upper()
+        else:
+            # Busca exactamente 32 caracteres hexadecimales, ignorando guiones intermedios
+            m_gen_raw = re.search(r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})", t_no_spaces)
+            if m_gen_raw:
+                limpio = m_gen_raw.group(1).replace("-", "")
+                gen = f"{limpio[:8]}-{limpio[8:12]}-{limpio[12:16]}-{limpio[16:20]}-{limpio[20:]}"
 
-        if not gen:
-            uuid_elastico = r"([A-F0-9]{8}\s*-?\s*[A-F0-9]{4}\s*-?\s*[A-F0-9]{4}\s*-?\s*[A-F0-9]{4}\s*-?\s*[A-F0-9]{12})"
-            gen_m = re.search(r"(?:C[OÓ]DIGO\s*DE\s*GENERACI[OÓ]N|GENERACI[OÓ]N)[^\w]*" + uuid_elastico, texto_completo, re.I)
-            if gen_m:
-                raw_gen = re.sub(r'[^A-F0-9]', '', gen_m.group(1).upper())
-                gen = f"{raw_gen[:8]}-{raw_gen[8:12]}-{raw_gen[12:16]}-{raw_gen[16:20]}-{raw_gen[20:]}"
-            else:
-                uuids = re.findall(uuid_elastico, t_clean, re.I)
-                for u in uuids:
-                    raw_u = re.sub(r'[^A-F0-9]', '', u.upper())
-                    if len(raw_u) == 32 and not re.search(r"SELLO.*?RECEPC.*?" + u[:8], t_clean, re.I):
-                        gen = f"{raw_u[:8]}-{raw_u[8:12]}-{raw_u[12:16]}-{raw_u[16:20]}-{raw_u[20:]}"
-                        break
+        fecha = extraer_y_formatear_fecha(t_clean)
 
-        if not fecha:
-            fecha = extraer_y_formatear_fecha(t_clean)
-
-        texto_emisor = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE|SOCIO/EMPRESA|SOCIO:)\b", texto_completo)[0]
-        if len(texto_emisor) < 50: texto_emisor = texto_completo
-
+        # --- SEPARACIÓN EMISOR/RECEPTOR MEJORADA ---
         nit_prov = ""
         dui_prov = ""
         nom_prov = "⚠️ PROVEEDOR NUEVO"
         es_nuevo = True
 
         patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
-        nits_encontrados = re.findall(patron_identificadores, texto_emisor)
-        if not nits_encontrados: nits_encontrados = re.findall(patron_identificadores, texto_completo)
+        nits_encontrados = re.findall(patron_identificadores, texto_completo)
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
 
-        # --- CONEXIÓN AL CEREBRO CENTRAL ---
+        # Eliminamos el NIT/DUI del receptor activo para que JAMÁS lo confunda con el proveedor
+        nits_candidatos = [n for n in nits_limpios if n != nit_receptor_limpio and n != dui_receptor_limpio]
+
         proveedores_json = cargar_proveedores_json()
 
-        for n in nits_limpios:
+        # 1. Buscar en el cerebro central primero
+        for n in nits_candidatos:
             if n in proveedores_json:
                 nit_prov = n; nom_prov = proveedores_json[n]; es_nuevo = False; break
 
-        if not nit_prov:
-            m_emisor = re.search(r"EMISOR[\s\S]{1,250}?(?:NIT|N\s*I\s*T|N\.I\.T)[^\d]*([\d\-\s]{9,17})", texto_emisor, re.I)
-            if m_emisor:
-                posible_nit = re.sub(r'[^0-9]', '', m_emisor.group(1))
-                if len(posible_nit) in [9, 14] and posible_nit != nit_receptor_limpio: nit_prov = posible_nit
-
-        if not nit_prov and nits_limpios:
-            if nit_receptor_limpio == "00000000000000": nit_prov = nits_limpios[0]
-            else:
-                for n in nits_limpios:
-                    if n != nit_receptor_limpio and n != dui_receptor_limpio: nit_prov = n; break
+        # 2. Si no lo conoce, agarra el primer NIT que no sea el cliente
+        if not nit_prov and nits_candidatos:
+            nit_prov = nits_candidatos[0]
 
         if len(nit_prov) == 9: dui_prov = nit_prov
 
         if es_nuevo and nit_prov:
-            nom_prov = "⚠️ PROVEEDOR NUEVO"
-            nombres_receptor = [n for n in cliente_activo['nombre'].split() if len(n) > 3]
-            
             palabras_basura = [
-                "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "ELECTRONICO", "REPRESENTACIÓN", "REPRESENTACION", "IMPRESA", "DTE",
-                "CREDITO", "CRÉDITO", "FISCAL", "RECEPTOR", "CLIENTE", "EMISOR", "FACTURA", "CONSUMIDOR", "FINAL",
-                "FACTURACION", "FACTURACIÓN", "COMPROBANTE", "RECEP", "DIRECC", "A QUIEN INTERESE", 
-                "NÚMERO DE CONTROL", "NUMERO DE CONTROL", "CÓDIGO", "SELLO", "VERSIÓ", "VERSIÓN", "TIPO DE", 
-                "TRANSMISIÓN", "TRANSMISION", "MODELO", "NÚM.", "NUM.", "INFORMACIÓN", "INFORMACION", 
-                "AQUI CONTENIDA", "AQUÍ CONTENIDA", "VÁLIDO", "VALIDO", "MINISTERIO", "HACIENDA", "PORTAL",
-                "COLONIA", "BOULEVARD", "BLVD", "CALLE", "AVENIDA", "RESIDENCIAL", "BARRIO", "EDIFICIO", "LOCAL", 
-                "KILOMETRO", "KM", "CARR.", "CARRETERA", "PANAMERICAN", "CENTRO COMERCIAL", "PLAZA", "DEPARTAMENTO", "MUNICIPIO",
-                "GIRO:", "GIRO", "TIPO ESTABLECIMIENTO", "ORDEN DE COMPRA", "TASA MUNICIPAL", "CARGO",
-                "CASA MATRIZ", "SUCURSAL", "AGENCIA", "PAGO DE", "CONCEPTO DE", "COMPAÑIA DE SEGUROS",
-                "PREVIO", "NORMAL", "ANULADO", "SUJETO EXCLUIDO", "EXCLUIDO",
-                "CAJERO", "TERMINAL", "EFECTIVO", "VUELTO", "CAMBIO", "CONTADO", "TARJETA", "VISA", "MASTERCARD", "CAJA", "VENTA",
-                "FECHA", "HORA", "EMISIÓN", "EMISION", "GENERACIÓN", "GENERACION", "AM", "PM",
-                "RESOLUCION", "RESOLUCIÓN", "AUTORIZACION", "AUTORIZACIÓN", "CORRELATIVO", "RANGO", "DEL", "AL",
-                "PAGINA", "PÁGINA", "WWW", "HTTP", ".COM", "EMAIL", "CORREO", "TELÉFONO", "TELEFONO", "CELULAR", "PBX", "FAX"
+                "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "ELECTRONICO", "REPRESENTACIÓN", "RECEPTOR", "CLIENTE", "EMISOR",
+                "FACTURA", "CONSUMIDOR", "FACTURACION", "COMPROBANTE", "DIRECC", "CÓDIGO", "SELLO", "VERSIÓN", 
+                "TRANSMISIÓN", "MODELO", "MINISTERIO", "HACIENDA", "COLONIA", "BOULEVARD", "CALLE", "AVENIDA", 
+                "MUNICIPIO", "GIRO:", "GIRO", "ACTIVIDAD", "ECONOMICA", "ECONÓMICA", "TIPO ESTABLECIMIENTO", 
+                "SUCURSAL", "AGENCIA", "PAGO DE", "TARJETA", "EFECTIVO", "FECHA", "HORA", "EMISIÓN", "GENERACIÓN", "TELÉFONO"
             ]
             
-            regex_nombres = r"(?:Nombre, denominaci[oó]n o raz[oó]n social|Nombre o raz[oó]n social|Raz[oó]n social|Nombre comercial|Nombre)\s*[:]?\s*([^\n]+)"
-            m_nombre_exacto = re.search(regex_nombres, texto_emisor, re.I)
-            
-            if m_nombre_exacto:
-                clean_name = m_nombre_exacto.group(1).strip()
-                clean_name = re.split(r'\s{4,}|NIT|NRC|Registro|Giro', clean_name, flags=re.I)[0].strip()
-                if clean_name and len(clean_name) > 3 and not any(b in clean_name.upper() for b in palabras_basura):
-                    nom_prov = clean_name.upper()
-            
-            if nom_prov == "⚠️ PROVEEDOR NUEVO":
-                lineas = texto_emisor.split('\n')
-                nit_line_idx = -1
-                for i, L in enumerate(lineas):
-                    if nit_prov in re.sub(r'[^0-9]', '', L):
-                        nit_line_idx = i; break
+            lineas = texto_completo.split('\n')
+            for L in lineas[:25]: # Buscar en las primeras líneas
+                L = L.strip().upper()
+                if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3: continue
+                if any(b in L for b in palabras_basura): continue
                 
-                start_idx = max(0, nit_line_idx - 4) if nit_line_idx != -1 else 0
-                end_idx = min(len(lineas), nit_line_idx + 5) if nit_line_idx != -1 else len(lineas)
-                
-                for i in range(start_idx, end_idx):
-                    L = lineas[i].strip().upper()
-                    if not L or len(L) < 5: continue
-                    if re.search(r"[A-F0-9]{8}-?[A-F0-9]{4}-?", L, re.I): continue
-                    if re.search(r"\d{2}/\d{2}/\d{4}|\d{2}:\d{2}:\d{2}", L): continue 
-                    if sum(c.isdigit() for c in L) / len(L) > 0.5: continue
-                    if any(b in L for b in palabras_basura) or any(n in L for n in nombres_receptor): continue
-                    
-                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "SEGUROS", "FARMACIA", "ASOCIACION", "GRUPO"])
-                    
-                    if re.search(r'[A-Z]{5,}', L) and "NIT:" not in L and "NRC:" not in L:
-                        clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
-                        if es_comercial and len(clean_name) < 25 and i > 0:
-                            prev_L = lineas[i-1].strip().upper()
-                            if len(prev_L) > 3 and not any(b in prev_L for b in palabras_basura) and not re.search(r"[A-F0-9]{8}-|\d{2}:\d{2}", prev_L):
-                                clean_name = f"{prev_L} {clean_name}"
-                        
-                        if clean_name and es_comercial: nom_prov = clean_name; break
-                        elif clean_name and nom_prov == "⚠️ PROVEEDOR NUEVO": nom_prov = clean_name
-
-            if nom_prov == "⚠️ PROVEEDOR NUEVO" or "ELECTRÓNICO" in nom_prov:
-                lineas_top = texto_emisor.split('\n')[:10]
-                for L in lineas_top:
-                    L = L.strip().upper()
-                    if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3 or any(b in L for b in palabras_basura): continue
+                es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO"])
+                if es_comercial or (len(L) > 10 and "NIT" not in L and "NRC" not in L):
                     clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
-                    if clean_name: nom_prov = clean_name; break
+                    if clean_name: 
+                        nom_prov = clean_name
+                        break
 
-            if nom_prov != "⚠️ PROVEEDOR NUEVO":
-                nom_prov = re.sub(r"^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$", "", nom_prov).strip()
-
-            if len(nom_prov) > 60 or nom_prov == "⚠️ PROVEEDOR NUEVO": 
+            if len(nom_prov) > 60 or nom_prov == "⚠️ PROVEEDOR NUEVO" or "ACTIVIDAD" in nom_prov: 
                 nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
-
-        nit_nuevo = nit_prov
 
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
         
-        m_ret = re.search(r"(?:Retenido|Retenci.n)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
-        if m_ret: ret = limpiar_monto(m_ret.group(1))
-        
-        m_perc = re.search(r"(?:Percibido|Percepci.n)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
-        if m_perc: perc = limpiar_monto(m_perc.group(1))
+        m_t = re.search(r"(?:Total a Pagar|Venta Total|Monto total|TOTAL|SUMA DE VENTAS)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
+        if m_t: t = limpiar_monto(m_t.group(1))
 
-        fovial, cotrans = 0.0, 0.0
-        m_fovial_line = re.search(r"Fovial.{0,60}", texto_completo, re.I)
-        if m_fovial_line:
-            nums = re.findall(r"\d+\.\d{2,4}", m_fovial_line.group(0))
-            if nums: fovial = max([float(n) for n in nums]) 
-            
-        m_cotrans_line = re.search(r"Cotrans.{0,60}", texto_completo, re.I)
-        if m_cotrans_line:
-            nums = re.findall(r"\d+\.\d{2,4}", m_cotrans_line.group(0))
-            if nums: cotrans = max([float(n) for n in nums])
-            
-        e = fovial + cotrans 
-
-        montos_brutos = re.findall(r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean)
-        valores = sorted(list(set([limpiar_monto(m) for m in montos_brutos])), reverse=True)
-        valores = [v for v in valores if v > 0] 
-        
-        encontrado = False
-        for val_t in valores:
-            if encontrado: break
-            for val_g in valores:
-                if val_g >= val_t: continue
-                for val_i in valores:
-                    if val_i >= val_g: continue
-                    if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
-                        if abs(round((val_g + val_i + e + perc - ret), 2) - round(val_t, 2)) <= 0.05:
-                            g, i, t = val_g, val_i, val_t
-                            encontrado = True
-                            break
-
-        if not encontrado:
-            m_g = re.search(r"(?:Suma Total de Operaciones|Sub-Total|Sub Total|Sumatoria de ventas|Ventas Gravadas|Subtotal-?)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
-            if m_g: g = limpiar_monto(m_g.group(1))
-            
+        if t > 0:
             m_i = re.search(r"(?:Impuesto.*Agregado|IVA|13% IVA|20-Impuesto|I\.V\.A)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
             if m_i: i = limpiar_monto(m_i.group(1))
-                
-            m_t = re.search(r"(?:Total a Pagar|Venta Total|Monto total|TOTAL|SUMA DE VENTAS)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
-            if m_t: t = limpiar_monto(m_t.group(1))
+            
+            m_ret = re.search(r"(?:Retenido|Retenci.n)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
+            if m_ret: ret = limpiar_monto(m_ret.group(1))
 
-            if t > 0 and i > 0 and (g == 0.0 or abs(round(g * 0.13, 2) - round(i, 2)) > 0.05):
-                g = round(t - i - e - perc + ret, 2)
-                
-            if t > 0 and i == 0.0 and tipo == "03":
-                g = round((t - e + ret - perc) / 1.13, 2)
-                i = round(t - e + ret - perc - g, 2)
+            if i == 0.0 and tipo == "03":
+                g = round(t / 1.13, 2)
+                i = round(t - g, 2)
                 iva_calculado = True
+            elif i > 0:
+                g = round(t - i + ret, 2)
 
         return {
             "fecha": fecha, "nit_prov": nit_prov, "dui_prov": dui_prov, "nom_prov": nom_prov, "tipo": tipo, "gen": gen, 
             "exe": e, "gra": g, "iva": i, "ret": ret, "perc": perc, "tot": t, "estado": "✅ OK", "iva_calc": iva_calculado,
-            "es_nuevo": es_nuevo, "nit_nuevo": nit_nuevo, "motor": motor
+            "es_nuevo": es_nuevo, "nit_nuevo": nit_prov, "motor": motor
         }
     except Exception as err: 
         return {"error": str(err)}
@@ -415,7 +254,7 @@ with st.sidebar:
     archivos = st.file_uploader("Arrastra facturas de proveedores (PDF)", type="pdf", accept_multiple_files=True, key=st.session_state.comp_uploader_key)
     
     if archivos and st.button("🚀 Procesar Compras", type="primary", use_container_width=True):
-        extracted, duplicados, iva_calculado_files, intrusos, invalidos = [], [], [], [], []
+        extracted, duplicados, iva_calculado_files, intrusos, invalidos, corruptos = [], [], [], [], [], []
         nuevos_proveedores = {}
         nuevos_archivos = [f for f in archivos if f.name not in st.session_state.archivos_comp]
 
@@ -425,9 +264,7 @@ with st.sidebar:
                 t_inicio, total = time.time(), len(nuevos_archivos)
                 
                 for idx, f in enumerate(nuevos_archivos):
-                    # --- RECOLECTOR DE BASURA (Evita el Network Error por falta de RAM) ---
-                    if idx > 0 and idx % 50 == 0:
-                        gc.collect()
+                    if idx > 0 and idx % 50 == 0: gc.collect()
 
                     if idx > 0:
                         m, s = divmod(int(((time.time() - t_inicio) / idx) * (total - idx)), 60)
@@ -436,6 +273,13 @@ with st.sidebar:
                         txt_progreso.markdown(f"📄 **Procesando:** 1 de {total}<br>⏳ Extrayendo datos...", unsafe_allow_html=True)
                     
                     file_bytes = f.read()
+                    
+                    # Verificación rápida de archivo PDF de 0 KB o dañado
+                    if len(file_bytes) < 1024:
+                        corruptos.append(f.name)
+                        st.session_state.archivos_comp.add(f.name)
+                        continue
+
                     res = extraer_compras_nativo_pro(file_bytes, cliente)
                     
                     codigo_gen = res.get('gen', '')
@@ -469,7 +313,8 @@ with st.sidebar:
                         
                         st.session_state.archivos_comp.add(f.name)
                     else:
-                        st.sidebar.error(f"❌ {res['error']} ({f.name})")
+                        corruptos.append(f.name)
+                        st.session_state.archivos_comp.add(f.name)
                         
                     bar.progress((idx + 1) / total)
                 
@@ -477,7 +322,8 @@ with st.sidebar:
             
             st.session_state.reporte_compras = {
                 "intrusos": intrusos, "invalidos": invalidos, "duplicados": duplicados, 
-                "iva_calc": iva_calculado_files, "nuevos_proveedores": nuevos_proveedores
+                "iva_calc": iva_calculado_files, "nuevos_proveedores": nuevos_proveedores,
+                "corruptos": corruptos
             }
             
             if extracted: 
@@ -491,12 +337,12 @@ with st.sidebar:
             if key in st.session_state: del st.session_state[key]
         st.session_state.comp_uploader_key = str(time.time()); st.rerun()
 
-# --- 🚨 MÓDULO HITL (HUMAN-IN-THE-LOOP) MEJORADO 🚨 ---
+# --- 🚨 MÓDULO HITL CON VISOR NATIVO Y MENTE COLMENA 🚨 ---
 if st.session_state.cola_revision:
     st.markdown("""
     <div class="inbox-revision">
         <h3 style="margin-top:0px; color:#ffaa00;">📥 Bandeja de Revisión Manual</h3>
-        <p style="color:#aaa; margin-bottom:0px;">La Inteligencia Artificial encontró datos borrosos o incompletos. Ayúdala a rellenar los campos vacíos.</p>
+        <p style="color:#aaa; margin-bottom:0px;">La Inteligencia Artificial encontró datos borrosos o incompletos. Selecciona el texto del PDF y pégalo aquí.</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -506,26 +352,22 @@ if st.session_state.cola_revision:
     item_actual = st.session_state.cola_revision[0]
     datos_actuales = item_actual["datos"]
     
-    col_img, col_form = st.columns([1.2, 1])
+    col_img, col_form = st.columns([1.5, 1]) # Columnas más anchas para el PDF
     
     with col_img:
-        try:
-            with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
-                # --- ACTUALIZACIÓN A 300 DPI Y ZOOM ---
-                img = pdf.pages[0].to_image(resolution=300).original
-                st.markdown("🔍 *Pasa el cursor sobre la imagen y haz clic en el botón de flechas arriba a la derecha para verla en pantalla completa y hacer Zoom.*")
-                st.image(img, caption=f"📄 Vista Previa (Alta Resolución): {item_actual['archivo']}", use_container_width=True)
-        except Exception as e:
-            st.error("No se pudo cargar la vista previa del PDF.")
+        # --- NUEVO VISOR DE PDF iFRAME ---
+        base64_pdf = base64.b64encode(item_actual["bytes"]).decode('utf-8')
+        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}#toolbar=1&navpanes=0&scrollbar=1" width="100%" height="600px" type="application/pdf"></iframe>'
+        st.markdown(pdf_display, unsafe_allow_html=True)
             
     with col_form:
         st.markdown("### ✍️ Corrección Rápida")
         with st.form(key=f"form_revision_{item_actual['archivo']}"):
-            f_fecha = st.text_input("📅 Fecha de Emisión (DD/MM/YYYY) *", value=datos_actuales.get("fecha", ""))
+            f_fecha = st.text_input("📅 Fecha (DD/MM/YYYY) *", value=datos_actuales.get("fecha", ""))
             f_gen = st.text_input("🔑 Código de Generación (UUID) *", value=datos_actuales.get("gen", ""))
             
             nom_sugerido = datos_actuales.get("nom_prov", "")
-            if nom_sugerido == "ESCRIBE EL NOMBRE AQUÍ": nom_sugerido = ""
+            if nom_sugerido == "ESCRIBE EL NOMBRE AQUÍ" or "ACTIVIDAD" in nom_sugerido: nom_sugerido = ""
             f_nom = st.text_input("🏢 Razón Social del Proveedor *", value=nom_sugerido)
             
             f_tot = st.number_input("💰 Total a Pagar ($) *", value=float(datos_actuales.get("tot", 0.0)), format="%.2f")
@@ -536,8 +378,18 @@ if st.session_state.cola_revision:
             with c_btn1:
                 if st.form_submit_button("✅ Aprobar y Guardar", type="primary", use_container_width=True):
                     if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
-                        st.error("Por favor rellena todos los campos con (*) para continuar.")
+                        st.error("Rellena todos los campos con (*) para continuar.")
                     else:
+                        # Guardar el nombre en el cerebro central si es nuevo
+                        nit_actual = datos_actuales.get("nit_prov", "")
+                        if nit_actual: guardar_proveedor_rapido(nit_actual, f_nom.upper())
+
+                        # --- LA MENTE COLMENA (Actualización en Cascada) ---
+                        if nit_actual:
+                            for i in range(1, len(st.session_state.cola_revision)):
+                                if st.session_state.cola_revision[i]["datos"].get("nit_prov") == nit_actual:
+                                    st.session_state.cola_revision[i]["datos"]["nom_prov"] = f_nom.upper()
+
                         datos_actuales["fecha"] = f_fecha
                         datos_actuales["gen"] = f_gen.upper()
                         datos_actuales["nom_prov"] = f_nom.upper()
@@ -568,21 +420,26 @@ if st.session_state.cola_revision:
 if st.session_state.reporte_compras:
     rep = st.session_state.reporte_compras
     st.markdown("### 📋 Alertas de Procesamiento Automático")
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
+        if rep.get("corruptos"):
+            st.error(f"💀 **{len(rep['corruptos'])} Dañados** (PDFs rotos).")
+            with st.expander("Ver lista"): st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["corruptos"]])}</div>', unsafe_allow_html=True)
+        else: st.success("✅ **0 Dañados**.")
+    with c2:
         if rep.get("intrusos"):
-            st.error(f"🚫 **{len(rep['intrusos'])} Ajenos** (DTE de otra empresa).")
+            st.error(f"🚫 **{len(rep['intrusos'])} Ajenos** (Otro NIT).")
             with st.expander("Ver lista"): st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["intrusos"]])}</div>', unsafe_allow_html=True)
         elif rep.get("invalidos"):
-            st.error(f"⚠️ **{len(rep['invalidos'])} Ignorados** (No son F-07).")
+            st.error(f"⚠️ **{len(rep['invalidos'])} Ignorados** (No F-07).")
             with st.expander("Ver lista"): st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["invalidos"]])}</div>', unsafe_allow_html=True)
         else: st.success("✅ **0 Rechazados**.")
-    with c2:
+    with c3:
         if rep["duplicados"]:
             st.error(f"🛑 **{len(rep['duplicados'])} Omitidos** (Duplicados).")
             with st.expander("Ver lista"): st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["duplicados"]])}</div>', unsafe_allow_html=True)
         else: st.success("✅ **0 Omitidos**.")
-    with c3:
+    with c4:
         if rep["iva_calc"]:
             st.info(f"🧮 **{len(rep['iva_calc'])} IVA Calc.** (Al 13%).")
             with st.expander("Ver lista"): st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["iva_calc"]])}</div>', unsafe_allow_html=True)
