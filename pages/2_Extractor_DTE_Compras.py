@@ -7,7 +7,6 @@ import pytesseract
 import json
 import os
 import gc
-import base64
 from io import BytesIO
 import platform
 
@@ -100,11 +99,21 @@ def limpiar_monto(monto_str):
 
 def extraer_y_formatear_fecha(texto):
     m_expl = re.search(r"(?:FECHA\s*DE\s*EMISI[OÓ]N|FECHA\s*DE\s*GENERACI[OÓ]N|FECHA)[^\d]*(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})", texto, re.I)
-    if m_expl: return f"{int(m_expl.group(1)):02d}/{int(m_expl.group(2)):02d}/{m_expl.group(3)}"
+    if m_expl: 
+        d, m, y = int(m_expl.group(1)), int(m_expl.group(2)), int(m_expl.group(3))
+        if d <= 12 and m > 12: d, m = m, d
+        if m <= 12: return f"{d:02d}/{m:02d}/{y}"
+
     m_hacienda = re.search(r"\b(20[2-3]\d)\s*[\-\/]\s*(0[1-9]|1[0-2])\s*[\-\/]\s*([0-2]\d|3[0-1])\b", texto)
     if m_hacienda: return f"{int(m_hacienda.group(3)):02d}/{int(m_hacienda.group(2)):02d}/{m_hacienda.group(1)}"
-    m_suelto = re.search(r"\b(0[1-9]|[12]\d|3[01])\s*[\/\-\.]\s*(0[1-9]|1[0-2])\s*[\/\-\.]\s*(20[2-3]\d)\b", texto)
-    if m_suelto: return f"{int(m_suelto.group(1)):02d}/{int(m_suelto.group(2)):02d}/{m_suelto.group(3)}"
+    
+    m_suelto = re.search(r"\b(0[1-9]|[12]\d|3[01])\s*[\/\-\.]\s*(0[1-9]|[12]\d|3[01])\s*[\/\-\.]\s*(20[2-3]\d)\b", texto)
+    if m_suelto: 
+        p1, p2, y = int(m_suelto.group(1)), int(m_suelto.group(2)), m_suelto.group(3)
+        if p1 <= 12 and p2 > 12: return f"{p2:02d}/{p1:02d}/{y}"
+        elif p2 <= 12 and p1 > 12: return f"{p1:02d}/{p2:02d}/{y}"
+        elif p2 <= 12 and p1 <= 31: return f"{p1:02d}/{p2:02d}/{y}"
+        
     return ""
 
 def extraer_compras_nativo_pro(file_bytes, cliente_activo):
@@ -113,7 +122,8 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         texto_completo = ""
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
-                texto_pagina = page.extract_text(layout=False) # Layout false evita mezclar columnas en algunos casos
+                # SE ELIMINÓ EL layout=False QUE DAÑABA LOS TOTALES
+                texto_pagina = page.extract_text() 
                 texto_completo += (texto_pagina or "") + "\n"
                 
         if len(texto_completo.strip()) < 50: return {"error": "El PDF parece ser una imagen sin texto incrustado."}
@@ -135,13 +145,11 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         nit_receptor_limpio = re.sub(r'[^0-9]', '', cliente_activo['nit'])
         dui_receptor_limpio = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
         
-        # --- NUEVA EXTRACCIÓN DE UUID AGRESIVA ---
         gen = ""
         m_url_gen = re.search(r"CODGEN=([A-F0-9-]+)", t_no_spaces)
         if m_url_gen:
             gen = m_url_gen.group(1).upper()
         else:
-            # Busca exactamente 32 caracteres hexadecimales, ignorando guiones intermedios
             m_gen_raw = re.search(r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})", t_no_spaces)
             if m_gen_raw:
                 limpio = m_gen_raw.group(1).replace("-", "")
@@ -149,7 +157,6 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
 
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        # --- SEPARACIÓN EMISOR/RECEPTOR MEJORADA ---
         nit_prov = ""
         dui_prov = ""
         nom_prov = "⚠️ PROVEEDOR NUEVO"
@@ -158,18 +165,14 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
         nits_encontrados = re.findall(patron_identificadores, texto_completo)
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
-
-        # Eliminamos el NIT/DUI del receptor activo para que JAMÁS lo confunda con el proveedor
         nits_candidatos = [n for n in nits_limpios if n != nit_receptor_limpio and n != dui_receptor_limpio]
 
         proveedores_json = cargar_proveedores_json()
 
-        # 1. Buscar en el cerebro central primero
         for n in nits_candidatos:
             if n in proveedores_json:
                 nit_prov = n; nom_prov = proveedores_json[n]; es_nuevo = False; break
 
-        # 2. Si no lo conoce, agarra el primer NIT que no sea el cliente
         if not nit_prov and nits_candidatos:
             nit_prov = nits_candidatos[0]
 
@@ -181,21 +184,29 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                 "FACTURA", "CONSUMIDOR", "FACTURACION", "COMPROBANTE", "DIRECC", "CÓDIGO", "SELLO", "VERSIÓN", 
                 "TRANSMISIÓN", "MODELO", "MINISTERIO", "HACIENDA", "COLONIA", "BOULEVARD", "CALLE", "AVENIDA", 
                 "MUNICIPIO", "GIRO:", "GIRO", "ACTIVIDAD", "ECONOMICA", "ECONÓMICA", "TIPO ESTABLECIMIENTO", 
-                "SUCURSAL", "AGENCIA", "PAGO DE", "TARJETA", "EFECTIVO", "FECHA", "HORA", "EMISIÓN", "GENERACIÓN", "TELÉFONO"
+                "SUCURSAL", "AGENCIA", "PAGO DE", "TARJETA", "EFECTIVO", "FECHA", "HORA", "EMISIÓN", "GENERACIÓN", "TELÉFONO", "NOMBRE:"
             ]
             
-            lineas = texto_completo.split('\n')
-            for L in lineas[:25]: # Buscar en las primeras líneas
-                L = L.strip().upper()
-                if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3: continue
-                if any(b in L for b in palabras_basura): continue
-                
-                es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO"])
-                if es_comercial or (len(L) > 10 and "NIT" not in L and "NRC" not in L):
-                    clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
-                    if clean_name: 
-                        nom_prov = clean_name
-                        break
+            regex_nombre_etiqueta = r"(?:Nombre[:\s]+|Nombre o raz[oó]n social[:\s]+|Raz[oó]n Social[:\s]+)(.*?)(?:NIT|NRC|Giro|Actividad|Direcci[oó]n|$)"
+            m_nombre_etiqueta = re.search(regex_nombre_etiqueta, t_clean, re.I)
+            if m_nombre_etiqueta:
+                candidato = m_nombre_etiqueta.group(1).strip()
+                if len(candidato) > 5 and not any(b in candidato.upper() for b in ["RECEPTOR", cliente_activo['nombre'].upper().split()[0]]):
+                    nom_prov = candidato.upper()
+            
+            if nom_prov == "⚠️ PROVEEDOR NUEVO":
+                lineas = texto_completo.split('\n')
+                for L in lineas[:30]: 
+                    L = L.strip().upper()
+                    if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3: continue
+                    if any(b in L for b in palabras_basura): continue
+                    
+                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO", "EUROPEAS"])
+                    if es_comercial or (len(L) > 10 and "NIT" not in L and "NRC" not in L):
+                        clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
+                        if clean_name and not any(n in clean_name for n in cliente_activo['nombre'].upper().split()[:2]): 
+                            nom_prov = clean_name
+                            break
 
             if len(nom_prov) > 60 or nom_prov == "⚠️ PROVEEDOR NUEVO" or "ACTIVIDAD" in nom_prov: 
                 nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
@@ -203,7 +214,8 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
         
-        m_t = re.search(r"(?:Total a Pagar|Venta Total|Monto total|TOTAL|SUMA DE VENTAS)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
+        # --- SE MEJORÓ EL RADAR DE TOTALES ---
+        m_t = re.search(r"(?:Total a Pagar|Venta Total|Monto total|TOTAL|SUMA DE VENTAS|Total.*operaci.n)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
         if m_t: t = limpiar_monto(m_t.group(1))
 
         if t > 0:
@@ -274,7 +286,6 @@ with st.sidebar:
                     
                     file_bytes = f.read()
                     
-                    # Verificación rápida de archivo PDF de 0 KB o dañado
                     if len(file_bytes) < 1024:
                         corruptos.append(f.name)
                         st.session_state.archivos_comp.add(f.name)
@@ -337,12 +348,12 @@ with st.sidebar:
             if key in st.session_state: del st.session_state[key]
         st.session_state.comp_uploader_key = str(time.time()); st.rerun()
 
-# --- 🚨 MÓDULO HITL CON VISOR NATIVO Y MENTE COLMENA 🚨 ---
+# --- 🚨 MÓDULO HITL (SPLIT-SCREEN + MENTE COLMENA) 🚨 ---
 if st.session_state.cola_revision:
     st.markdown("""
     <div class="inbox-revision">
         <h3 style="margin-top:0px; color:#ffaa00;">📥 Bandeja de Revisión Manual</h3>
-        <p style="color:#aaa; margin-bottom:0px;">La Inteligencia Artificial encontró datos borrosos o incompletos. Selecciona el texto del PDF y pégalo aquí.</p>
+        <p style="color:#aaa; margin-bottom:0px;">La Inteligencia Artificial encontró datos borrosos o incompletos. Selecciona el texto de la caja inferior y pégalo aquí.</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -352,26 +363,23 @@ if st.session_state.cola_revision:
     item_actual = st.session_state.cola_revision[0]
     datos_actuales = item_actual["datos"]
     
-    col_img, col_form = st.columns([1.5, 1]) # Columnas más anchas para el PDF
+    col_img, col_form = st.columns([1.2, 1])
     
     with col_img:
         try:
             with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
-                # 1. Mostramos la imagen nítida (A prueba de bloqueos de Chrome)
                 img = pdf.pages[0].to_image(resolution=300).original
                 st.image(img, caption=f"📄 Vista Previa: {item_actual['archivo']}", use_container_width=True)
                 
-                # 2. Extraemos el texto crudo para que el contador pueda COPIAR y PEGAR
                 texto_crudo = ""
                 for page in pdf.pages:
-                    texto_crudo += (page.extract_text(layout=False) or "") + "\n"
+                    texto_crudo += (page.extract_text() or "") + "\n"
                 
                 st.markdown("📝 **Texto extraído (Selecciona y copia lo que necesites):**")
-                # Esta caja permite seleccionar texto libremente
                 st.text_area("Texto de la factura", value=texto_crudo.strip(), height=200, label_visibility="collapsed")
                 
         except Exception as e:
-            st.error("No se pudo cargar la vista previa de la imagen.")
+            st.error("No se pudo cargar la vista previa.")
             
     with col_form:
         st.markdown("### ✍️ Corrección Rápida")
@@ -393,11 +401,9 @@ if st.session_state.cola_revision:
                     if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
                         st.error("Rellena todos los campos con (*) para continuar.")
                     else:
-                        # Guardar el nombre en el cerebro central si es nuevo
                         nit_actual = datos_actuales.get("nit_prov", "")
                         if nit_actual: guardar_proveedor_rapido(nit_actual, f_nom.upper())
 
-                        # --- LA MENTE COLMENA (Actualización en Cascada) ---
                         if nit_actual:
                             for i in range(1, len(st.session_state.cola_revision)):
                                 if st.session_state.cola_revision[i]["datos"].get("nit_prov") == nit_actual:
