@@ -98,35 +98,39 @@ def limpiar_monto(monto_str):
         return float(re.sub(r'[^\d]', '', monto_str))
 
 def extraer_y_formatear_fecha(texto):
-    m_expl = re.search(r"(?:FECHA\s*DE\s*EMISI[OÓ]N|FECHA\s*DE\s*GENERACI[OÓ]N|FECHA)[^\d]*(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})", texto, re.I)
-    if m_expl: 
-        d, m, y = int(m_expl.group(1)), int(m_expl.group(2)), int(m_expl.group(3))
-        if d <= 12 and m > 12: d, m = m, d
-        if m <= 12: return f"{d:02d}/{m:02d}/{y}"
-
-    m_hacienda = re.search(r"\b(20[2-3]\d)\s*[\-\/]\s*(0[1-9]|1[0-2])\s*[\-\/]\s*([0-2]\d|3[0-1])\b", texto)
+    # Detección agresiva para Fechas pegadas a la hora (Selectos)
+    m_hacienda = re.search(r"(20[2-3]\d)[\-\/](0[1-9]|1[0-2])[\-\/]([0-2]\d|3[0-1])", texto)
     if m_hacienda: return f"{int(m_hacienda.group(3)):02d}/{int(m_hacienda.group(2)):02d}/{m_hacienda.group(1)}"
     
-    m_suelto = re.search(r"\b(0[1-9]|[12]\d|3[01])\s*[\/\-\.]\s*(0[1-9]|[12]\d|3[01])\s*[\/\-\.]\s*(20[2-3]\d)\b", texto)
+    m_suelto = re.search(r"(0[1-9]|[12]\d|3[01])[\-\/](0[1-9]|1[0-2])[\-\/](20[2-3]\d)", texto)
     if m_suelto: 
         p1, p2, y = int(m_suelto.group(1)), int(m_suelto.group(2)), m_suelto.group(3)
         if p1 <= 12 and p2 > 12: return f"{p2:02d}/{p1:02d}/{y}"
         elif p2 <= 12 and p1 > 12: return f"{p1:02d}/{p2:02d}/{y}"
         elif p2 <= 12 and p1 <= 31: return f"{p1:02d}/{p2:02d}/{y}"
         
+    m_expl = re.search(r"(?:FECHA)[^\d]*(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})", texto, re.I)
+    if m_expl: 
+        d, m, y = int(m_expl.group(1)), int(m_expl.group(2)), int(m_expl.group(3))
+        if d <= 12 and m > 12: d, m = m, d
+        if m <= 12: return f"{d:02d}/{m:02d}/{y}"
+        
     return ""
 
 def extraer_compras_nativo_pro(file_bytes, cliente_activo):
     motor = "Nativo"
     try:
-        texto_completo = ""
+        texto_lineal = ""
+        texto_visual = ""
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
-                # SE ELIMINÓ EL layout=False QUE DAÑABA LOS TOTALES
-                texto_pagina = page.extract_text() 
-                texto_completo += (texto_pagina or "") + "\n"
+                # DOBLE MOTOR: Lee visualmente y lee linealmente al mismo tiempo
+                texto_lineal += (page.extract_text(layout=False) or "") + "\n"
+                texto_visual += (page.extract_text() or "") + "\n"
                 
-        if len(texto_completo.strip()) < 50: return {"error": "El PDF parece ser una imagen sin texto incrustado."}
+        texto_completo = texto_lineal + "\n" + texto_visual
+                
+        if len(texto_completo.strip()) < 50: return {"error": "El PDF parece ser una imagen."}
 
         t_clean = re.sub(r'\s+', ' ', texto_completo)
         t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
@@ -180,11 +184,11 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
 
         if es_nuevo and nit_prov:
             palabras_basura = [
-                "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "ELECTRONICO", "REPRESENTACIÓN", "RECEPTOR", "CLIENTE", "EMISOR",
+                "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "REPRESENTACIÓN", "RECEPTOR", "CLIENTE", "EMISOR",
                 "FACTURA", "CONSUMIDOR", "FACTURACION", "COMPROBANTE", "DIRECC", "CÓDIGO", "SELLO", "VERSIÓN", 
-                "TRANSMISIÓN", "MODELO", "MINISTERIO", "HACIENDA", "COLONIA", "BOULEVARD", "CALLE", "AVENIDA", 
-                "MUNICIPIO", "GIRO:", "GIRO", "ACTIVIDAD", "ECONOMICA", "ECONÓMICA", "TIPO ESTABLECIMIENTO", 
-                "SUCURSAL", "AGENCIA", "PAGO DE", "TARJETA", "EFECTIVO", "FECHA", "HORA", "EMISIÓN", "GENERACIÓN", "TELÉFONO", "NOMBRE:"
+                "TRANSMISIÓN", "MINISTERIO", "HACIENDA", "COLONIA", "BOULEVARD", "CALLE", "AVENIDA", "MUNICIPIO", 
+                "GIRO:", "ACTIVIDAD", "ECONOMICA", "TIPO ESTABLECIMIENTO", "SUCURSAL", "AGENCIA", "PAGO DE", "TARJETA", 
+                "EFECTIVO", "FECHA", "HORA", "EMISIÓN", "GENERACIÓN", "TELÉFONO", "NOMBRE:"
             ]
             
             regex_nombre_etiqueta = r"(?:Nombre[:\s]+|Nombre o raz[oó]n social[:\s]+|Raz[oó]n Social[:\s]+)(.*?)(?:NIT|NRC|Giro|Actividad|Direcci[oó]n|$)"
@@ -195,13 +199,13 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                     nom_prov = candidato.upper()
             
             if nom_prov == "⚠️ PROVEEDOR NUEVO":
-                lineas = texto_completo.split('\n')
+                lineas = texto_lineal.split('\n')
                 for L in lineas[:30]: 
                     L = L.strip().upper()
                     if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3: continue
                     if any(b in L for b in palabras_basura): continue
                     
-                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO", "EUROPEAS"])
+                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO"])
                     if es_comercial or (len(L) > 10 and "NIT" not in L and "NRC" not in L):
                         clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
                         if clean_name and not any(n in clean_name for n in cliente_activo['nombre'].upper().split()[:2]): 
@@ -214,22 +218,41 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
         
-        # --- SE MEJORÓ EL RADAR DE TOTALES ---
-        m_t = re.search(r"(?:Total a Pagar|Venta Total|Monto total|TOTAL|SUMA DE VENTAS|Total.*operaci.n)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
-        if m_t: t = limpiar_monto(m_t.group(1))
+        # --- RADAR MATEMÁTICO (El Escudo Definitivo para los Totales) ---
+        montos_brutos = re.findall(r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean)
+        valores = sorted(list(set([limpiar_monto(m) for m in montos_brutos])), reverse=True)
+        valores = [v for v in valores if v > 0] 
+        
+        m_ret = re.search(r"(?:Retenido|Retenci.n)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
+        if m_ret: ret = limpiar_monto(m_ret.group(1))
 
-        if t > 0:
-            m_i = re.search(r"(?:Impuesto.*Agregado|IVA|13% IVA|20-Impuesto|I\.V\.A)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
-            if m_i: i = limpiar_monto(m_i.group(1))
+        encontrado = False
+        for val_t in valores:
+            if encontrado: break
+            for val_g in valores:
+                if val_g >= val_t: continue
+                for val_i in valores:
+                    if val_i >= val_g: continue
+                    # Prueba matemática: Base * 0.13 = IVA  y  Base + IVA - Retención = Total
+                    if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
+                        if abs(round((val_g + val_i - ret), 2) - round(val_t, 2)) <= 0.05:
+                            g, i, t = val_g, val_i, val_t
+                            encontrado = True
+                            break
+
+        if not encontrado:
+            # Si la matemática falla (ej. DTE 03 o exentos), busca las etiquetas específicas de total
+            m_t = re.search(r"(?:TOTAL A PAGAR|TOTAL PAGAR|MONTO TOTAL|TOTAL OPERACI.N|VENTA TOTAL|TOTAL \$)[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
+            if m_t: t = limpiar_monto(m_t.group(1))
             
-            m_ret = re.search(r"(?:Retenido|Retenci.n)[^0-9]*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
-            if m_ret: ret = limpiar_monto(m_ret.group(1))
+            m_i = re.search(r"(?:Impuesto.*Agregado|IVA|13% IVA|I\.V\.A)[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
+            if m_i: i = limpiar_monto(m_i.group(1))
 
-            if i == 0.0 and tipo == "03":
-                g = round(t / 1.13, 2)
-                i = round(t - g, 2)
+            if t > 0 and i == 0.0 and tipo == "03":
+                g = round((t + ret) / 1.13, 2)
+                i = round(t + ret - g, 2)
                 iva_calculado = True
-            elif i > 0:
+            elif t > 0 and i > 0:
                 g = round(t - i + ret, 2)
 
         return {
