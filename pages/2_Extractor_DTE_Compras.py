@@ -98,20 +98,25 @@ def limpiar_monto(monto_str):
         return float(re.sub(r'[^\d]', '', monto_str))
 
 def extraer_y_formatear_fecha(texto):
-    # Detección agresiva para Fechas pegadas a la hora (Selectos)
-    m_hacienda = re.search(r"(20[2-3]\d)[\-\/](0[1-9]|1[0-2])[\-\/]([0-2]\d|3[0-1])", texto)
+    # Formato AAAA-MM-DD
+    m_hacienda = re.search(r"\b(20[2-3]\d)\s*[\-\/]\s*(0[1-9]|1[0-2])\s*[\-\/]\s*([0-2]\d|3[0-1])\b", texto)
     if m_hacienda: return f"{int(m_hacienda.group(3)):02d}/{int(m_hacienda.group(2)):02d}/{m_hacienda.group(1)}"
     
-    m_suelto = re.search(r"(0[1-9]|[12]\d|3[01])[\-\/](0[1-9]|1[0-2])[\-\/](20[2-3]\d)", texto)
+    # Formato suelto D/M/AAAA o DD/MM/AAAA (Acepta meses de 1 dígito para Farmacias Europeas)
+    m_suelto = re.search(r"\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b", texto)
     if m_suelto: 
         p1, p2, y = int(m_suelto.group(1)), int(m_suelto.group(2)), m_suelto.group(3)
+        # Parche SÚPER SELECTOS (Voltear siempre a DD/MM si es Selectos y parece gringo)
+        if "SELECTOS" in texto.upper() and p1 <= 12 and p2 <= 31: return f"{p2:02d}/{p1:02d}/{y}"
         if p1 <= 12 and p2 > 12: return f"{p2:02d}/{p1:02d}/{y}"
         elif p2 <= 12 and p1 > 12: return f"{p1:02d}/{p2:02d}/{y}"
         elif p2 <= 12 and p1 <= 31: return f"{p1:02d}/{p2:02d}/{y}"
         
-    m_expl = re.search(r"(?:FECHA)[^\d]*(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})", texto, re.I)
+    # Formato guiado por texto (FECHA: 21/3/2026)
+    m_expl = re.search(r"(?:FECHA\s*DE\s*EMISI[OÓ]N|FECHA\s*DE\s*GENERACI[OÓ]N|FECHA)[^\d]*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})", texto, re.I)
     if m_expl: 
         d, m, y = int(m_expl.group(1)), int(m_expl.group(2)), int(m_expl.group(3))
+        if "SELECTOS" in texto.upper() and d <= 12 and m <= 31: return f"{m:02d}/{d:02d}/{y}"
         if d <= 12 and m > 12: d, m = m, d
         if m <= 12: return f"{d:02d}/{m:02d}/{y}"
         
@@ -124,7 +129,6 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         texto_visual = ""
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
-                # DOBLE MOTOR: Lee visualmente y lee linealmente al mismo tiempo
                 texto_lineal += (page.extract_text(layout=False) or "") + "\n"
                 texto_visual += (page.extract_text() or "") + "\n"
                 
@@ -205,7 +209,7 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                     if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3: continue
                     if any(b in L for b in palabras_basura): continue
                     
-                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO"])
+                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA.", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO"])
                     if es_comercial or (len(L) > 10 and "NIT" not in L and "NRC" not in L):
                         clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
                         if clean_name and not any(n in clean_name for n in cliente_activo['nombre'].upper().split()[:2]): 
@@ -218,7 +222,6 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
         
-        # --- RADAR MATEMÁTICO (El Escudo Definitivo para los Totales) ---
         montos_brutos = re.findall(r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean)
         valores = sorted(list(set([limpiar_monto(m) for m in montos_brutos])), reverse=True)
         valores = [v for v in valores if v > 0] 
@@ -233,7 +236,6 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                 if val_g >= val_t: continue
                 for val_i in valores:
                     if val_i >= val_g: continue
-                    # Prueba matemática: Base * 0.13 = IVA  y  Base + IVA - Retención = Total
                     if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
                         if abs(round((val_g + val_i - ret), 2) - round(val_t, 2)) <= 0.05:
                             g, i, t = val_g, val_i, val_t
@@ -241,7 +243,6 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                             break
 
         if not encontrado:
-            # Si la matemática falla (ej. DTE 03 o exentos), busca las etiquetas específicas de total
             m_t = re.search(r"(?:TOTAL A PAGAR|TOTAL PAGAR|MONTO TOTAL|TOTAL OPERACI.N|VENTA TOTAL|TOTAL \$)[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
             if m_t: t = limpiar_monto(m_t.group(1))
             
@@ -371,91 +372,96 @@ with st.sidebar:
             if key in st.session_state: del st.session_state[key]
         st.session_state.comp_uploader_key = str(time.time()); st.rerun()
 
-# --- 🚨 MÓDULO HITL (SPLIT-SCREEN + MENTE COLMENA) 🚨 ---
+# --- 🚨 MÓDULO HITL EN CONTENEDOR SEGURO 🚨 ---
 if st.session_state.cola_revision:
-    st.markdown("""
-    <div class="inbox-revision">
-        <h3 style="margin-top:0px; color:#ffaa00;">📥 Bandeja de Revisión Manual</h3>
-        <p style="color:#aaa; margin-bottom:0px;">La Inteligencia Artificial encontró datos borrosos o incompletos. Selecciona el texto de la caja inferior y pégalo aquí.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    total_cola = len(st.session_state.cola_revision)
-    st.info(f"Quedan **{total_cola}** documento(s) por revisar.")
-    
-    item_actual = st.session_state.cola_revision[0]
-    datos_actuales = item_actual["datos"]
-    
-    col_img, col_form = st.columns([1.2, 1])
-    
-    with col_img:
-        try:
-            with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
-                img = pdf.pages[0].to_image(resolution=300).original
-                st.image(img, caption=f"📄 Vista Previa: {item_actual['archivo']}", use_container_width=True)
+    with st.container():
+        st.markdown("""
+        <div class="inbox-revision">
+            <h3 style="margin-top:0px; color:#ffaa00;">📥 Bandeja de Revisión Manual</h3>
+            <p style="color:#aaa; margin-bottom:0px;">La Inteligencia Artificial encontró datos borrosos o incompletos. Selecciona el texto de la caja inferior y pégalo aquí.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        total_cola = len(st.session_state.cola_revision)
+        st.info(f"Quedan **{total_cola}** documento(s) por revisar.")
+        
+        item_actual = st.session_state.cola_revision[0]
+        datos_actuales = item_actual["datos"]
+        
+        # FIJAMOS EL ANCHO PARA EVITAR QUE SE ENCOJA
+        col_img, col_form = st.columns([1.5, 1])
+        
+        with col_img:
+            try:
+                with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
+                    img = pdf.pages[0].to_image(resolution=300).original
+                    st.image(img, caption=f"📄 Vista Previa: {item_actual['archivo']}", use_container_width=True)
+                    
+                    texto_crudo = ""
+                    for page in pdf.pages:
+                        texto_crudo += (page.extract_text() or "") + "\n"
+                    
+                    st.markdown("📝 **Texto extraído:**")
+                    st.text_area("Texto de la factura", value=texto_crudo.strip(), height=200, label_visibility="collapsed")
+                    
+            except Exception as e:
+                st.error("No se pudo cargar la vista previa.")
                 
-                texto_crudo = ""
-                for page in pdf.pages:
-                    texto_crudo += (page.extract_text() or "") + "\n"
+        with col_form:
+            st.markdown("### ✍️ Corrección Rápida")
+            with st.form(key=f"form_revision_{item_actual['archivo']}"):
+                f_fecha = st.text_input("📅 Fecha (DD/MM/YYYY) *", value=datos_actuales.get("fecha", ""))
+                f_gen = st.text_input("🔑 Código de Generación (UUID) *", value=datos_actuales.get("gen", ""))
                 
-                st.markdown("📝 **Texto extraído (Selecciona y copia lo que necesites):**")
-                st.text_area("Texto de la factura", value=texto_crudo.strip(), height=200, label_visibility="collapsed")
+                nom_sugerido = datos_actuales.get("nom_prov", "")
+                if nom_sugerido == "ESCRIBE EL NOMBRE AQUÍ" or "ACTIVIDAD" in nom_sugerido: nom_sugerido = ""
+                f_nom = st.text_input("🏢 Razón Social del Proveedor *", value=nom_sugerido)
                 
-        except Exception as e:
-            st.error("No se pudo cargar la vista previa.")
-            
-    with col_form:
-        st.markdown("### ✍️ Corrección Rápida")
-        with st.form(key=f"form_revision_{item_actual['archivo']}"):
-            f_fecha = st.text_input("📅 Fecha (DD/MM/YYYY) *", value=datos_actuales.get("fecha", ""))
-            f_gen = st.text_input("🔑 Código de Generación (UUID) *", value=datos_actuales.get("gen", ""))
-            
-            nom_sugerido = datos_actuales.get("nom_prov", "")
-            if nom_sugerido == "ESCRIBE EL NOMBRE AQUÍ" or "ACTIVIDAD" in nom_sugerido: nom_sugerido = ""
-            f_nom = st.text_input("🏢 Razón Social del Proveedor *", value=nom_sugerido)
-            
-            f_tot = st.number_input("💰 Total a Pagar ($) *", value=float(datos_actuales.get("tot", 0.0)), format="%.2f")
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            c_btn1, c_btn2 = st.columns(2)
-            
-            with c_btn1:
-                if st.form_submit_button("✅ Aprobar y Guardar", type="primary", use_container_width=True):
-                    if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
-                        st.error("Rellena todos los campos con (*) para continuar.")
-                    else:
-                        nit_actual = datos_actuales.get("nit_prov", "")
-                        if nit_actual: guardar_proveedor_rapido(nit_actual, f_nom.upper())
-
-                        if nit_actual:
-                            for i in range(1, len(st.session_state.cola_revision)):
-                                if st.session_state.cola_revision[i]["datos"].get("nit_prov") == nit_actual:
-                                    st.session_state.cola_revision[i]["datos"]["nom_prov"] = f_nom.upper()
-
-                        datos_actuales["fecha"] = f_fecha
-                        datos_actuales["gen"] = f_gen.upper()
-                        datos_actuales["nom_prov"] = f_nom.upper()
-                        datos_actuales["tot"] = f_tot
-                        
-                        if f_tot > 0 and datos_actuales["iva"] == 0:
-                            datos_actuales["gra"] = round(f_tot / 1.13, 2)
-                            datos_actuales["iva"] = round(f_tot - datos_actuales["gra"], 2)
-                            datos_actuales["iva_calc"] = True
+                f_tot = st.number_input("💰 Total a Pagar ($) *", value=float(datos_actuales.get("tot", 0.0)), format="%.2f")
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                c_btn1, c_btn2 = st.columns(2)
+                
+                with c_btn1:
+                    if st.form_submit_button("✅ Aprobar y Guardar", type="primary", use_container_width=True):
+                        if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
+                            st.error("Rellena todos los campos con (*) para continuar.")
+                        else:
+                            nit_actual = datos_actuales.get("nit_prov", "")
                             
-                        datos_actuales["archivo"] = item_actual["archivo"]
-                        
-                        nuevo_df = pd.DataFrame([datos_actuales])
-                        if st.session_state.db_compras.empty: st.session_state.db_compras = nuevo_df
-                        else: st.session_state.db_compras = pd.concat([st.session_state.db_compras, nuevo_df], ignore_index=True)
-                        
+                            # 1. ACTUALIZA EL DIRECTORIO INMEDIATAMENTE
+                            if nit_actual: guardar_proveedor_rapido(nit_actual, f_nom.upper())
+
+                            # 2. LA MENTE COLMENA: AUTO-REVISIÓN DE LA COLA RESTANTE
+                            if nit_actual:
+                                for i in range(1, len(st.session_state.cola_revision)):
+                                    if st.session_state.cola_revision[i]["datos"].get("nit_prov") == nit_actual:
+                                        st.session_state.cola_revision[i]["datos"]["nom_prov"] = f_nom.upper()
+
+                            datos_actuales["fecha"] = f_fecha
+                            datos_actuales["gen"] = f_gen.upper()
+                            datos_actuales["nom_prov"] = f_nom.upper()
+                            datos_actuales["tot"] = f_tot
+                            
+                            if f_tot > 0 and datos_actuales["iva"] == 0:
+                                datos_actuales["gra"] = round(f_tot / 1.13, 2)
+                                datos_actuales["iva"] = round(f_tot - datos_actuales["gra"], 2)
+                                datos_actuales["iva_calc"] = True
+                                
+                            datos_actuales["archivo"] = item_actual["archivo"]
+                            
+                            nuevo_df = pd.DataFrame([datos_actuales])
+                            if st.session_state.db_compras.empty: st.session_state.db_compras = nuevo_df
+                            else: st.session_state.db_compras = pd.concat([st.session_state.db_compras, nuevo_df], ignore_index=True)
+                            
+                            st.session_state.cola_revision.pop(0)
+                            st.rerun()
+                            
+                with c_btn2:
+                    if st.form_submit_button("🗑️ Descartar Archivo", use_container_width=True):
                         st.session_state.cola_revision.pop(0)
                         st.rerun()
                         
-            with c_btn2:
-                if st.form_submit_button("🗑️ Descartar Archivo", use_container_width=True):
-                    st.session_state.cola_revision.pop(0)
-                    st.rerun()
-                    
     st.stop() 
 
 # --- DASHBOARD DE RESULTADOS ---
