@@ -26,13 +26,18 @@ def cargar_proveedores():
     if not os.path.exists("data"): 
         os.makedirs("data")
     if not os.path.exists(ARCHIVO_PROVEEDORES):
-        # Si no existe, crea un archivo vacío
         with open(ARCHIVO_PROVEEDORES, "w", encoding="utf-8") as f:
             json.dump({}, f, indent=4, ensure_ascii=False)
         return {}
     
     with open(ARCHIVO_PROVEEDORES, "r", encoding="utf-8") as f:
-        try: return json.load(f)
+        try: 
+            data = json.load(f)
+            # MIGRACIÓN AUTOMÁTICA: Pasa del formato viejo al nuevo con NRC
+            for k, v in data.items():
+                if isinstance(v, str):
+                    data[k] = {"nombre": v, "nrc": ""}
+            return data
         except: return {}
 
 def guardar_proveedores(db):
@@ -46,37 +51,40 @@ db_proveedores = cargar_proveedores()
 
 st.markdown("<h2 style='font-family: Courier New, monospace; color: #003057; letter-spacing: 2px; margin-bottom: 0px; padding-bottom: 0px;'>YN</h2>", unsafe_allow_html=True)
 st.title("🏢 Directorio de Proveedores")
-st.write("Base de datos maestra (Vendor Master Data). Los extractores usarán esta lista para bautizar automáticamente a los proveedores usando su NIT.")
+st.write("Base de datos maestra (Vendor Master Data). Los extractores usarán esta lista para bautizar automáticamente a los proveedores.")
 st.divider()
 
-# --- NUEVA ESTRUCTURA DE 3 PESTAÑAS ---
-tab1, tab2, tab3 = st.tabs(["➕ Agregar / Actualizar", "📋 Ver Base de Datos", "🚀 Carga Masiva (Excel/CSV)"])
+tab1, tab2, tab3 = st.tabs(["➕ Agregar / Actualizar", "📋 Ver Base de Datos", "🚀 Carga Masiva"])
 
-# PESTAÑA 1: AGREGAR MANUAL
 with tab1:
     with st.form("form_proveedor", clear_on_submit=True):
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns([2, 2, 4])
         with col1:
-            nuevo_nit = st.text_input("NIT o DUI del Proveedor (Obligatorio)*")
+            nuevo_nit = st.text_input("NIT o DUI (Obligatorio)*")
         with col2:
-            nuevo_nombre = st.text_input("Nombre Oficial para Hacienda (Obligatorio)*")
+            nuevo_nrc = st.text_input("NRC (Opcional)")
+        with col3:
+            nuevo_nombre = st.text_input("Razón Social Oficial (Obligatorio)*")
             
         if st.form_submit_button("💾 Guardar Proveedor", type="primary"):
             if not nuevo_nit or not nuevo_nombre:
-                st.error("Ambos campos son obligatorios.")
+                st.error("El NIT y el Nombre son obligatorios.")
             else:
                 nit_limpio = limpiar_numero(nuevo_nit)
-                db_proveedores[nit_limpio] = nuevo_nombre.strip().upper()
+                nrc_limpio = limpiar_numero(nuevo_nrc) if nuevo_nrc else ""
+                db_proveedores[nit_limpio] = {"nombre": nuevo_nombre.strip().upper(), "nrc": nrc_limpio}
                 guardar_proveedores(db_proveedores)
                 st.success(f"✅ ¡Proveedor {nuevo_nombre.upper()} guardado!")
                 time.sleep(1)
                 st.rerun()
 
-# PESTAÑA 2: VER Y ELIMINAR
 with tab2:
     if db_proveedores:
-        df_prov = pd.DataFrame(list(db_proveedores.items()), columns=["NIT / DUI", "Nombre Registrado"])
-        # Usamos use_container_width para que se estire correctamente en Streamlit
+        lista_prov = []
+        for k, v in db_proveedores.items():
+            lista_prov.append({"NIT / DUI": k, "NRC": v.get("nrc", ""), "Nombre Registrado": v.get("nombre", "")})
+            
+        df_prov = pd.DataFrame(lista_prov)
         st.dataframe(df_prov, use_container_width=True, hide_index=True)
         
         st.write("---")
@@ -91,46 +99,40 @@ with tab2:
     else:
         st.info("No hay proveedores registrados.")
 
-# PESTAÑA 3: CARGA MASIVA (NUEVO)
 with tab3:
     st.subheader("Subir Catálogo Completo desde tu Despacho")
-    st.write("Sube un archivo **Excel** o **CSV**. El sistema extraerá los NITs y los guardará para que la IA sea más rápida.")
+    st.write("Sube un Excel. El sistema extraerá los NITs, NRCs y Nombres.")
     archivo_subido = st.file_uploader("Selecciona tu archivo", type=["xlsx", "csv"])
     
     if archivo_subido:
         try:
-            if archivo_subido.name.endswith('.csv'): 
-                df_import = pd.read_csv(archivo_subido)
-            else: 
-                df_import = pd.read_excel(archivo_subido)
+            if archivo_subido.name.endswith('.csv'): df_import = pd.read_csv(archivo_subido)
+            else: df_import = pd.read_excel(archivo_subido)
             
-            st.write("Vista previa del documento:")
-            st.dataframe(df_import.head(), use_container_width=True)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                col_nits = st.selectbox("¿Qué columna tiene los NITs?", df_import.columns)
-            with col2:
-                col_noms = st.selectbox("¿Qué columna tiene los Nombres Comerciales?", df_import.columns)
+            st.write("Mapea las columnas de tu Excel:")
+            col1, col2, col3 = st.columns(3)
+            with col1: col_nits = st.selectbox("Columna NIT", df_import.columns)
+            with col2: col_nrcs = st.selectbox("Columna NRC (Opcional)", ["-- Ninguna --"] + list(df_import.columns))
+            with col3: col_noms = st.selectbox("Columna Nombre", df_import.columns)
             
             if st.button("🚀 Inyectar al Cerebro Central", type="primary"):
                 nuevos_agregados = 0
                 for index, row in df_import.iterrows():
                     nit_raw = str(row[col_nits])
                     nom_raw = str(row[col_noms])
+                    nrc_raw = str(row[col_nrcs]) if col_nrcs != "-- Ninguna --" else ""
                     
-                    if pd.isna(row[col_nits]) or pd.isna(row[col_noms]): 
-                        continue
+                    if pd.isna(row[col_nits]) or pd.isna(row[col_noms]): continue
                         
                     nit_cln = limpiar_numero(nit_raw)
+                    nrc_cln = limpiar_numero(nrc_raw)
                     if nit_cln and nom_raw and nom_raw.lower() != "nan":
-                        db_proveedores[nit_cln] = nom_raw.strip().upper()
+                        db_proveedores[nit_cln] = {"nombre": nom_raw.strip().upper(), "nrc": nrc_cln}
                         nuevos_agregados += 1
                 
                 guardar_proveedores(db_proveedores)
-                st.success(f"🎉 ¡Éxito! Se inyectaron/actualizaron {nuevos_agregados} proveedores. La IA ahora los reconocerá al instante.")
+                st.success(f"🎉 ¡Éxito! Se inyectaron/actualizaron {nuevos_agregados} proveedores.")
                 time.sleep(2)
                 st.rerun()
-                
         except Exception as e:
-            st.error(f"Ocurrió un error al leer el archivo: {e}")
+            st.error(f"Error: {e}")
