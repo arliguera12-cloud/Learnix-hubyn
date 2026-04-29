@@ -46,7 +46,6 @@ estilo_custom = """
     [data-testid="stStatusWidget"], [data-testid="stExpander"] { background-color: #161616 !important; border: 1px solid #444444 !important; border-radius: 6px; }
     .alerta-activo { padding: 10px; border-radius: 6px; border-left: 4px solid #00407A; background-color: #111111; color: white; margin-bottom: 15px; font-size: 14px; }
     .inbox-revision { background-color: #1a1a1a; border: 1px solid #ffaa00; border-radius: 10px; padding: 20px; margin-top: 20px; margin-bottom: 20px; }
-    /* VARILLAS DE ACERO: Fuerzan a las columnas a no encogerse nunca */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
         min-width: 45% !important;
         flex: 1 1 45% !important;
@@ -61,7 +60,6 @@ def cargar_proveedores_json():
         try:
             with open(archivo, "r", encoding="utf-8") as f: 
                 data = json.load(f)
-                # Migración automática por si hay formatos viejos
                 for k, v in data.items():
                     if isinstance(v, str): data[k] = {"nombre": v, "nrc": ""}
                 return data
@@ -72,7 +70,6 @@ def guardar_proveedor_rapido(nit, nombre):
     archivo = "data/proveedores.json"
     if not os.path.exists("data"): os.makedirs("data")
     db = cargar_proveedores_json()
-    # Mantenemos el NRC que ya existía, si no, lo dejamos vacío
     nrc_existente = db.get(nit, {}).get("nrc", "")
     db[nit] = {"nombre": nombre.strip().upper(), "nrc": nrc_existente}
     with open(archivo, "w", encoding="utf-8") as f: json.dump(db, f, indent=4, ensure_ascii=False)
@@ -178,11 +175,12 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         nom_prov = "⚠️ PROVEEDOR NUEVO"
         es_nuevo = True
 
-        # --- EXTRACCIÓN DE NIT GLOBAL (Búsqueda en todo el documento) ---
+        texto_emisor_aislado = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b", texto_lineal)[0]
+        if len(texto_emisor_aislado) < 100: texto_emisor_aislado = texto_lineal[:1500]
+
         patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
-        nits_encontrados = re.findall(patron_identificadores, texto_completo)
+        nits_encontrados = re.findall(patron_identificadores, texto_emisor_aislado)
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
-        
         nits_candidatos = [n for n in nits_limpios if n != nit_receptor_limpio and n != dui_receptor_limpio]
 
         proveedores_json = cargar_proveedores_json()
@@ -198,11 +196,7 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
 
         if len(nit_prov) == 9: dui_prov = nit_prov
 
-        # --- CAZADOR DE NOMBRES AISLADO (Solo mira arriba para no agarrar al cliente) ---
         if es_nuevo and nit_prov:
-            texto_emisor_aislado = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b", texto_lineal)[0]
-            if len(texto_emisor_aislado) < 100: texto_emisor_aislado = texto_lineal[:1000]
-
             palabras_basura = [
                 "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "REPRESENTACIÓN", "RECEPTOR", "CLIENTE", "EMISOR",
                 "FACTURA", "CONSUMIDOR", "FACTURACION", "COMPROBANTE", "DIRECC", "CÓDIGO", "SELLO", "VERSIÓN", 
@@ -244,6 +238,27 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
         
+        # --- NUEVO RADAR DE FOVIAL, COTRANS Y EXENTOS ---
+        fovial, cotrans = 0.0, 0.0
+        m_fovial_line = re.search(r"FOVIAL.{0,40}", texto_completo, re.I)
+        if m_fovial_line:
+            nums = re.findall(r"\d+\.\d{2,4}", m_fovial_line.group(0))
+            if nums: fovial = max([float(n) for n in nums]) 
+
+        m_cotrans_line = re.search(r"COTRANS.{0,40}", texto_completo, re.I)
+        if m_cotrans_line:
+            nums = re.findall(r"\d+\.\d{2,4}", m_cotrans_line.group(0))
+            if nums: cotrans = max([float(n) for n in nums])
+
+        e = round(fovial + cotrans, 2)
+
+        # Buscar explícitamente "Ventas Exentas" por si no es gasolinera
+        m_exe = re.search(r"(?:Ventas Exentas|Total Exento)[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
+        if m_exe:
+            val_exe = limpiar_monto(m_exe.group(1))
+            if val_exe > e: e = val_exe
+
+        # --- EXTRACCIÓN DE TOTALES CON MATEMÁTICA PROTEGIDA ---
         montos_brutos = re.findall(r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean)
         valores = sorted(list(set([limpiar_monto(m) for m in montos_brutos])), reverse=True)
         valores = [v for v in valores if v > 0] 
@@ -258,8 +273,9 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                 if val_g >= val_t: continue
                 for val_i in valores:
                     if val_i >= val_g: continue
+                    # Prueba matemática con FOVIAL/COTRANS incluidos: Base * 13% = IVA y Base + IVA + Exentos - Retención = Total
                     if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
-                        if abs(round((val_g + val_i - ret), 2) - round(val_t, 2)) <= 0.05:
+                        if abs(round((val_g + val_i + e - ret), 2) - round(val_t, 2)) <= 0.05:
                             g, i, t = val_g, val_i, val_t
                             encontrado = True
                             break
@@ -272,11 +288,11 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
             if m_i: i = limpiar_monto(m_i.group(1))
 
             if t > 0 and i == 0.0 and tipo == "03":
-                g = round((t + ret) / 1.13, 2)
-                i = round(t + ret - g, 2)
+                g = round((t + ret - e) / 1.13, 2)
+                i = round(t + ret - e - g, 2)
                 iva_calculado = True
             elif t > 0 and i > 0:
-                g = round(t - i + ret, 2)
+                g = round(t - i - e + ret, 2)
 
         return {
             "fecha": fecha, "nit_prov": nit_prov, "dui_prov": dui_prov, "nom_prov": nom_prov, "tipo": tipo, "gen": gen, 
@@ -436,7 +452,12 @@ if st.session_state.cola_revision:
             if nom_sugerido == "ESCRIBE EL NOMBRE AQUÍ": nom_sugerido = ""
             f_nom = st.text_input("🏢 Razón Social del Proveedor *", value=nom_sugerido)
             
-            f_tot = st.number_input("💰 Total a Pagar ($) *", value=float(datos_actuales.get("tot", 0.0)), format="%.2f")
+            # --- NUEVA CAJA PARA EXENTOS MANUALES ---
+            c_mon1, c_mon2 = st.columns(2)
+            with c_mon1:
+                f_tot = st.number_input("💰 Total a Pagar ($) *", value=float(datos_actuales.get("tot", 0.0)), format="%.2f")
+            with c_mon2:
+                f_exe = st.number_input("⛽ Exento/Fovial ($)", value=float(datos_actuales.get("exe", 0.0)), format="%.2f")
             
             st.markdown("<br>", unsafe_allow_html=True)
             c_btn1, c_btn2 = st.columns(2)
@@ -458,10 +479,12 @@ if st.session_state.cola_revision:
                         datos_actuales["gen"] = f_gen.upper()
                         datos_actuales["nom_prov"] = f_nom.upper()
                         datos_actuales["tot"] = f_tot
+                        datos_actuales["exe"] = f_exe
                         
+                        # Recálculo con el exento que hayas puesto
                         if f_tot > 0 and datos_actuales["iva"] == 0:
-                            datos_actuales["gra"] = round(f_tot / 1.13, 2)
-                            datos_actuales["iva"] = round(f_tot - datos_actuales["gra"], 2)
+                            datos_actuales["gra"] = round((f_tot - f_exe) / 1.13, 2)
+                            datos_actuales["iva"] = round(f_tot - f_exe - datos_actuales["gra"], 2)
                             datos_actuales["iva_calc"] = True
                             
                         datos_actuales["archivo"] = item_actual["archivo"]
