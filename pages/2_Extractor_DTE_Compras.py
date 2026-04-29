@@ -46,20 +46,21 @@ estilo_custom = """
     [data-testid="stStatusWidget"], [data-testid="stExpander"] { background-color: #161616 !important; border: 1px solid #444444 !important; border-radius: 6px; }
     .alerta-activo { padding: 10px; border-radius: 6px; border-left: 4px solid #00407A; background-color: #111111; color: white; margin-bottom: 15px; font-size: 14px; }
     .inbox-revision { background-color: #1a1a1a; border: 1px solid #ffaa00; border-radius: 10px; padding: 20px; margin-top: 20px; margin-bottom: 20px; }
-    /* VARILLAS DE ACERO: Fuerzan a las columnas a no encogerse nunca */
-    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-        min-width: 45% !important;
-        flex: 1 1 45% !important;
-    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] { min-width: 45% !important; flex: 1 1 45% !important; }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
 
+# --- ADAPTACIÓN AL NUEVO DICCIONARIO CON NRC ---
 def cargar_proveedores_json():
     archivo = "data/proveedores.json"
     if os.path.exists(archivo):
         try:
-            with open(archivo, "r", encoding="utf-8") as f: return json.load(f)
+            with open(archivo, "r", encoding="utf-8") as f: 
+                data = json.load(f)
+                for k, v in data.items():
+                    if isinstance(v, str): data[k] = {"nombre": v, "nrc": ""}
+                return data
         except: return {}
     return {}
 
@@ -67,7 +68,7 @@ def guardar_proveedor_rapido(nit, nombre):
     archivo = "data/proveedores.json"
     if not os.path.exists("data"): os.makedirs("data")
     db = cargar_proveedores_json()
-    db[nit] = nombre.strip().upper()
+    db[nit] = {"nombre": nombre.strip().upper(), "nrc": ""}
     with open(archivo, "w", encoding="utf-8") as f: json.dump(db, f, indent=4, ensure_ascii=False)
 
 def to_excel_hacienda_compras(df):
@@ -183,7 +184,9 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
 
         for n in nits_candidatos:
             if n in proveedores_json:
-                nit_prov = n; nom_prov = proveedores_json[n]; es_nuevo = False; break
+                nit_prov = n
+                nom_prov = proveedores_json[n].get("nombre", "") # ACCESO AL NUEVO DICCIONARIO
+                es_nuevo = False; break
 
         if not nit_prov and nits_candidatos:
             nit_prov = nits_candidatos[0]
@@ -213,7 +216,6 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                     if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3: continue
                     if any(b in L for b in palabras_basura): continue
                     
-                    # AHORA ES ESTRICTO: Solo si tiene una de estas palabras lo considera Nombre. Adiós direcciones.
                     es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA.", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO", "LABORATORIOS", "INDUSTRIAS"])
                     if es_comercial:
                         clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
@@ -221,9 +223,7 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                             nom_prov = clean_name
                             break
 
-            # --- LA GUILLOTINA ANTI-BASURA (SOLO PARA NUEVOS) ---
             if nom_prov and nom_prov != "⚠️ PROVEEDOR NUEVO":
-                # EL MEGA-FIX: El símbolo ^ asegura que solo borre "COMERCIAL" o "NOMBRE" si están al INICIO de la oración.
                 nom_prov = re.sub(r"^(?:(?:O\s*)?RAZ[OÓ]N\s*SOCIAL|NOMBRE(?: O RAZ[OÓ]N SOCIAL)?|CLIENTE|NOMBRE COMERCIAL|COMERCIAL)[\s:]*", "", nom_prov, flags=re.I).strip()
                 nom_prov = re.sub(r"^[-_.,:]+", "", nom_prov).strip()
                 
@@ -385,7 +385,6 @@ with st.sidebar:
             if key in st.session_state: del st.session_state[key]
         st.session_state.comp_uploader_key = str(time.time()); st.rerun()
 
-# --- 🚨 MÓDULO HITL (ESTABLE Y SEGURO) 🚨 ---
 if st.session_state.cola_revision:
     st.markdown("""
     <div class="inbox-revision">
@@ -439,7 +438,6 @@ if st.session_state.cola_revision:
                         st.error("Rellena todos los campos con (*) para continuar.")
                     else:
                         nit_actual = datos_actuales.get("nit_prov", "")
-                        
                         if nit_actual: guardar_proveedor_rapido(nit_actual, f_nom.upper())
 
                         if nit_actual:
@@ -473,37 +471,30 @@ if st.session_state.cola_revision:
                     
     st.stop() 
 
-# --- DASHBOARD DE RESULTADOS ---
 if st.session_state.reporte_compras:
     rep = st.session_state.reporte_compras
     st.markdown("### 📋 Alertas de Procesamiento Automático")
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         if rep.get("corruptos"):
-            st.error(f"💀 **{len(rep['corruptos'])} Dañados** (PDFs rotos).")
-            with st.expander("Ver lista"): st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["corruptos"]])}</div>', unsafe_allow_html=True)
+            st.error(f"💀 **{len(rep['corruptos'])} Dañados**.")
         else: st.success("✅ **0 Dañados**.")
     with c2:
         if rep.get("intrusos"):
-            st.error(f"🚫 **{len(rep['intrusos'])} Ajenos** (Otro NIT).")
-            with st.expander("Ver lista"): st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["intrusos"]])}</div>', unsafe_allow_html=True)
+            st.error(f"🚫 **{len(rep['intrusos'])} Ajenos**.")
         elif rep.get("invalidos"):
-            st.error(f"⚠️ **{len(rep['invalidos'])} Ignorados** (No F-07).")
-            with st.expander("Ver lista"): st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["invalidos"]])}</div>', unsafe_allow_html=True)
+            st.error(f"⚠️ **{len(rep['invalidos'])} Ignorados**.")
         else: st.success("✅ **0 Rechazados**.")
     with c3:
         if rep["duplicados"]:
-            st.error(f"🛑 **{len(rep['duplicados'])} Omitidos** (Duplicados).")
-            with st.expander("Ver lista"): st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["duplicados"]])}</div>', unsafe_allow_html=True)
+            st.error(f"🛑 **{len(rep['duplicados'])} Omitidos**.")
         else: st.success("✅ **0 Omitidos**.")
     with c4:
         if rep["iva_calc"]:
-            st.info(f"🧮 **{len(rep['iva_calc'])} IVA Calc.** (Al 13%).")
-            with st.expander("Ver lista"): st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["iva_calc"]])}</div>', unsafe_allow_html=True)
-        else: st.success("✅ **0 IVA Calc.** (Nativo).")
+            st.info(f"🧮 **{len(rep['iva_calc'])} IVA Calc**.")
+        else: st.success("✅ **0 IVA Calc.**")
     st.divider()
 
-# --- TABLAS DE RESULTADOS Y FILTROS DE BÚSQUEDA ---
 if not st.session_state.db_compras.empty:
     df = st.session_state.db_compras.copy()
     
@@ -511,7 +502,7 @@ if not st.session_state.db_compras.empty:
     col_f1, col_f2 = st.columns([2, 1])
     
     with col_f1:
-        busqueda_texto = st.text_input("Buscar Proveedor (Nombre, NIT, DUI o UUID) 🔎", placeholder="Ej. FREUND, 0614...")
+        busqueda_texto = st.text_input("Buscar Proveedor 🔎")
     with col_f2:
         filtro_tipo = st.multiselect("Filtrar por Tipo DTE 📄", options=df['tipo'].unique(), default=df['tipo'].unique())
         
@@ -559,9 +550,9 @@ if not st.session_state.db_compras.empty:
 
         st.dataframe(df_hacienda.style.format({col: "{:.2f}" for col in df_hacienda.columns[6:15]}), hide_index=True, use_container_width=True)
         
-        if st.button("📥 Generar Excel para Hacienda (Resultados Filtrados)", type="primary"): 
+        if st.button("📥 Generar Excel para Hacienda", type="primary"): 
             ventana_descarga_compras(df_hacienda, "F07_Compras_Proveedores.xlsx")
             
     with tab2:
-        st.write(f"📊 Registros listos: **{len(df_filtrado)}** de **{len(df)}** procesados.")
+        st.write(f"📊 Registros listos: **{len(df_filtrado)}** de **{len(df)}**.")
         st.dataframe(df_filtrado, use_container_width=True)
