@@ -46,8 +46,8 @@ estilo_custom = """
     [data-testid="stStatusWidget"], [data-testid="stExpander"] { background-color: #161616 !important; border: 1px solid #444444 !important; border-radius: 6px; }
     .alerta-activo { padding: 10px; border-radius: 6px; border-left: 4px solid #00407A; background-color: #111111; color: white; margin-bottom: 15px; font-size: 14px; }
     .inbox-revision { background-color: #1a1a1a; border: 1px solid #ffaa00; border-radius: 10px; padding: 20px; margin-top: 20px; margin-bottom: 20px; }
-    /* ESTABILIZADOR DE COLUMNAS PARA EVITAR ENCOGIMIENTO */
-    [data-testid="column"] { min-width: 300px !important; }
+    /* PILARES DE TITANIO: Evita el encogimiento de columnas */
+    div[data-testid="column"] { min-width: 45% !important; flex-grow: 1 !important; }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
@@ -168,8 +168,13 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         nom_prov = "⚠️ PROVEEDOR NUEVO"
         es_nuevo = True
 
+        # --- AISLAMIENTO ESTRUCTURAL (EL ESCUDO CONTRA CLIENTES 0000000) ---
+        # Cortamos el documento donde empieza la info del cliente para JAMÁS leer su NIT por error.
+        texto_emisor_aislado = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b", texto_lineal)[0]
+        if len(texto_emisor_aislado) < 100: texto_emisor_aislado = texto_lineal[:1500]
+
         patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
-        nits_encontrados = re.findall(patron_identificadores, texto_completo)
+        nits_encontrados = re.findall(patron_identificadores, texto_emisor_aislado)
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
         nits_candidatos = [n for n in nits_limpios if n != nit_receptor_limpio and n != dui_receptor_limpio]
 
@@ -194,14 +199,14 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
             ]
             
             regex_nombre_etiqueta = r"(?:Nombre[:\s]+|Nombre o raz[oó]n social[:\s]+|Raz[oó]n Social[:\s]+)(.*?)(?:NIT|NRC|Giro|Actividad|Direcci[oó]n|$)"
-            m_nombre_etiqueta = re.search(regex_nombre_etiqueta, t_clean, re.I)
+            m_nombre_etiqueta = re.search(regex_nombre_etiqueta, texto_emisor_aislado, re.I)
             if m_nombre_etiqueta:
                 candidato = m_nombre_etiqueta.group(1).strip()
                 if len(candidato) > 5 and not any(b in candidato.upper() for b in ["RECEPTOR", cliente_activo['nombre'].upper().split()[0]]):
                     nom_prov = candidato.upper()
             
             if nom_prov == "⚠️ PROVEEDOR NUEVO":
-                lineas = texto_lineal.split('\n')
+                lineas = texto_emisor_aislado.split('\n')
                 for L in lineas[:30]: 
                     L = L.strip().upper()
                     if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3: continue
@@ -214,11 +219,13 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                             nom_prov = clean_name
                             break
 
-        # --- FILTRO ANTIBASURA DE NOMBRES ---
+        # --- GUILLOTINA ANTI-BASURA KILOMÉTRICA ---
         if nom_prov and nom_prov != "⚠️ PROVEEDOR NUEVO":
-            nom_prov = re.sub(r"^(?:O\s*)?RAZ[OÓ]N\s*SOCIAL[\s:]*|NOMBRE(?: O RAZ[OÓ]N SOCIAL)?[\s:]*|CLIENTE[\s:]*", "", nom_prov, flags=re.I).strip()
+            nom_prov = re.sub(r"^(?:O\s*)?RAZ[OÓ]N\s*SOCIAL[\s:]*|NOMBRE(?: O RAZ[OÓ]N SOCIAL)?[\s:]*|CLIENTE[\s:]*|COMERCIAL[\s:]*", "", nom_prov, flags=re.I).strip()
             nom_prov = re.sub(r"^[-_.,:]+", "", nom_prov).strip()
-            if len(nom_prov) < 4 or nom_prov.upper() in ["S.A. DE C.V.", "C.V.", "SA DE CV", "LTDA", "LTDA.", "S.A.", "DE C.V."]:
+            
+            # Si el texto es absurdamente largo o solo dice "C.V.", lo destruimos para forzar revisión manual
+            if len(nom_prov) > 65 or len(nom_prov) < 4 or nom_prov.upper() in ["S.A. DE C.V.", "C.V.", "SA DE CV", "LTDA", "LTDA.", "S.A.", "DE C.V."]:
                 nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
         else:
             nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
@@ -338,7 +345,6 @@ with st.sidebar:
                         fecha_str = str(res.get('fecha', '')).strip()
                         nom_prov_str = str(res.get('nom_prov', '')).strip()
                         
-                        # CONDICIÓN DE REVISIÓN MANUAL
                         if res.get('tot', 0.0) == 0.0 or not res.get('gen') or not fecha_str or nom_prov_str == "ESCRIBE EL NOMBRE AQUÍ" or nom_prov_str == "": 
                             st.session_state.cola_revision.append({
                                 "archivo": f.name,
@@ -392,7 +398,6 @@ if st.session_state.cola_revision:
     item_actual = st.session_state.cola_revision[0]
     datos_actuales = item_actual["datos"]
     
-    # GAP LARGE EVITA QUE LAS COLUMNAS COLAPSEN EN STREAMLIT
     col_img, col_form = st.columns([1.2, 1], gap="large")
     
     with col_img:
@@ -433,10 +438,8 @@ if st.session_state.cola_revision:
                     else:
                         nit_actual = datos_actuales.get("nit_prov", "")
                         
-                        # 1. ACTUALIZAR DIRECTORIO MAESTRO
                         if nit_actual: guardar_proveedor_rapido(nit_actual, f_nom.upper())
 
-                        # 2. MENTE COLMENA: ACTUALIZAR EL RESTO DE LA COLA
                         if nit_actual:
                             for i in range(1, len(st.session_state.cola_revision)):
                                 if st.session_state.cola_revision[i]["datos"].get("nit_prov") == nit_actual:
