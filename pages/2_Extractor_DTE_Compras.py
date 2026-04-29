@@ -27,7 +27,6 @@ if platform.system() == "Windows":
 
 st.set_page_config(page_title="Extraer DTE Compras", layout="wide", page_icon="🛒")
 
-# --- ESTILOS CSS BLINDADOS (EVITA EL ENCOGIMIENTO DE COLUMNAS) ---
 estilo_custom = """
 <style>
     [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background-color: #000000 !important; }
@@ -47,7 +46,6 @@ estilo_custom = """
     [data-testid="stStatusWidget"], [data-testid="stExpander"] { background-color: #161616 !important; border: 1px solid #444444 !important; border-radius: 6px; }
     .alerta-activo { padding: 10px; border-radius: 6px; border-left: 4px solid #00407A; background-color: #111111; color: white; margin-bottom: 15px; font-size: 14px; }
     .inbox-revision { background-color: #1a1a1a; border: 1px solid #ffaa00; border-radius: 10px; padding: 20px; margin-top: 20px; margin-bottom: 20px; }
-    
     /* VARILLAS DE ACERO: Fuerzan a las columnas a no encogerse nunca */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
         min-width: 45% !important;
@@ -173,12 +171,12 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         nom_prov = "⚠️ PROVEEDOR NUEVO"
         es_nuevo = True
 
-        # --- EXTRACCIÓN DE NIT SEGURA (SIN AMPUTACIONES) ---
+        texto_emisor_aislado = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b", texto_lineal)[0]
+        if len(texto_emisor_aislado) < 100: texto_emisor_aislado = texto_lineal[:1500]
+
         patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
-        nits_encontrados = re.findall(patron_identificadores, texto_completo)
+        nits_encontrados = re.findall(patron_identificadores, texto_emisor_aislado)
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
-        
-        # Eliminamos el NIT/DUI del cliente. El que queda es el del proveedor.
         nits_candidatos = [n for n in nits_limpios if n != nit_receptor_limpio and n != dui_receptor_limpio]
 
         proveedores_json = cargar_proveedores_json()
@@ -192,48 +190,47 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
 
         if len(nit_prov) == 9: dui_prov = nit_prov
 
-        # --- CAZADOR DE NOMBRES PARA PROVEEDORES NUEVOS ---
         if es_nuevo and nit_prov:
             palabras_basura = [
                 "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "REPRESENTACIÓN", "RECEPTOR", "CLIENTE", "EMISOR",
                 "FACTURA", "CONSUMIDOR", "FACTURACION", "COMPROBANTE", "DIRECC", "CÓDIGO", "SELLO", "VERSIÓN", 
                 "TRANSMISIÓN", "MINISTERIO", "HACIENDA", "COLONIA", "BOULEVARD", "CALLE", "AVENIDA", "MUNICIPIO", 
                 "GIRO:", "ACTIVIDAD", "ECONOMICA", "TIPO ESTABLECIMIENTO", "SUCURSAL", "AGENCIA", "PAGO DE", "TARJETA", 
-                "EFECTIVO", "FECHA", "HORA", "EMISIÓN", "GENERACIÓN", "TELÉFONO", "NOMBRE:"
+                "EFECTIVO", "FECHA", "HORA", "EMISIÓN", "GENERACIÓN", "TELÉFONO"
             ]
             
             regex_nombre_etiqueta = r"(?:Nombre[:\s]+|Nombre o raz[oó]n social[:\s]+|Raz[oó]n Social[:\s]+)(.*?)(?:NIT|NRC|Giro|Actividad|Direcci[oó]n|$)"
-            m_nombre_etiqueta = re.search(regex_nombre_etiqueta, texto_completo, re.I)
+            m_nombre_etiqueta = re.search(regex_nombre_etiqueta, texto_emisor_aislado, re.I)
             if m_nombre_etiqueta:
                 candidato = m_nombre_etiqueta.group(1).strip()
-                # Verifica que no sea el nombre del cliente
-                cliente_palabras = cliente_activo['nombre'].upper().split()
-                if len(candidato) > 5 and not any(n in candidato.upper() for n in cliente_palabras[:2]) and "RECEPTOR" not in candidato.upper():
+                if len(candidato) > 5 and not any(b in candidato.upper() for b in ["RECEPTOR", cliente_activo['nombre'].upper().split()[0]]):
                     nom_prov = candidato.upper()
             
             if nom_prov == "⚠️ PROVEEDOR NUEVO":
-                lineas = texto_lineal.split('\n')
+                lineas = texto_emisor_aislado.split('\n')
                 for L in lineas[:30]: 
                     L = L.strip().upper()
                     if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3: continue
                     if any(b in L for b in palabras_basura): continue
                     
-                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA.", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO"])
-                    if es_comercial or (len(L) > 10 and "NIT" not in L and "NRC" not in L):
+                    # AHORA ES ESTRICTO: Solo si tiene una de estas palabras lo considera Nombre. Adiós direcciones.
+                    es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA.", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO", "LABORATORIOS", "INDUSTRIAS"])
+                    if es_comercial:
                         clean_name = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
                         if clean_name and not any(n in clean_name for n in cliente_activo['nombre'].upper().split()[:2]): 
                             nom_prov = clean_name
                             break
 
-        # --- GUILLOTINA ANTI-BASURA ---
-        if nom_prov and nom_prov != "⚠️ PROVEEDOR NUEVO":
-            nom_prov = re.sub(r"^(?:O\s*)?RAZ[OÓ]N\s*SOCIAL[\s:]*|NOMBRE(?: O RAZ[OÓ]N SOCIAL)?[\s:]*|CLIENTE[\s:]*|COMERCIAL[\s:]*", "", nom_prov, flags=re.I).strip()
-            nom_prov = re.sub(r"^[-_.,:]+", "", nom_prov).strip()
-            
-            if len(nom_prov) > 65 or len(nom_prov) < 4 or nom_prov.upper() in ["S.A. DE C.V.", "C.V.", "SA DE CV", "LTDA", "LTDA.", "S.A.", "DE C.V."]:
+            # --- LA GUILLOTINA ANTI-BASURA (SOLO PARA NUEVOS) ---
+            if nom_prov and nom_prov != "⚠️ PROVEEDOR NUEVO":
+                # EL MEGA-FIX: El símbolo ^ asegura que solo borre "COMERCIAL" o "NOMBRE" si están al INICIO de la oración.
+                nom_prov = re.sub(r"^(?:(?:O\s*)?RAZ[OÓ]N\s*SOCIAL|NOMBRE(?: O RAZ[OÓ]N SOCIAL)?|CLIENTE|NOMBRE COMERCIAL|COMERCIAL)[\s:]*", "", nom_prov, flags=re.I).strip()
+                nom_prov = re.sub(r"^[-_.,:]+", "", nom_prov).strip()
+                
+                if len(nom_prov) > 65 or len(nom_prov) < 4 or nom_prov.upper() in ["S.A. DE C.V.", "C.V.", "SA DE CV", "LTDA", "LTDA.", "S.A.", "DE C.V."]:
+                    nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
+            else:
                 nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
-        else:
-            nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
 
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
@@ -388,7 +385,7 @@ with st.sidebar:
             if key in st.session_state: del st.session_state[key]
         st.session_state.comp_uploader_key = str(time.time()); st.rerun()
 
-# --- 🚨 MÓDULO HITL (CON ESTABILIZADOR CSS Y TEXTO ORDENADO) 🚨 ---
+# --- 🚨 MÓDULO HITL (ESTABLE Y SEGURO) 🚨 ---
 if st.session_state.cola_revision:
     st.markdown("""
     <div class="inbox-revision">
@@ -411,12 +408,11 @@ if st.session_state.cola_revision:
                 img = pdf.pages[0].to_image(resolution=300).original
                 st.image(img, caption=f"📄 Vista Previa: {item_actual['archivo']}", use_container_width=True)
                 
-                # AHORA EL TEXTO RESPETA EL DISEÑO VISUAL PARA QUE NO SALGA PEGADO
                 texto_crudo = ""
                 for page in pdf.pages:
                     texto_crudo += (page.extract_text(layout=True) or page.extract_text() or "") + "\n"
                 
-                st.markdown("📝 **Texto extraído (Más legible):**")
+                st.markdown("📝 **Texto extraído:**")
                 st.text_area("Texto de la factura", value=texto_crudo.strip(), height=200, label_visibility="collapsed")
                 
         except Exception as e:
