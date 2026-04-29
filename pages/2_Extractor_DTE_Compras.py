@@ -46,18 +46,22 @@ estilo_custom = """
     [data-testid="stStatusWidget"], [data-testid="stExpander"] { background-color: #161616 !important; border: 1px solid #444444 !important; border-radius: 6px; }
     .alerta-activo { padding: 10px; border-radius: 6px; border-left: 4px solid #00407A; background-color: #111111; color: white; margin-bottom: 15px; font-size: 14px; }
     .inbox-revision { background-color: #1a1a1a; border: 1px solid #ffaa00; border-radius: 10px; padding: 20px; margin-top: 20px; margin-bottom: 20px; }
-    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] { min-width: 45% !important; flex: 1 1 45% !important; }
+    /* VARILLAS DE ACERO: Fuerzan a las columnas a no encogerse nunca */
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        min-width: 45% !important;
+        flex: 1 1 45% !important;
+    }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
 
-# --- ADAPTACIÓN AL NUEVO DICCIONARIO CON NRC ---
 def cargar_proveedores_json():
     archivo = "data/proveedores.json"
     if os.path.exists(archivo):
         try:
             with open(archivo, "r", encoding="utf-8") as f: 
                 data = json.load(f)
+                # Migración automática por si hay formatos viejos
                 for k, v in data.items():
                     if isinstance(v, str): data[k] = {"nombre": v, "nrc": ""}
                 return data
@@ -68,7 +72,9 @@ def guardar_proveedor_rapido(nit, nombre):
     archivo = "data/proveedores.json"
     if not os.path.exists("data"): os.makedirs("data")
     db = cargar_proveedores_json()
-    db[nit] = {"nombre": nombre.strip().upper(), "nrc": ""}
+    # Mantenemos el NRC que ya existía, si no, lo dejamos vacío
+    nrc_existente = db.get(nit, {}).get("nrc", "")
+    db[nit] = {"nombre": nombre.strip().upper(), "nrc": nrc_existente}
     with open(archivo, "w", encoding="utf-8") as f: json.dump(db, f, indent=4, ensure_ascii=False)
 
 def to_excel_hacienda_compras(df):
@@ -172,12 +178,11 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         nom_prov = "⚠️ PROVEEDOR NUEVO"
         es_nuevo = True
 
-        texto_emisor_aislado = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b", texto_lineal)[0]
-        if len(texto_emisor_aislado) < 100: texto_emisor_aislado = texto_lineal[:1500]
-
+        # --- EXTRACCIÓN DE NIT GLOBAL (Búsqueda en todo el documento) ---
         patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
-        nits_encontrados = re.findall(patron_identificadores, texto_emisor_aislado)
+        nits_encontrados = re.findall(patron_identificadores, texto_completo)
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
+        
         nits_candidatos = [n for n in nits_limpios if n != nit_receptor_limpio and n != dui_receptor_limpio]
 
         proveedores_json = cargar_proveedores_json()
@@ -185,7 +190,7 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         for n in nits_candidatos:
             if n in proveedores_json:
                 nit_prov = n
-                nom_prov = proveedores_json[n].get("nombre", "") # ACCESO AL NUEVO DICCIONARIO
+                nom_prov = proveedores_json[n].get("nombre", "")
                 es_nuevo = False; break
 
         if not nit_prov and nits_candidatos:
@@ -193,7 +198,11 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
 
         if len(nit_prov) == 9: dui_prov = nit_prov
 
+        # --- CAZADOR DE NOMBRES AISLADO (Solo mira arriba para no agarrar al cliente) ---
         if es_nuevo and nit_prov:
+            texto_emisor_aislado = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b", texto_lineal)[0]
+            if len(texto_emisor_aislado) < 100: texto_emisor_aislado = texto_lineal[:1000]
+
             palabras_basura = [
                 "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "REPRESENTACIÓN", "RECEPTOR", "CLIENTE", "EMISOR",
                 "FACTURA", "CONSUMIDOR", "FACTURACION", "COMPROBANTE", "DIRECC", "CÓDIGO", "SELLO", "VERSIÓN", 
