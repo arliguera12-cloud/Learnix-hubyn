@@ -46,6 +46,8 @@ estilo_custom = """
     [data-testid="stStatusWidget"], [data-testid="stExpander"] { background-color: #161616 !important; border: 1px solid #444444 !important; border-radius: 6px; }
     .alerta-activo { padding: 10px; border-radius: 6px; border-left: 4px solid #00407A; background-color: #111111; color: white; margin-bottom: 15px; font-size: 14px; }
     .inbox-revision { background-color: #1a1a1a; border: 1px solid #ffaa00; border-radius: 10px; padding: 20px; margin-top: 20px; margin-bottom: 20px; }
+    /* ESTABILIZADOR DE COLUMNAS PARA EVITAR ENCOGIMIENTO */
+    [data-testid="column"] { min-width: 300px !important; }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
@@ -98,21 +100,17 @@ def limpiar_monto(monto_str):
         return float(re.sub(r'[^\d]', '', monto_str))
 
 def extraer_y_formatear_fecha(texto):
-    # Formato AAAA-MM-DD
     m_hacienda = re.search(r"\b(20[2-3]\d)\s*[\-\/]\s*(0[1-9]|1[0-2])\s*[\-\/]\s*([0-2]\d|3[0-1])\b", texto)
     if m_hacienda: return f"{int(m_hacienda.group(3)):02d}/{int(m_hacienda.group(2)):02d}/{m_hacienda.group(1)}"
     
-    # Formato suelto D/M/AAAA o DD/MM/AAAA (Acepta meses de 1 dígito para Farmacias Europeas)
     m_suelto = re.search(r"\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b", texto)
     if m_suelto: 
         p1, p2, y = int(m_suelto.group(1)), int(m_suelto.group(2)), m_suelto.group(3)
-        # Parche SÚPER SELECTOS (Voltear siempre a DD/MM si es Selectos y parece gringo)
         if "SELECTOS" in texto.upper() and p1 <= 12 and p2 <= 31: return f"{p2:02d}/{p1:02d}/{y}"
         if p1 <= 12 and p2 > 12: return f"{p2:02d}/{p1:02d}/{y}"
         elif p2 <= 12 and p1 > 12: return f"{p1:02d}/{p2:02d}/{y}"
         elif p2 <= 12 and p1 <= 31: return f"{p1:02d}/{p2:02d}/{y}"
         
-    # Formato guiado por texto (FECHA: 21/3/2026)
     m_expl = re.search(r"(?:FECHA\s*DE\s*EMISI[OÓ]N|FECHA\s*DE\s*GENERACI[OÓ]N|FECHA)[^\d]*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})", texto, re.I)
     if m_expl: 
         d, m, y = int(m_expl.group(1)), int(m_expl.group(2)), int(m_expl.group(3))
@@ -216,8 +214,14 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                             nom_prov = clean_name
                             break
 
-            if len(nom_prov) > 60 or nom_prov == "⚠️ PROVEEDOR NUEVO" or "ACTIVIDAD" in nom_prov: 
+        # --- FILTRO ANTIBASURA DE NOMBRES ---
+        if nom_prov and nom_prov != "⚠️ PROVEEDOR NUEVO":
+            nom_prov = re.sub(r"^(?:O\s*)?RAZ[OÓ]N\s*SOCIAL[\s:]*|NOMBRE(?: O RAZ[OÓ]N SOCIAL)?[\s:]*|CLIENTE[\s:]*", "", nom_prov, flags=re.I).strip()
+            nom_prov = re.sub(r"^[-_.,:]+", "", nom_prov).strip()
+            if len(nom_prov) < 4 or nom_prov.upper() in ["S.A. DE C.V.", "C.V.", "SA DE CV", "LTDA", "LTDA.", "S.A.", "DE C.V."]:
                 nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
+        else:
+            nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
 
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
@@ -334,6 +338,7 @@ with st.sidebar:
                         fecha_str = str(res.get('fecha', '')).strip()
                         nom_prov_str = str(res.get('nom_prov', '')).strip()
                         
+                        # CONDICIÓN DE REVISIÓN MANUAL
                         if res.get('tot', 0.0) == 0.0 or not res.get('gen') or not fecha_str or nom_prov_str == "ESCRIBE EL NOMBRE AQUÍ" or nom_prov_str == "": 
                             st.session_state.cola_revision.append({
                                 "archivo": f.name,
@@ -372,96 +377,95 @@ with st.sidebar:
             if key in st.session_state: del st.session_state[key]
         st.session_state.comp_uploader_key = str(time.time()); st.rerun()
 
-# --- 🚨 MÓDULO HITL EN CONTENEDOR SEGURO 🚨 ---
+# --- 🚨 MÓDULO HITL (CON FIX DE ENCOGIMIENTO) 🚨 ---
 if st.session_state.cola_revision:
-    with st.container():
-        st.markdown("""
-        <div class="inbox-revision">
-            <h3 style="margin-top:0px; color:#ffaa00;">📥 Bandeja de Revisión Manual</h3>
-            <p style="color:#aaa; margin-bottom:0px;">La Inteligencia Artificial encontró datos borrosos o incompletos. Selecciona el texto de la caja inferior y pégalo aquí.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        total_cola = len(st.session_state.cola_revision)
-        st.info(f"Quedan **{total_cola}** documento(s) por revisar.")
-        
-        item_actual = st.session_state.cola_revision[0]
-        datos_actuales = item_actual["datos"]
-        
-        # FIJAMOS EL ANCHO PARA EVITAR QUE SE ENCOJA
-        col_img, col_form = st.columns([1.5, 1])
-        
-        with col_img:
-            try:
-                with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
-                    img = pdf.pages[0].to_image(resolution=300).original
-                    st.image(img, caption=f"📄 Vista Previa: {item_actual['archivo']}", use_container_width=True)
-                    
-                    texto_crudo = ""
-                    for page in pdf.pages:
-                        texto_crudo += (page.extract_text() or "") + "\n"
-                    
-                    st.markdown("📝 **Texto extraído:**")
-                    st.text_area("Texto de la factura", value=texto_crudo.strip(), height=200, label_visibility="collapsed")
-                    
-            except Exception as e:
-                st.error("No se pudo cargar la vista previa.")
+    st.markdown("""
+    <div class="inbox-revision">
+        <h3 style="margin-top:0px; color:#ffaa00;">📥 Bandeja de Revisión Manual</h3>
+        <p style="color:#aaa; margin-bottom:0px;">La Inteligencia Artificial encontró datos borrosos o incompletos. Selecciona el texto de la caja inferior y pégalo aquí.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    total_cola = len(st.session_state.cola_revision)
+    st.info(f"Quedan **{total_cola}** documento(s) por revisar.")
+    
+    item_actual = st.session_state.cola_revision[0]
+    datos_actuales = item_actual["datos"]
+    
+    # GAP LARGE EVITA QUE LAS COLUMNAS COLAPSEN EN STREAMLIT
+    col_img, col_form = st.columns([1.2, 1], gap="large")
+    
+    with col_img:
+        try:
+            with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
+                img = pdf.pages[0].to_image(resolution=300).original
+                st.image(img, caption=f"📄 Vista Previa: {item_actual['archivo']}", use_container_width=True)
                 
-        with col_form:
-            st.markdown("### ✍️ Corrección Rápida")
-            with st.form(key=f"form_revision_{item_actual['archivo']}"):
-                f_fecha = st.text_input("📅 Fecha (DD/MM/YYYY) *", value=datos_actuales.get("fecha", ""))
-                f_gen = st.text_input("🔑 Código de Generación (UUID) *", value=datos_actuales.get("gen", ""))
+                texto_crudo = ""
+                for page in pdf.pages:
+                    texto_crudo += (page.extract_text() or "") + "\n"
                 
-                nom_sugerido = datos_actuales.get("nom_prov", "")
-                if nom_sugerido == "ESCRIBE EL NOMBRE AQUÍ" or "ACTIVIDAD" in nom_sugerido: nom_sugerido = ""
-                f_nom = st.text_input("🏢 Razón Social del Proveedor *", value=nom_sugerido)
+                st.markdown("📝 **Texto extraído:**")
+                st.text_area("Texto de la factura", value=texto_crudo.strip(), height=200, label_visibility="collapsed")
                 
-                f_tot = st.number_input("💰 Total a Pagar ($) *", value=float(datos_actuales.get("tot", 0.0)), format="%.2f")
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                c_btn1, c_btn2 = st.columns(2)
-                
-                with c_btn1:
-                    if st.form_submit_button("✅ Aprobar y Guardar", type="primary", use_container_width=True):
-                        if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
-                            st.error("Rellena todos los campos con (*) para continuar.")
-                        else:
-                            nit_actual = datos_actuales.get("nit_prov", "")
-                            
-                            # 1. ACTUALIZA EL DIRECTORIO INMEDIATAMENTE
-                            if nit_actual: guardar_proveedor_rapido(nit_actual, f_nom.upper())
+        except Exception as e:
+            st.error("No se pudo cargar la vista previa.")
+            
+    with col_form:
+        st.markdown("### ✍️ Corrección Rápida")
+        with st.form(key=f"form_revision_{item_actual['archivo']}"):
+            f_fecha = st.text_input("📅 Fecha (DD/MM/YYYY) *", value=datos_actuales.get("fecha", ""))
+            f_gen = st.text_input("🔑 Código de Generación (UUID) *", value=datos_actuales.get("gen", ""))
+            
+            nom_sugerido = datos_actuales.get("nom_prov", "")
+            if nom_sugerido == "ESCRIBE EL NOMBRE AQUÍ": nom_sugerido = ""
+            f_nom = st.text_input("🏢 Razón Social del Proveedor *", value=nom_sugerido)
+            
+            f_tot = st.number_input("💰 Total a Pagar ($) *", value=float(datos_actuales.get("tot", 0.0)), format="%.2f")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            c_btn1, c_btn2 = st.columns(2)
+            
+            with c_btn1:
+                if st.form_submit_button("✅ Aprobar y Guardar", type="primary", use_container_width=True):
+                    if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
+                        st.error("Rellena todos los campos con (*) para continuar.")
+                    else:
+                        nit_actual = datos_actuales.get("nit_prov", "")
+                        
+                        # 1. ACTUALIZAR DIRECTORIO MAESTRO
+                        if nit_actual: guardar_proveedor_rapido(nit_actual, f_nom.upper())
 
-                            # 2. LA MENTE COLMENA: AUTO-REVISIÓN DE LA COLA RESTANTE
-                            if nit_actual:
-                                for i in range(1, len(st.session_state.cola_revision)):
-                                    if st.session_state.cola_revision[i]["datos"].get("nit_prov") == nit_actual:
-                                        st.session_state.cola_revision[i]["datos"]["nom_prov"] = f_nom.upper()
+                        # 2. MENTE COLMENA: ACTUALIZAR EL RESTO DE LA COLA
+                        if nit_actual:
+                            for i in range(1, len(st.session_state.cola_revision)):
+                                if st.session_state.cola_revision[i]["datos"].get("nit_prov") == nit_actual:
+                                    st.session_state.cola_revision[i]["datos"]["nom_prov"] = f_nom.upper()
 
-                            datos_actuales["fecha"] = f_fecha
-                            datos_actuales["gen"] = f_gen.upper()
-                            datos_actuales["nom_prov"] = f_nom.upper()
-                            datos_actuales["tot"] = f_tot
+                        datos_actuales["fecha"] = f_fecha
+                        datos_actuales["gen"] = f_gen.upper()
+                        datos_actuales["nom_prov"] = f_nom.upper()
+                        datos_actuales["tot"] = f_tot
+                        
+                        if f_tot > 0 and datos_actuales["iva"] == 0:
+                            datos_actuales["gra"] = round(f_tot / 1.13, 2)
+                            datos_actuales["iva"] = round(f_tot - datos_actuales["gra"], 2)
+                            datos_actuales["iva_calc"] = True
                             
-                            if f_tot > 0 and datos_actuales["iva"] == 0:
-                                datos_actuales["gra"] = round(f_tot / 1.13, 2)
-                                datos_actuales["iva"] = round(f_tot - datos_actuales["gra"], 2)
-                                datos_actuales["iva_calc"] = True
-                                
-                            datos_actuales["archivo"] = item_actual["archivo"]
-                            
-                            nuevo_df = pd.DataFrame([datos_actuales])
-                            if st.session_state.db_compras.empty: st.session_state.db_compras = nuevo_df
-                            else: st.session_state.db_compras = pd.concat([st.session_state.db_compras, nuevo_df], ignore_index=True)
-                            
-                            st.session_state.cola_revision.pop(0)
-                            st.rerun()
-                            
-                with c_btn2:
-                    if st.form_submit_button("🗑️ Descartar Archivo", use_container_width=True):
+                        datos_actuales["archivo"] = item_actual["archivo"]
+                        
+                        nuevo_df = pd.DataFrame([datos_actuales])
+                        if st.session_state.db_compras.empty: st.session_state.db_compras = nuevo_df
+                        else: st.session_state.db_compras = pd.concat([st.session_state.db_compras, nuevo_df], ignore_index=True)
+                        
                         st.session_state.cola_revision.pop(0)
                         st.rerun()
                         
+            with c_btn2:
+                if st.form_submit_button("🗑️ Descartar Archivo", use_container_width=True):
+                    st.session_state.cola_revision.pop(0)
+                    st.rerun()
+                    
     st.stop() 
 
 # --- DASHBOARD DE RESULTADOS ---
@@ -493,26 +497,6 @@ if st.session_state.reporte_compras:
             with st.expander("Ver lista"): st.markdown(f'<div class="scroll-list">{"".join([f"• {a}<br>" for a in rep["iva_calc"]])}</div>', unsafe_allow_html=True)
         else: st.success("✅ **0 IVA Calc.** (Nativo).")
     st.divider()
-
-    if rep.get("nuevos_proveedores"):
-        st.markdown("### ✨ Guardado Rápido de Proveedores")
-        st.info("Revisa el nombre, corrígelo si es necesario y guárdalo para actualizar la tabla al instante.")
-        
-        for nit, nombre_sug in list(rep["nuevos_proveedores"].items()):
-            col1, col2, col3 = st.columns([2, 5, 2])
-            with col1: st.text_input("NIT / DUI", value=nit, disabled=True, key=f"lbl_{nit}")
-            with col2: nuevo_nom = st.text_input("Nombre Oficial", value=nombre_sug, key=f"nom_{nit}")
-            with col3:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("💾 Guardar y Actualizar", key=f"btn_{nit}", type="primary"):
-                    guardar_proveedor_rapido(nit, nuevo_nom)
-                    df = st.session_state.db_compras
-                    mask = (df['nit_prov'] == nit) | (df['dui_prov'] == nit)
-                    df.loc[mask, 'nom_prov'] = nuevo_nom.strip().upper()
-                    st.session_state.db_compras = df
-                    del st.session_state.reporte_compras["nuevos_proveedores"][nit]
-                    st.rerun()
-        st.divider()
 
 # --- TABLAS DE RESULTADOS Y FILTROS DE BÚSQUEDA ---
 if not st.session_state.db_compras.empty:
