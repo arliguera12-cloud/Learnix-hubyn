@@ -27,6 +27,7 @@ if platform.system() == "Windows":
 
 st.set_page_config(page_title="Extraer DTE Compras", layout="wide", page_icon="🛒")
 
+# --- ESTILOS CSS BLINDADOS (EVITA EL ENCOGIMIENTO DE COLUMNAS) ---
 estilo_custom = """
 <style>
     [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background-color: #000000 !important; }
@@ -46,8 +47,12 @@ estilo_custom = """
     [data-testid="stStatusWidget"], [data-testid="stExpander"] { background-color: #161616 !important; border: 1px solid #444444 !important; border-radius: 6px; }
     .alerta-activo { padding: 10px; border-radius: 6px; border-left: 4px solid #00407A; background-color: #111111; color: white; margin-bottom: 15px; font-size: 14px; }
     .inbox-revision { background-color: #1a1a1a; border: 1px solid #ffaa00; border-radius: 10px; padding: 20px; margin-top: 20px; margin-bottom: 20px; }
-    /* PILARES DE TITANIO: Evita el encogimiento de columnas */
-    div[data-testid="column"] { min-width: 45% !important; flex-grow: 1 !important; }
+    
+    /* VARILLAS DE ACERO: Fuerzan a las columnas a no encogerse nunca */
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        min-width: 45% !important;
+        flex: 1 1 45% !important;
+    }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
@@ -168,14 +173,12 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         nom_prov = "⚠️ PROVEEDOR NUEVO"
         es_nuevo = True
 
-        # --- AISLAMIENTO ESTRUCTURAL (EL ESCUDO CONTRA CLIENTES 0000000) ---
-        # Cortamos el documento donde empieza la info del cliente para JAMÁS leer su NIT por error.
-        texto_emisor_aislado = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b", texto_lineal)[0]
-        if len(texto_emisor_aislado) < 100: texto_emisor_aislado = texto_lineal[:1500]
-
+        # --- EXTRACCIÓN DE NIT SEGURA (SIN AMPUTACIONES) ---
         patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
-        nits_encontrados = re.findall(patron_identificadores, texto_emisor_aislado)
+        nits_encontrados = re.findall(patron_identificadores, texto_completo)
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
+        
+        # Eliminamos el NIT/DUI del cliente. El que queda es el del proveedor.
         nits_candidatos = [n for n in nits_limpios if n != nit_receptor_limpio and n != dui_receptor_limpio]
 
         proveedores_json = cargar_proveedores_json()
@@ -189,6 +192,7 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
 
         if len(nit_prov) == 9: dui_prov = nit_prov
 
+        # --- CAZADOR DE NOMBRES PARA PROVEEDORES NUEVOS ---
         if es_nuevo and nit_prov:
             palabras_basura = [
                 "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "REPRESENTACIÓN", "RECEPTOR", "CLIENTE", "EMISOR",
@@ -199,14 +203,16 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
             ]
             
             regex_nombre_etiqueta = r"(?:Nombre[:\s]+|Nombre o raz[oó]n social[:\s]+|Raz[oó]n Social[:\s]+)(.*?)(?:NIT|NRC|Giro|Actividad|Direcci[oó]n|$)"
-            m_nombre_etiqueta = re.search(regex_nombre_etiqueta, texto_emisor_aislado, re.I)
+            m_nombre_etiqueta = re.search(regex_nombre_etiqueta, texto_completo, re.I)
             if m_nombre_etiqueta:
                 candidato = m_nombre_etiqueta.group(1).strip()
-                if len(candidato) > 5 and not any(b in candidato.upper() for b in ["RECEPTOR", cliente_activo['nombre'].upper().split()[0]]):
+                # Verifica que no sea el nombre del cliente
+                cliente_palabras = cliente_activo['nombre'].upper().split()
+                if len(candidato) > 5 and not any(n in candidato.upper() for n in cliente_palabras[:2]) and "RECEPTOR" not in candidato.upper():
                     nom_prov = candidato.upper()
             
             if nom_prov == "⚠️ PROVEEDOR NUEVO":
-                lineas = texto_emisor_aislado.split('\n')
+                lineas = texto_lineal.split('\n')
                 for L in lineas[:30]: 
                     L = L.strip().upper()
                     if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3: continue
@@ -219,12 +225,11 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                             nom_prov = clean_name
                             break
 
-        # --- GUILLOTINA ANTI-BASURA KILOMÉTRICA ---
+        # --- GUILLOTINA ANTI-BASURA ---
         if nom_prov and nom_prov != "⚠️ PROVEEDOR NUEVO":
             nom_prov = re.sub(r"^(?:O\s*)?RAZ[OÓ]N\s*SOCIAL[\s:]*|NOMBRE(?: O RAZ[OÓ]N SOCIAL)?[\s:]*|CLIENTE[\s:]*|COMERCIAL[\s:]*", "", nom_prov, flags=re.I).strip()
             nom_prov = re.sub(r"^[-_.,:]+", "", nom_prov).strip()
             
-            # Si el texto es absurdamente largo o solo dice "C.V.", lo destruimos para forzar revisión manual
             if len(nom_prov) > 65 or len(nom_prov) < 4 or nom_prov.upper() in ["S.A. DE C.V.", "C.V.", "SA DE CV", "LTDA", "LTDA.", "S.A.", "DE C.V."]:
                 nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
         else:
@@ -383,7 +388,7 @@ with st.sidebar:
             if key in st.session_state: del st.session_state[key]
         st.session_state.comp_uploader_key = str(time.time()); st.rerun()
 
-# --- 🚨 MÓDULO HITL (CON FIX DE ENCOGIMIENTO) 🚨 ---
+# --- 🚨 MÓDULO HITL (CON ESTABILIZADOR CSS Y TEXTO ORDENADO) 🚨 ---
 if st.session_state.cola_revision:
     st.markdown("""
     <div class="inbox-revision">
@@ -406,11 +411,12 @@ if st.session_state.cola_revision:
                 img = pdf.pages[0].to_image(resolution=300).original
                 st.image(img, caption=f"📄 Vista Previa: {item_actual['archivo']}", use_container_width=True)
                 
+                # AHORA EL TEXTO RESPETA EL DISEÑO VISUAL PARA QUE NO SALGA PEGADO
                 texto_crudo = ""
                 for page in pdf.pages:
-                    texto_crudo += (page.extract_text() or "") + "\n"
+                    texto_crudo += (page.extract_text(layout=True) or page.extract_text() or "") + "\n"
                 
-                st.markdown("📝 **Texto extraído:**")
+                st.markdown("📝 **Texto extraído (Más legible):**")
                 st.text_area("Texto de la factura", value=texto_crudo.strip(), height=200, label_visibility="collapsed")
                 
         except Exception as e:
