@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit as st  # v1.28.1 - st.Page() support
 import time
 import json
 import os
