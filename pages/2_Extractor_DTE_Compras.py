@@ -33,8 +33,6 @@ cliente = st.session_state.cliente_activo
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-# st.set_page_config() ya ejecutado en app.py
-
 # ═══════════════════════════════════════════════════════════════
 # 🎨 ESTILOS GLOBALES
 # ═══════════════════════════════════════════════════════════════
@@ -120,6 +118,36 @@ estilo_custom = """
         padding: 20px;
         margin-top: 20px;
         margin-bottom: 20px;
+    }
+    .indicador-confianza {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: bold;
+        margin-left: 8px;
+    }
+    .confianza-alta {
+        background-color: #1b5e20;
+        color: #81c784;
+    }
+    .confianza-media {
+        background-color: #e65100;
+        color: #ffb74d;
+    }
+    .confianza-baja {
+        background-color: #b71c1c;
+        color: #ef5350;
+    }
+    .badge-revision {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: bold;
+        margin-left: 5px;
+        background-color: #ff6f00;
+        color: white;
     }
 </style>
 """
@@ -337,18 +365,186 @@ def normalizar_nombre_proveedor(nombre_raw, cliente_nombre):
 
     return nombre.upper()
 
+
+def mostrar_indicador_confianza(confianza):
+    """Retorna HTML para mostrar indicador visual de confianza."""
+    confianza = str(confianza).lower().strip()
+    
+    if confianza == "alta":
+        return '<span class="indicador-confianza confianza-alta">✓ Alta</span>'
+    elif confianza == "media":
+        return '<span class="indicador-confianza confianza-media">⚠ Media</span>'
+    else:
+        return '<span class="indicador-confianza confianza-baja">✗ Baja</span>'
+
 # ═══════════════════════════════════════════════════════════════
-# 🔧 MOTOR DE EXTRACCIÓN DTE COMPRAS
+# 🔧 MOTOR DE EXTRACCIÓN MEJORADO - NIT Y RAZÓN SOCIAL
 # ═══════════════════════════════════════════════════════════════
 
-def extraer_compras_nativo_pro(file_bytes, cliente_activo, proveedores_cache=None):
-    """Motor de extracción de DTE de Compras (El Salvador)."""
+def extraer_nit_y_razon_social_mejorado(texto_emisor, texto_completo):
+    """
+    ✅ Extrae NIT del emisor y RAZÓN SOCIAL con manejo robusto de formatos
+    inconsistentes en DTEs de El Salvador.
+    """
+    
+    resultado = {
+        "nit_encontrado": "",
+        "razon_social": "",
+        "confianza_nit": "baja",
+        "confianza_rs": "baja"
+    }
+    
+    # Texto limpio para búsquedas
+    t_clean = re.sub(r'\s+', ' ', texto_emisor).upper()
+    
+    # ═════════════════════════════════════════════════════════════════
+    # 1️⃣ EXTRACCIÓN DE NIT (MÚLTIPLES FORMATOS)
+    # ═════════════════════════════════════════════════════════════════
+    
+    # Patrón 1: NIT con guiones (XXXX-XXXXXX-XXX-X) - Formato estándar El Salvador
+    patron_nit_guiones = r'NIT\s*[#:]?\s*(\d{4})\s*[-]?\s*(\d{6})\s*[-]?\s*(\d{3})\s*[-]?\s*(\d{1})'
+    match = re.search(patron_nit_guiones, t_clean)
+    
+    if match:
+        nit_raw = f"{match.group(1)}{match.group(2)}{match.group(3)}{match.group(4)}"
+        resultado["nit_encontrado"] = nit_raw
+        resultado["confianza_nit"] = "alta"
+        return resultado
+    
+    # Patrón 2: NIT sin guiones (14 dígitos seguidos)
+    patron_nit_digitos = r'NIT\s*[#:]?\s*(\d{14})'
+    match = re.search(patron_nit_digitos, t_clean)
+    
+    if match:
+        resultado["nit_encontrado"] = match.group(1)
+        resultado["confianza_nit"] = "alta"
+        return resultado
+    
+    # Patrón 3: Búsqueda flexible con palabras clave
+    patron_flexible = r'(?:DOCUMENTO\s+DE\s+IDENTIFICACI[OÓ]N|NIT|IDENTIFICACI[OÓ]N\s+TRIBUTARIA)[:\s]*(\d{14})'
+    match = re.search(patron_flexible, t_clean, re.IGNORECASE)
+    
+    if match:
+        resultado["nit_encontrado"] = match.group(1)
+        resultado["confianza_nit"] = "media"
+        return resultado
+    
+    # Patrón 4: DUI (9 dígitos con guión final)
+    patron_dui = r'DUI\s*[#:]?\s*(\d{8})\s*[-]?\s*(\d{1})'
+    match = re.search(patron_dui, t_clean)
+    
+    if match:
+        dui = f"{match.group(1)}{match.group(2)}"
+        resultado["nit_encontrado"] = dui
+        resultado["confianza_nit"] = "media"
+        return resultado
+    
+    # ═════════════════════════════════════════════════════════════════
+    # 2️⃣ EXTRACCIÓN DE RAZÓN SOCIAL (ULTRA ROBUSTA)
+    # ═════════════════════════════════════════════════════════════════
+    
+    patrones_razon = [
+        {
+            "patron": r"(?:RAZ[ÓO]N\s*SOCIAL|NOMBRE\s+O\s+RAZ[ÓO]N\s*SOCIAL)[:\s]*([A-Z][^,\n]{8,80}?)(?=\n|NIT|NRC|GIRO|ACTIVIDAD|DIRECCI[ÓO]N|$)",
+            "confianza": "alta"
+        },
+        {
+            "patron": r"(?:^|\n)\s*NOMBRE[:\s]*([A-Z][^,\n]{8,80}?)(?=\n|NIT|NRC|GIRO)",
+            "confianza": "alta"
+        },
+        {
+            "patron": r"NOMBRE\s*COMERCIAL[:\s]*([A-Z][^,\n]{5,80}?)(?=\n|NIT|GIRO)",
+            "confianza": "media"
+        },
+        {
+            "patron": r"(?:NIT|N\.I\.T\.)[:\s]*\d+\s*(?:\n|\s{4,})\s*([A-Z][^,\n]{8,80}?)(?=\n|GIRO|ACTIVIDAD)",
+            "confianza": "media"
+        },
+        {
+            "patron": r"(?:^|\n)\s*([A-Z][A-Z\s\.\&\,0-9]{8,80})(?=\n|NIT|NRC|GIRO)",
+            "confianza": "baja"
+        }
+    ]
+    
+    for patron_obj in patrones_razon:
+        match = re.search(patron_obj["patron"], texto_emisor, re.MULTILINE | re.IGNORECASE)
+        
+        if match:
+            razon_candidato = match.group(1).strip()
+            razon_candidato = re.sub(r'\s+', ' ', razon_candidato)
+            razon_candidato = razon_candidato.rstrip('.,;:')
+            
+            # Validaciones
+            if (
+                len(razon_candidato) >= 8
+                and len(razon_candidato) <= 80
+                and not any(bad in razon_candidato.upper() for bad in BASURA_ESTRICTA)
+                and "RECEPTOR" not in razon_candidato.upper()
+                and "CLIENTE" not in razon_candidato.upper()
+            ):
+                resultado["razon_social"] = razon_candidato.upper()
+                resultado["confianza_rs"] = patron_obj["confianza"]
+                break
+    
+    return resultado
+
+
+def extraer_nit_alternativo_tabla(pdf_bytes):
+    """
+    ✅ ALTERNATIVA: Extrae NIT de la TABLA de detalles del DTE
+    Si falla en encabezado, busca en los datos estructurados.
+    """
+    
+    try:
+        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages[:2]:
+                tables = page.extract_tables()
+                
+                if not tables:
+                    continue
+                
+                for table in tables:
+                    for row in table:
+                        for cell in row:
+                            if not cell:
+                                continue
+                            
+                            cell_str = str(cell).upper()
+                            
+                            # Buscar NIT en celdas (14 dígitos)
+                            m_nit = re.search(r'\d{14}', cell_str)
+                            if m_nit:
+                                return m_nit.group(0)
+                            
+                            # Buscar NIT formateado
+                            m_nit_fmt = re.search(
+                                r'(\d{4})\s*[-]?\s*(\d{6})\s*[-]?\s*(\d{3})\s*[-]?\s*(\d{1})',
+                                cell_str
+                            )
+                            if m_nit_fmt:
+                                return f"{m_nit_fmt.group(1)}{m_nit_fmt.group(2)}{m_nit_fmt.group(3)}{m_nit_fmt.group(4)}"
+    
+    except Exception:
+        pass
+    
+    return ""
+
+# ═══════════════════════════════════════════════════════════════
+# 🔧 MOTOR DE EXTRACCIÓN DTE COMPRAS (VERSIÓN MEJORADA V2)
+# ═══════════════════════════════════════════════════════════════
+
+def extraer_compras_nativo_pro_v2(file_bytes, cliente_activo, proveedores_cache=None):
+    """
+    ✅ MOTOR DE EXTRACCIÓN MEJORADO CON EXTRACCIÓN ROBUSTA DE NIT Y RAZÓN SOCIAL
+    Incluye indicadores de confianza para validar calidad de extracción.
+    """
     motor = "Nativo"
 
     try:
         texto_lineal = ""
         texto_visual = ""
 
+        # Extracción de texto del PDF
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
                 t_lin = page.extract_text(layout=False) or ""
@@ -358,6 +554,7 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo, proveedores_cache=Non
 
         texto_completo = texto_lineal + "\n" + texto_visual
 
+        # Si el texto es muy poco, usar OCR
         if len(texto_completo.strip()) < 80:
             motor = "OCR"
             with pdfplumber.open(BytesIO(file_bytes)) as pdf:
@@ -373,7 +570,9 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo, proveedores_cache=Non
         t_clean = re.sub(r'\s+', ' ', texto_completo)
         t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
 
-        # Detección del tipo de DTE
+        # ═════════════════════════════════════════════════════════════════
+        # DETECCIÓN DEL TIPO DE DTE
+        # ═════════════════════════════════════════════════════════════════
         m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_spaces)
         tipo = "01"
         ctrl = ""
@@ -392,7 +591,9 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo, proveedores_cache=Non
         nit_receptor = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
         dui_receptor = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
 
-        # Código de generación (UUID)
+        # ═════════════════════════════════════════════════════════════════
+        # CÓDIGO DE GENERACIÓN (UUID)
+        # ═════════════════════════════════════════════════════════════════
         gen = ""
         m_url = re.search(r"CODGEN=([A-F0-9-]+)", t_no_spaces)
         if m_url:
@@ -407,14 +608,22 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo, proveedores_cache=Non
                 if len(raw) >= 32:
                     gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:32]}"
 
+        # ═════════════════════════════════════════════════════════════════
+        # EXTRACCIÓN DE FECHA
+        # ═════════════════════════════════════════════════════════════════
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        # Identificación del proveedor
+        # ═════════════════════════════════════════════════════════════════
+        # ✅ EXTRACCIÓN MEJORADA DE NIT Y RAZÓN SOCIAL
+        # ═════════════════════════════════════════════════════════════════
         nit_prov = ""
         dui_prov = ""
         nom_prov = NOMBRE_PLACEHOLDER
         es_nuevo = True
+        confianza_nit = "baja"
+        confianza_rs = "baja"
 
+        # Separar sección del emisor
         partes_emisor = re.split(
             r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b",
             texto_lineal
@@ -423,91 +632,81 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo, proveedores_cache=Non
         if len(texto_emisor.strip()) < 100:
             texto_emisor = texto_lineal[:1500]
 
-        patron_ids = (
-            r"\b\d{4}\s*[-]?\s*\d{6}\s*[-]?\s*\d{3}\s*[-]?\s*\d{1}\b"
-            r"|\b\d{14}\b"
-            r"|\b\d{8}\s*[-]?\s*\d{1}\b"
-            r"|\b\d{9}\b"
-        )
-        nits_raw = re.findall(patron_ids, texto_emisor)
-        nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_raw]))
-        nits_candidatos = [
-            n for n in nits_limpios
-            if n != nit_receptor and n != dui_receptor
-        ]
+        # 🔴 PASO 1: Extracción mejorada
+        datos_nit_rs = extraer_nit_y_razon_social_mejorado(texto_emisor, texto_completo)
+        
+        if datos_nit_rs["nit_encontrado"]:
+            nit_prov = datos_nit_rs["nit_encontrado"]
+            confianza_nit = datos_nit_rs["confianza_nit"]
+        
+        if datos_nit_rs["razon_social"]:
+            nom_prov = normalizar_nombre_proveedor(
+                datos_nit_rs["razon_social"],
+                cliente_activo.get('nombre', '')
+            )
+            confianza_rs = datos_nit_rs["confianza_rs"]
+        
+        # 🔴 PASO 2: Si el NIT está vacío, buscar en tabla
+        if not nit_prov:
+            nit_tabla = extraer_nit_alternativo_tabla(file_bytes)
+            if nit_tabla:
+                nit_prov = nit_tabla
+                confianza_nit = "media"
+        
+        # 🔴 PASO 3: Fallback - método anterior
+        if not nit_prov:
+            patron_ids = (
+                r"\b\d{4}\s*[-]?\s*\d{6}\s*[-]?\s*\d{3}\s*[-]?\s*\d{1}\b"
+                r"|\b\d{14}\b"
+                r"|\b\d{8}\s*[-]?\s*\d{1}\b"
+                r"|\b\d{9}\b"
+            )
+            nits_raw = re.findall(patron_ids, texto_emisor)
+            nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_raw]))
+            nits_candidatos = [
+                n for n in nits_limpios
+                if n != nit_receptor and n != dui_receptor
+            ]
+            
+            prov_db = proveedores_cache if proveedores_cache is not None else cargar_proveedores_json()
+            
+            for n in nits_candidatos:
+                if n in prov_db:
+                    nit_prov = n
+                    nom_prov = prov_db[n].get("nombre", NOMBRE_PLACEHOLDER)
+                    es_nuevo = False
+                    confianza_nit = "alta"
+                    break
+            
+            if not nit_prov and nits_candidatos:
+                nit_prov = nits_candidatos[0]
+                confianza_nit = "baja"
 
-        prov_db = proveedores_cache if proveedores_cache is not None else cargar_proveedores_json()
-
-        for n in nits_candidatos:
-            if n in prov_db:
-                nit_prov = n
-                nom_prov = prov_db[n].get("nombre", NOMBRE_PLACEHOLDER)
-                es_nuevo = False
-                break
-
-        if not nit_prov and nits_candidatos:
-            nit_prov = nits_candidatos[0]
-
+        # Validar DUI
         if len(nit_prov) == 9:
             dui_prov = nit_prov
 
-        # Extraer nombre si es proveedor nuevo
-        if es_nuevo and nit_prov:
-            nombre_encontrado = ""
-
-            m_etiqueta = re.search(
-                r"(?:Nombre[:\s]+|Nombre\s+o\s+raz[oo]n\s+social[:\s]+|Raz[oo]n\s+Social[:\s]+)"
-                r"(.*?)(?:NIT|NRC|Giro|Actividad|Direcci[oo]n|$)",
-                texto_emisor, re.I | re.DOTALL
-            )
-            if m_etiqueta:
-                candidato = m_etiqueta.group(1).strip().replace('\n', ' ')[:80]
-                if (
-                    len(candidato) > 5
-                    and not any(bad in candidato.upper() for bad in BASURA_ESTRICTA)
-                    and "RECEPTOR" not in candidato.upper()
-                ):
-                    nombre_encontrado = candidato
-
-            if not nombre_encontrado:
-                for linea in texto_emisor.split('\n')[:30]:
-                    L = linea.strip().upper()
-                    if len(L) < 5:
-                        continue
-                    if sum(c.isdigit() for c in L) / len(L) > 0.3:
-                        continue
-                    if any(b in L for b in PALABRAS_BASURA):
-                        continue
-                    if any(bad in L for bad in BASURA_ESTRICTA):
-                        continue
-                    if any(marca in L for marca in MARCAS_COMERCIALES):
-                        clean = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
-                        palabras_cliente = cliente_activo.get('nombre', '').upper().split()[:2]
-                        if clean and not any(p in clean for p in palabras_cliente if len(p) > 3):
-                            nombre_encontrado = clean
-                            break
-
-            nom_prov = normalizar_nombre_proveedor(
-                nombre_encontrado,
-                cliente_activo.get('nombre', '')
-            )
-
-        # Extracción de montos
+        # ═════════════════════════════════════════════════════════════════
+        # EXTRACCIÓN DE MONTOS
+        # ═════════════════════════════════════════════════════════════════
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
 
+        # Buscar FOVIAL
         m_fovial = re.search(r"FOVIAL.{0,50}", texto_completo, re.I)
         if m_fovial:
             nums = re.findall(r"\d+[.,]\d{2,4}", m_fovial.group(0))
             if nums:
                 e = max(limpiar_monto(n) for n in nums)
 
+        # Buscar COTRANS
         m_cotrans = re.search(r"COTRANS.{0,50}", texto_completo, re.I)
         if m_cotrans:
             nums = re.findall(r"\d+[.,]\d{2,4}", m_cotrans.group(0))
             if nums:
                 e += max(limpiar_monto(n) for n in nums)
 
+        # Buscar Exentos
         m_exe = re.search(
             r"(?:Ventas\s+Exentas|Total\s+Exento)[^\d]{0,30}?"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})",
@@ -518,6 +717,7 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo, proveedores_cache=Non
             if val_exe > e:
                 e = val_exe
 
+        # Buscar Retención
         m_ret = re.search(
             r"(?:Retenido|Retenci[oo]n)[^0-9]*"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})",
@@ -526,7 +726,9 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo, proveedores_cache=Non
         if m_ret:
             ret = limpiar_monto(m_ret.group(1))
 
-        # Algoritmo matemático principal
+        # ═════════════════════════════════════════════════════════════════
+        # ALGORITMO MATEMÁTICO PARA DESGLOSE
+        # ═════════════════════════════════════════════════════════════════
         montos_raw = re.findall(
             r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})",
             t_clean
@@ -582,6 +784,9 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo, proveedores_cache=Non
                 if g < 0:
                     g = 0.0
 
+        # ═════════════════════════════════════════════════════════════════
+        # RETORNO DE RESULTADOS
+        # ═════════════════════════════════════════════════════════════════
         return {
             "fecha": fecha,
             "nit_prov": nit_prov,
@@ -600,7 +805,9 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo, proveedores_cache=Non
             "iva_calc": iva_calculado,
             "es_nuevo": es_nuevo,
             "nit_nuevo": nit_prov,
-            "motor": motor
+            "motor": motor,
+            "confianza_nit": confianza_nit,
+            "confianza_rs": confianza_rs
         }
 
     except Exception as err:
@@ -718,7 +925,7 @@ with st.sidebar:
                     bar.progress((idx + 1) / total)
                     continue
 
-                res = extraer_compras_nativo_pro(file_bytes, cliente, prov_cache)
+                res = extraer_compras_nativo_pro_v2(file_bytes, cliente, prov_cache)
 
                 codigo_gen = res.get('gen', '')
                 dup_memoria = (
@@ -831,7 +1038,7 @@ with st.sidebar:
             st.warning(f"{en_cola} en bandeja de revisión")
 
 # ═══════════════════════════════════════════════════════════════
-# 📋 BANDEJA DE REVISIÓN MANUAL
+# 📋 BANDEJA DE REVISIÓN MANUAL - CON INDICADORES DE CONFIANZA
 # ═══════════════════════════════════════════════════════════════
 
 if st.session_state.cola_revision:
@@ -848,6 +1055,31 @@ if st.session_state.cola_revision:
     total_cola = len(st.session_state.cola_revision)
     item_actual = st.session_state.cola_revision[0]
     datos = item_actual["datos"]
+
+    # ═════════════════════════════════════════════════════════════════
+    # INDICADORES DE CONFIANZA
+    # ═════════════════════════════════════════════════════════════════
+    col_prog1, col_prog2, col_prog3 = st.columns(3)
+    
+    with col_prog1:
+        conf_nit = datos.get('confianza_nit', 'baja')
+        st.markdown(
+            f"<div><strong>NIT Extraído:</strong> {mostrar_indicador_confianza(conf_nit)}</div>",
+            unsafe_allow_html=True
+        )
+    
+    with col_prog2:
+        conf_rs = datos.get('confianza_rs', 'baja')
+        st.markdown(
+            f"<div><strong>Razón Social:</strong> {mostrar_indicador_confianza(conf_rs)}</div>",
+            unsafe_allow_html=True
+        )
+    
+    with col_prog3:
+        st.markdown(
+            f"<div><strong>Documento:</strong> <span class='badge-revision'>REVISIÓN REQUERIDA</span></div>",
+            unsafe_allow_html=True
+        )
 
     st.info(f"Documento **1 de {total_cola}** en revisión.")
 
