@@ -69,6 +69,8 @@ if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 if "usuario_actual" not in st.session_state:
     st.session_state["usuario_actual"] = None
+if "pagina_actual" not in st.session_state:
+    st.session_state["pagina_actual"] = "Dashboard Hub"
 
 # --- 5. FASE 2: UI DE LOGIN Y REGISTRO ---
 def mostrar_registro_login():
@@ -112,39 +114,75 @@ def mostrar_registro_login():
                 else:
                     st.error("❌ Este usuario ya existe. Por favor elige otro.")
 
-# --- 6. NAVEGACIÓN Y ENRUTAMIENTO ---
+# --- 6. NAVEGACIÓN Y ENRUTAMIENTO (COMPATIBLE CON CUALQUIER VERSIÓN) ---
 if not st.session_state["autenticado"]:
     mostrar_registro_login()
 else:
-    # --- LA CONEXIÓN DEL NUEVO DASHBOARD ---
-    # default=True hace que esta sea la pantalla de aterrizaje oficial
-    page_inicio = st.Page("pages/0_Dashboard_Inicio.py", title="Dashboard Hub", icon="🏠", default=True)
-
-    # Definición de rutas EXACTAS según tu carpeta 'pages'
-    page_ventas = st.Page("pages/1_Extractor_DTE_Ventas.py", title="Extractor DTE Ventas", icon="📈")
-    page_compras = st.Page("pages/2_Extractor_DTE_Compras.py", title="Extractor DTE Compras", icon="🛒")
-    page_retenciones = st.Page("pages/3_Extractor_DTE_retenciones.py", title="Extractor DTE Retenciones", icon="✂️")
-    page_sujetos = st.Page("pages/4_Extractor_DTE_Sujetos_Excluidos.py", title="Extractor DTE Sujetos Excluidos", icon="⚖️")
+    # ═══════════════════════════════════════════════════════════════
+    # 🧭 NAVEGACIÓN MULTIPAGE (Compatible con Streamlit 1.12+)
+    # ═══════════════════════════════════════════════════════════════
     
-    page_clientes = st.Page("pages/5_Directorio_Clientes.py", title="Directorio Clientes", icon="👥")
-    page_proveedores = st.Page("pages/6_Directorio_Proveedores.py", title="Directorio Proveedores", icon="🏢")
+    # Mapeo de páginas con rutas exactas
+    PAGES = {
+        "🏠 Dashboard Hub": "pages/0_Dashboard_Inicio.py",
+        "📈 Extractor DTE Ventas": "pages/1_Extractor_DTE_Ventas.py",
+        "🛒 Extractor DTE Compras": "pages/2_Extractor_DTE_Compras.py",
+        "✂️ Extractor DTE Retenciones": "pages/3_Extractor_DTE_retenciones.py",
+        "⚖️ Extractor DTE Sujetos Excluidos": "pages/4_Extractor_DTE_Sujetos_Excluidos.py",
+        "👥 Directorio Clientes": "pages/5_Directorio_Clientes.py",
+        "🏢 Directorio Proveedores": "pages/6_Directorio_Proveedores.py",
+    }
     
     # Menú lateral organizado por categorías
-    nav = st.navigation({
-        "🚀 Inicio": [
-            page_inicio
-        ],
-        "⚙️ Módulos de Procesamiento": [
-            page_ventas, 
-            page_compras,
-            page_retenciones,
-            page_sujetos
-        ],
-        "🗄️ Administración": [
-            page_clientes, 
-            page_proveedores
-        ]
-    })
+    st.sidebar.title("📍 NAVEGACIÓN")
+    st.sidebar.markdown("---")
     
-    # Ejecutamos la página seleccionada
-    nav.run()
+    # Organización por categorías
+    with st.sidebar:
+        st.markdown("**🚀 Inicio**")
+        if st.button("🏠 Dashboard Hub", use_container_width=True, key="btn_inicio"):
+            st.session_state["pagina_actual"] = "🏠 Dashboard Hub"
+        
+        st.markdown("**⚙️ Módulos de Procesamiento**")
+        if st.button("📈 Extractor DTE Ventas", use_container_width=True, key="btn_ventas"):
+            st.session_state["pagina_actual"] = "📈 Extractor DTE Ventas"
+        
+        if st.button("🛒 Extractor DTE Compras", use_container_width=True, key="btn_compras"):
+            st.session_state["pagina_actual"] = "🛒 Extractor DTE Compras"
+        
+        if st.button("✂️ Extractor DTE Retenciones", use_container_width=True, key="btn_retenciones"):
+            st.session_state["pagina_actual"] = "✂️ Extractor DTE Retenciones"
+        
+        if st.button("⚖️ Extractor DTE Sujetos Excluidos", use_container_width=True, key="btn_sujetos"):
+            st.session_state["pagina_actual"] = "⚖️ Extractor DTE Sujetos Excluidos"
+        
+        st.markdown("**🗄️ Administración**")
+        if st.button("👥 Directorio Clientes", use_container_width=True, key="btn_clientes"):
+            st.session_state["pagina_actual"] = "👥 Directorio Clientes"
+        
+        if st.button("🏢 Directorio Proveedores", use_container_width=True, key="btn_proveedores"):
+            st.session_state["pagina_actual"] = "🏢 Directorio Proveedores"
+        
+        st.markdown("---")
+        st.markdown(f"**Usuario:** {st.session_state['usuario_actual']}")
+        if st.button("🚪 Cerrar Sesión", use_container_width=True, key="btn_logout"):
+            st.session_state["autenticado"] = False
+            st.session_state["usuario_actual"] = None
+            st.rerun()
+    
+    # Cargar y ejecutar la página seleccionada
+    page_path = PAGES.get(st.session_state["pagina_actual"])
+    
+    if page_path:
+        try:
+            with open(page_path, "r", encoding="utf-8") as f:
+                code = f.read()
+                exec(code, {"st": st, "__name__": "__main__"})
+        except FileNotFoundError:
+            st.error(f"❌ Archivo no encontrado: {page_path}")
+            st.info("✅ Asegúrate de que el archivo existe en la carpeta `pages/`")
+        except Exception as e:
+            st.error(f"❌ Error al cargar la página: {str(e)}")
+            st.info(f"📝 Detalles: {type(e).__name__}")
+    else:
+        st.warning("⚠️ Página no encontrada. Por favor, selecciona una opción del menú lateral.")
