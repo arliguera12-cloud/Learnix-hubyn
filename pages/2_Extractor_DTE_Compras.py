@@ -148,6 +148,16 @@ estilo_custom = """
         color: #90caf9;
         border: 1px solid #283593;
     }
+    .confianza-tabla {
+        background-color: #4a148c;
+        color: #ce93d8;
+        border: 1px solid #7b1fa2;
+    }
+    .confianza-ocr {
+        background-color: #01579b;
+        color: #81d4fa;
+        border: 1px solid #0277bd;
+    }
     .badge-revision {
         display: inline-block;
         padding: 3px 10px;
@@ -386,47 +396,39 @@ def mostrar_indicador_confianza(confianza):
         return '<span class="indicador-confianza confianza-media">MEDIA</span>'
     elif c == "cache":
         return '<span class="indicador-confianza confianza-cache">CACHE</span>'
+    elif c == "tabla":
+        return '<span class="indicador-confianza confianza-tabla">TABLA</span>'
+    elif c == "ocr":
+        return '<span class="indicador-confianza confianza-ocr">OCR</span>'
     else:
         return '<span class="indicador-confianza confianza-baja">BAJA</span>'
 
 # ═══════════════════════════════════════════════════════════════
-# ✅ EXTRACCION DE NIT — MEJORADA V4
-# (Busca en TODO el PDF, no solo en bloque emisor)
+# EXTRACCION DE NIT — V5 (MEGA BÚSQUEDA)
 # ═══════════════════════════════════════════════════════════════
 
 def _extraer_nit_completo_pdf(texto_lineal, texto_visual, file_bytes):
-    """
-    ✅ MEGA-BUSQUEDA de NIT en:
-    1. Bloque emisor (texto lineal)
-    2. Todo el PDF (visual)
-    3. Tablas del PDF
-    Garantiza encontrar el NIT aunque este en cualquier parte.
-    """
+    """Busca NIT en texto, visual y tablas del PDF."""
     textos_busqueda = [texto_lineal, texto_visual]
     
-    # PASO 1: Patrones sobre textos disponibles
     for texto in textos_busqueda:
         t = re.sub(r'\s+', ' ', texto).upper()
         
         # Patron 1: NIT con guiones XXXX-XXXXXX-XXX-X
-        m = re.search(
-            r'NIT\s*[#:]?\s*(\d{4})\s*-\s*(\d{6})\s*-\s*(\d{3})\s*-\s*(\d)',
-            t
-        )
+        m = re.search(r'NIT\s*[#:]?\s*(\d{4})\s*-\s*(\d{6})\s*-\s*(\d{3})\s*-\s*(\d)', t)
         if m:
             nit = f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}"
             return nit, "alta"
         
-        # Patron 2: NIT sin guiones directo tras etiqueta
+        # Patron 2: NIT sin guiones directo
         m = re.search(r'NIT\s*[#:]?\s*(\d{14})', t)
         if m:
             return m.group(1), "alta"
         
-        # Patron 3: Cualquier 14 digitos que empiece con 0 o 1
+        # Patron 3: 14 digitos que empiece con 0 o 1
         m = re.search(r'\b([01]\d{13})\b', t)
         if m:
             nit = m.group(1)
-            # Validar que no sea un total (total > 100,000 es sospechoso)
             if int(nit) < 100000000000000:
                 return nit, "media"
         
@@ -438,7 +440,7 @@ def _extraer_nit_completo_pdf(texto_lineal, texto_visual, file_bytes):
     # PASO 2: Buscar en tablas del PDF
     try:
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
-            for page in pdf.pages[:3]:  # Primeras 3 páginas
+            for page in pdf.pages[:3]:
                 for table in (page.extract_tables() or []):
                     for row in table:
                         for cell in (row or []):
@@ -446,16 +448,11 @@ def _extraer_nit_completo_pdf(texto_lineal, texto_visual, file_bytes):
                                 continue
                             cell_str = str(cell).upper()
                             
-                            # 14 digitos pegados
                             m = re.search(r'\b(0\d{13}|1\d{13})\b', cell_str)
                             if m:
                                 return m.group(1), "media"
                             
-                            # Formato con guiones
-                            m = re.search(
-                                r'(\d{4})-?(\d{6})-?(\d{3})-?(\d)',
-                                cell_str
-                            )
+                            m = re.search(r'(\d{4})-?(\d{6})-?(\d{3})-?(\d)', cell_str)
                             if m:
                                 nit = f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}"
                                 if nit.startswith('0') or nit.startswith('1'):
@@ -467,53 +464,140 @@ def _extraer_nit_completo_pdf(texto_lineal, texto_visual, file_bytes):
 
 
 def _buscar_nit_en_todas_lineas(texto_emisor):
-    """
-    Fallback: busca NIT en cada linea del bloque emisor.
-    Util cuando esta sin etiqueta "NIT:".
-    """
+    """Fallback: busca NIT en cada línea del bloque emisor."""
     lineas = texto_emisor.split('\n')
     for linea in lineas:
         linea_clean = linea.upper().strip()
         
-        # Linea que contenga muchos digitos (probable NIT/ubicacion)
         if re.search(r'^\d{4}\s*-?\s*\d{6}', linea_clean):
-            # Extrae primeros 14 digitos
             m = re.search(r'(\d{4})\s*-?(\d{6})\s*-?(\d{3})\s*-?(\d)', linea_clean)
             if m:
                 return f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}", "alta"
         
-        # Linea con exactamente 14 digitos
         m = re.search(r'\b(\d{14})\b', linea_clean)
         if m:
-            # Validar que no sea fecha o total
             if not re.search(r'(19|20)\d{2}', linea_clean):
                 return m.group(1), "media"
     
     return "", "baja"
 
 # ═══════════════════════════════════════════════════════════════
-# EXTRACCION DE RAZON SOCIAL — V4
-# (Consulta SIEMPRE el cache primero)
+# EXTRACCION DE RAZON SOCIAL DE TABLAS (V5 NUEVO)
 # ═══════════════════════════════════════════════════════════════
 
-def _extraer_razon_social_v4(nit_prov, texto_emisor, prov_db, cliente_nombre):
+def _extraer_razon_social_de_tablas(file_bytes, nit_prov):
+    """Busca RS en celdas adyacentes al NIT o por palabras clave."""
+    try:
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages[:2]:
+                tables = page.extract_tables()
+                if not tables:
+                    continue
+                
+                for table in tables:
+                    for row_idx, row in enumerate(table):
+                        if not row:
+                            continue
+                        
+                        for col_idx, cell in enumerate(row):
+                            if not cell:
+                                continue
+                            
+                            cell_str = str(cell).strip()
+                            
+                            # Si encontramos el NIT en esta celda
+                            if nit_prov and nit_prov in cell_str.replace('-', ''):
+                                # Buscar en celdas adyacentes
+                                if col_idx + 1 < len(row):
+                                    right_cell = str(row[col_idx + 1] or "").strip().upper()
+                                    if (len(right_cell) > 5 and len(right_cell) < 70 
+                                        and not any(b in right_cell for b in BASURA_ESTRICTA)
+                                        and not re.search(r'^\d+', right_cell)):
+                                        return right_cell, "tabla"
+                                
+                                if row_idx + 1 < len(table):
+                                    down_cell = str(table[row_idx + 1][col_idx] or "").strip().upper()
+                                    if (len(down_cell) > 5 and len(down_cell) < 70 
+                                        and not any(b in down_cell for b in BASURA_ESTRICTA)
+                                        and not re.search(r'^\d+', down_cell)):
+                                        return down_cell, "tabla"
+                                
+                                if col_idx - 1 >= 0:
+                                    left_cell = str(row[col_idx - 1] or "").strip().upper()
+                                    if (len(left_cell) > 5 and len(left_cell) < 70 
+                                        and not any(b in left_cell for b in BASURA_ESTRICTA)
+                                        and not re.search(r'^\d+', left_cell)):
+                                        return left_cell, "tabla"
+                        
+                        # Buscar nombres con palabras clave en cualquier celda
+                        for col_idx, cell in enumerate(row):
+                            if not cell:
+                                continue
+                            cell_str = str(cell).strip().upper()
+                            
+                            if any(marca in cell_str for marca in ["GRUPO ", "S.A.", "S.A DE", "LTDA", "S.R.L."]):
+                                if (len(cell_str) > 5 and len(cell_str) < 70 
+                                    and not any(b in cell_str for b in BASURA_ESTRICTA)):
+                                    return cell_str, "tabla"
+    
+    except Exception:
+        pass
+    
+    return "", "baja"
+
+
+# ═══════════════════════════════════════════════════════════════
+# EXTRACCION DE RAZON SOCIAL CON OCR LOCALIZADO (V5 NUEVO)
+# ═══════════════════════════════════════════════════════════════
+
+def _extraer_razon_social_con_ocr(file_bytes, nit_prov):
+    """OCR localizado: busca nombre cerca del NIT."""
+    try:
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages[:2]:
+                img = page.to_image(resolution=200)
+                ocr_text = pytesseract.image_to_string(img.original, lang='spa')
+                
+                for linea in ocr_text.split('\n'):
+                    if nit_prov and nit_prov[:8] in linea.replace('-', ''):
+                        lineas_list = ocr_text.split('\n')
+                        try:
+                            idx = lineas_list.index(linea)
+                        except ValueError:
+                            idx = -1
+                        
+                        if idx > -1:
+                            for next_line in lineas_list[idx+1:idx+4]:
+                                next_clean = next_line.strip().upper()
+                                if (len(next_clean) > 5 and len(next_clean) < 70 
+                                    and not re.search(r'^\d+', next_clean)
+                                    and not any(bad in next_clean for bad in BASURA_ESTRICTA)):
+                                    return next_clean, "ocr"
+    except Exception:
+        pass
+    
+    return "", "baja"
+
+# ═══════════════════════════════════════════════════════════════
+# EXTRACCION DE RAZON SOCIAL — V5 MEJORADA (5 NIVELES)
+# ═══════════════════════════════════════════════════════════════
+
+def _extraer_razon_social_v5(nit_prov, texto_emisor, prov_db, cliente_nombre, file_bytes):
     """
-    ✅ PASO 1: Verificar cache PRIMERO
-    ✅ PASO 2: Si no esta en cache, extraer del PDF
+    ✅ PASO 1: Cache
+    ✅ PASO 2: Patrones estrictos
+    ✅ PASO 3: Tablas (adyacentes al NIT)
+    ✅ PASO 4: OCR localizado
+    ✅ PASO 5: Fallback líneas con marcas
     """
     
-    # ┌─────────────────────────────────────────────────┐
-    # │ PASO 1: CONSULTAR CACHE — SIEMPRE PRIMERO       │
-    # └─────────────────────────────────────────────────┘
+    # PASO 1: CACHE
     if nit_prov and nit_prov in prov_db:
         nombre_cache = prov_db[nit_prov].get("nombre", "")
         if nombre_cache and nombre_cache != NOMBRE_PLACEHOLDER:
             return nombre_cache, "cache"
     
-    # ┌─────────────────────────────────────────────────┐
-    # │ PASO 2: EXTRAER DE PATRONES ESTRICTOS           │
-    # └─────────────────────────────────────────────────┘
-    
+    # PASO 2: PATRONES ESTRICTOS
     patrones = [
         (
             r"(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE\s+O\s+RAZ[OÓ]N\s*SOCIAL)\s*[:\-]?\s*"
@@ -553,10 +637,19 @@ def _extraer_razon_social_v4(nit_prov, texto_emisor, prov_db, cliente_nombre):
 
         return candidato.upper(), confianza
 
-    # ┌─────────────────────────────────────────────────┐
-    # │ PASO 3: FALLBACK — LINEAS CON MARCAS COMERCIALES│
-    # └─────────────────────────────────────────────────┘
-    
+    # PASO 3: TABLAS
+    if nit_prov:
+        rs_tabla, conf_tabla = _extraer_razon_social_de_tablas(file_bytes, nit_prov)
+        if rs_tabla:
+            return rs_tabla, conf_tabla
+
+    # PASO 4: OCR LOCALIZADO
+    if nit_prov:
+        rs_ocr, conf_ocr = _extraer_razon_social_con_ocr(file_bytes, nit_prov)
+        if rs_ocr:
+            return rs_ocr, conf_ocr
+
+    # PASO 5: FALLBACK
     for linea in texto_emisor.split('\n')[:30]:
         L = linea.strip().upper()
         if len(L) < 5:
@@ -578,14 +671,11 @@ def _extraer_razon_social_v4(nit_prov, texto_emisor, prov_db, cliente_nombre):
     return NOMBRE_PLACEHOLDER, "baja"
 
 # ═══════════════════════════════════════════════════════════════
-# MOTOR DE EXTRACCION DTE COMPRAS — V4 (ESTABLE + ROBUSTO)
+# MOTOR DE EXTRACCION DTE COMPRAS — V5
 # ═══════════════════════════════════════════════════════════════
 
-def extraer_compras_nativo_pro_v4(file_bytes, cliente_activo, proveedores_cache=None):
-    """
-    Motor V4 — Busqueda EXHAUSTIVA de NIT + CACHE FIRST para RS.
-    NO hay NITs vacios, NO hay RS huerfanas.
-    """
+def extraer_compras_nativo_pro_v5(file_bytes, cliente_activo, proveedores_cache=None):
+    """Motor V5 — Extracción ultra-robusta con tablas y OCR."""
     motor = "Nativo"
 
     try:
@@ -614,7 +704,6 @@ def extraer_compras_nativo_pro_v4(file_bytes, cliente_activo, proveedores_cache=
         t_clean     = re.sub(r'\s+', ' ', texto_completo)
         t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
 
-        # ── Tipo y numero de control DTE ──────────────────────────────
         m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_spaces)
         tipo = "01"
         ctrl = ""
@@ -633,7 +722,6 @@ def extraer_compras_nativo_pro_v4(file_bytes, cliente_activo, proveedores_cache=
         nit_receptor = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
         dui_receptor = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
 
-        # ── UUID / Codigo de generacion ───────────────────────────────
         gen = ""
         m_url = re.search(r"CODGEN=([A-F0-9-]+)", t_no_spaces)
         if m_url:
@@ -648,10 +736,8 @@ def extraer_compras_nativo_pro_v4(file_bytes, cliente_activo, proveedores_cache=
                 if len(raw) >= 32:
                     gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:32]}"
 
-        # ── Fecha ─────────────────────────────────────────────────────
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        # ── Bloque del EMISOR ─────────────────────────────────────────
         partes_emisor = re.split(
             r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b",
             texto_lineal
@@ -660,51 +746,36 @@ def extraer_compras_nativo_pro_v4(file_bytes, cliente_activo, proveedores_cache=
         if len(texto_emisor.strip()) < 100:
             texto_emisor = texto_lineal[:1500]
 
-        # ── Cargar cache de proveedores ───────────────────────────────
         prov_db = proveedores_cache if proveedores_cache is not None else cargar_proveedores_json()
 
-        # ════════════════════════════════════════════════════════════════
-        # ✅ EXTRACCION DE NIT — MEGA-BUSQUEDA (V4)
-        # ════════════════════════════════════════════════════════════════
         nit_prov, confianza_nit = _extraer_nit_completo_pdf(
             texto_lineal, texto_visual, file_bytes
         )
 
-        # Fallback: buscar linea por linea
         if not nit_prov:
             nit_prov, confianza_nit = _buscar_nit_en_todas_lineas(texto_emisor)
 
-        # Descartar si es el receptor
         if nit_prov in (nit_receptor, dui_receptor):
             nit_prov      = ""
             confianza_nit = "baja"
 
-        # ════════════════════════════════════════════════════════════════
-        # ✅ EXTRACCION DE RAZON SOCIAL — CACHE FIRST (V4)
-        # ════════════════════════════════════════════════════════════════
-        nom_prov, confianza_rs = _extraer_razon_social_v4(
-            nit_prov, texto_emisor, prov_db, cliente_activo.get('nombre', '')
+        nom_prov, confianza_rs = _extraer_razon_social_v5(
+            nit_prov, texto_emisor, prov_db, cliente_activo.get('nombre', ''), file_bytes
         )
 
-        # Determinar si es nuevo proveedor
         es_nuevo = True
         if nit_prov and nit_prov in prov_db:
             es_nuevo = False
 
-        # Normalizar nombre si es placeholder
         if nom_prov == NOMBRE_PLACEHOLDER:
             nom_normalizado = normalizar_nombre_proveedor(nom_prov, "")
             if nom_normalizado != NOMBRE_PLACEHOLDER:
                 nom_prov = nom_normalizado
 
-        # DUI si son 9 digitos
         dui_prov = ""
         if len(nit_prov) == 9:
             dui_prov = nit_prov
 
-        # ════════════════════════════════════════════════════════════════
-        # EXTRACCION DE MONTOS (SIN CAMBIOS)
-        # ════════════════════════════════════════════════════════════════
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
 
@@ -924,7 +995,7 @@ with st.sidebar:
                     bar.progress((idx + 1) / total)
                     continue
 
-                res = extraer_compras_nativo_pro_v4(file_bytes, cliente, prov_cache)
+                res = extraer_compras_nativo_pro_v5(file_bytes, cliente, prov_cache)
 
                 codigo_gen = res.get('gen', '')
                 dup_memoria = (
@@ -962,9 +1033,8 @@ with st.sidebar:
                     except (TypeError, ValueError):
                         tot_float = 0.0
 
-                    # ✅ FIX: NIT vacio O (NIT+Nombre pero sin Total/UUID/Fecha) = revision
                     necesita_revision = (
-                        not nit_prov_str  # ← NIT VACIO = REVISION
+                        not nit_prov_str
                         or tot_float == 0.0
                         or not res.get('gen')
                         or not fecha_str
