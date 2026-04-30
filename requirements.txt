@@ -1,19 +1,23 @@
-# Core Framework
+# Core
 streamlit==1.28.1
 pandas==2.0.3
-openpyxl==3.1.2
 
-# PDF Processing
+# PDF & OCR
 pdfplumber==0.9.0
 pytesseract==0.3.10
 Pillow==10.0.0
 
-# Data Processing
+# Excel
+openpyxl==3.1.2
+xlsxwriter==3.1.2
+
+# Data
 numpy==1.24.3
-
-# Utilities
 python-dateutil==2.8.2
-requests==2.31.0
 
-# Security (si usas passwords)
+# Auth (opcional)
 streamlit-authenticator==0.2.3
+
+# Utils
+requests==2.31.0
+jinja2==3.1.2
