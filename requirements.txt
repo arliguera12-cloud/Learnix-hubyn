@@ -1,37 +1,8 @@
-# ════════════════════════════════════════════════════════════
-# LEARNIX HUB - Requirements Compatible
-# ════════════════════════════════════════════════════════════
-
-# Core Framework & UI
 streamlit==1.28.1
-streamlit-authenticator==0.2.3
-
-# Data Processing
 pandas==2.0.3
-numpy==1.24.3
-python-dateutil==2.8.2
-
-# PDF Extraction & Processing
-pdfplumber==0.9.0
+plotly==5.14.0
+pdfrw==0.4
 pytesseract==0.3.10
-Pillow==10.0.0
-
-# Excel Generation
+pillow==9.5.0
 openpyxl==3.1.2
-xlsxwriter==3.1.2
-
-# HTTP & Utilities
-requests==2.31.0
-jinja2==3.1.2
-markdown==3.5.1
-
-# JSON & YAML (si lo usas)
-pyyaml==6.0.1
-
-# ════════════════════════════════════════════════════════════
-# NOTAS:
-# - Streamlit 1.28.1 es estable y compatible con todos los módulos
-# - pandas 2.0.3 requiere numpy>=1.23.5
-# - pdfplumber requiere Pillow para OCR
-# - pytesseract es wrapper de Tesseract (sistema Linux)
-# ════════════════════════════════════════════════════════════
+python-dotenv==1.0.0
