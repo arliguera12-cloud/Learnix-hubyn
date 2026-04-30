@@ -11,23 +11,11 @@ if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
     st.stop()
 
 # ═══════════════════════════════════════════════════════════════
-# 📋 CONFIGURACIÓN DE PÁGINA
-# ═══════════════════════════════════════════════════════════════
-st.set_page_config(
-    page_title="Learnix Hub - Dashboard",
-    layout="wide",  # Cambio: centered → wide (mejor para 4 módulos)
-    page_icon="🚀",
-    initial_sidebar_state="expanded"
-)
-
-# ═══════════════════════════════════════════════════════════════
-# 🎨 ESTILOS GLOBALES MEJORADOS
+# 🎨 ESTILOS GLOBALES
 # ═══════════════════════════════════════════════════════════════
 estilo_custom = """
 <style>
-    /* FONDOS */
-    [data-testid="stAppViewContainer"],
-    [data-testid="stHeader"] {
+    [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
         background-color: #000000 !important;
     }
     
@@ -36,21 +24,14 @@ estilo_custom = """
         border-right: 1px solid #333333 !important;
     }
     
-    /* TEXTOS */
     h1, h2, h3, h4, h5, h6, p, label, span, div {
         color: #F7F5EE !important;
     }
     
-    /* SELECTBOX */
     .stSelectbox label {
         display: none !important;
     }
     
-    .stSelectbox [data-testid="stSelectboxFormFieldLabel"] {
-        display: none !important;
-    }
-    
-    /* TARJETAS DE MÓDULOS */
     .modulo-card {
         background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
         padding: 25px;
@@ -113,54 +94,32 @@ estilo_custom = """
         margin: 0;
     }
     
-    /* SELECTBOX MEJORADO */
-    .stSelectbox > div > div {
-        border: 1px solid #333 !important;
-        border-radius: 6px !important;
-    }
-    
-    .stSelectbox > div > div:hover {
-        border-color: #4DA8DA !important;
-    }
-    
-    /* ALERTAS */
     [data-testid="stAlert"] {
         border-radius: 8px;
         padding: 16px;
         margin: 12px 0;
     }
     
-    /* DIVIDERS */
     hr {
         border-color: #333 !important;
         margin: 24px 0 !important;
-    }
-    
-    /* COLUMNAS */
-    [data-testid="stColumn"] {
-        gap: 16px !important;
     }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 💾 FUNCIONES DE DATOS CON VALIDACIÓN ROBUSTA
+# 💾 FUNCIONES DE DATOS
 # ═══════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=30)  # Cache de 30 segundos
+@st.cache_data(ttl=30)
 def cargar_clientes():
-    """
-    Carga clientes desde JSON con validación exhaustiva.
-    Retorna dict {nit: {nombre, dui, nrc, actividad}}
-    """
+    """Carga clientes desde JSON con validación."""
     ruta = "data/clientes.json"
     
-    # Crear carpeta si no existe
     if not os.path.exists("data"):
         os.makedirs("data")
     
-    # Crear archivo vacío si no existe
     if not os.path.exists(ruta):
         with open(ruta, "w", encoding="utf-8") as f:
             json.dump({}, f)
@@ -170,7 +129,6 @@ def cargar_clientes():
         with open(ruta, "r", encoding="utf-8") as f:
             data = json.load(f)
         
-        # VALIDACIÓN: Asegura que cada cliente es un dict válido
         clientes_validados = {}
         for nit, cliente in data.items():
             if isinstance(cliente, dict) and cliente.get("nombre"):
@@ -185,7 +143,7 @@ def cargar_clientes():
         return clientes_validados
     
     except json.JSONDecodeError:
-        st.error("❌ Error: clientes.json está corrupto. Contacta al administrador.")
+        st.error("❌ Error: clientes.json está corrupto.")
         return {}
     except Exception as e:
         st.error(f"❌ Error al cargar clientes: {str(e)}")
@@ -199,13 +157,9 @@ def obtener_nombre_usuario():
 
 
 def obtener_cliente_activo_seguro():
-    """
-    Obtiene el cliente activo con validación segura.
-    Retorna dict o None si no está configurado.
-    """
+    """Obtiene el cliente activo con validación segura."""
     cliente = st.session_state.get("cliente_activo")
     
-    # Blindaje contra None y tipos inválidos
     if not isinstance(cliente, dict):
         return None
     
@@ -236,7 +190,6 @@ with col_header2:
     )
 
 with col_header3:
-    # Hora actual
     hora_actual = datetime.now().strftime("%H:%M")
     st.markdown(
         f"<p style='text-align: right; color: #666; margin: 0;'>⏰ {hora_actual}</p>",
@@ -246,7 +199,7 @@ with col_header3:
 st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# 🏢 SELECTOR DE EMPRESA (CON FIX DE LOOP INFINITO)
+# 🏢 SELECTOR DE EMPRESA
 # ═══════════════════════════════════════════════════════════════
 
 db_clientes = cargar_clientes()
@@ -257,15 +210,11 @@ col_sel1, col_sel2, col_sel3 = st.columns([1, 2, 1])
 with col_sel2:
     if not db_clientes:
         st.warning(
-            """
-            ⚠️ **Tu Directorio de Clientes está vacío**
-            
-            👉 Ve a **🏢 Directorio Clientes** en el menú lateral para agregar tu primera empresa.
-            """
+            "⚠️ **Tu Directorio de Clientes está vacío**\n\n"
+            "👉 Ve a **🏢 Directorio Clientes** en el menú lateral para agregar tu primera empresa."
         )
         st.session_state.cliente_activo = None
     else:
-        # LISTA DE OPCIONES
         opciones = ["-- Selecciona una empresa --"]
         mapa_opciones = {}
         
@@ -275,8 +224,6 @@ with col_sel2:
             opciones.append(label)
             mapa_opciones[label] = datos
         
-        # SELECTBOX SIN CREAR RERUN LOOP
-        # FIX: Usar key único y on_change callback en lugar de condición IF
         indice_actual = 0
         if cliente_activo and "nit" in cliente_activo:
             for idx, label in enumerate(opciones[1:], 1):
@@ -292,11 +239,9 @@ with col_sel2:
             key="selector_empresa"
         )
         
-        # SOLO actualizar si cambió la selección
         if seleccion_idx > 0:
             empresa_seleccionada = mapa_opciones[opciones[seleccion_idx]]
             
-            # Comparar para evitar rerun innecesarios
             if not cliente_activo or cliente_activo.get("nit") != empresa_seleccionada["nit"]:
                 st.session_state.cliente_activo = empresa_seleccionada
                 st.success(f"✅ Entorno configurado para: **{empresa_seleccionada['nombre']}**")
@@ -315,41 +260,28 @@ if cliente_activo:
     col_info1, col_info2, col_info3, col_info4 = st.columns(4)
     
     with col_info1:
-        st.metric(
-            "🏢 Empresa",
-            cliente_activo.get("nombre", "N/A")[:20]
-        )
+        st.metric("🏢 Empresa", cliente_activo.get("nombre", "N/A")[:20])
     
     with col_info2:
-        st.metric(
-            "🆔 NIT",
-            cliente_activo.get("nit", "N/A")
-        )
+        st.metric("🆔 NIT", cliente_activo.get("nit", "N/A"))
     
     with col_info3:
         nrc = cliente_activo.get("nrc", "N/A")
-        st.metric(
-            "📋 NRC",
-            nrc if nrc else "—"
-        )
+        st.metric("📋 NRC", nrc if nrc else "—")
     
     with col_info4:
         actividad = cliente_activo.get("actividad", "N/A")[:15]
-        st.metric(
-            "🏭 Actividad",
-            actividad if actividad else "—"
-        )
+        st.metric("🏭 Actividad", actividad if actividad else "—")
     
     st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# 🔧 MÓDULOS DISPONIBLES (GRID 2x2)
+# 🔧 MÓDULOS DISPONIBLES
 # ═══════════════════════════════════════════════════════════════
 
 st.markdown("### 🚀 Módulos de Procesamiento")
 st.write("Selecciona un módulo en el menú lateral para comenzar")
 
-# ROW 1: Ventas + Compras
 col1, col2 = st.columns(2, gap="large")
 
 with col1:
@@ -378,7 +310,6 @@ with col2:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ROW 2: Retenciones + Sujetos Excluidos
 col3, col4 = st.columns(2, gap="large")
 
 with col3:
@@ -425,7 +356,6 @@ if cliente_activo:
     with col_stats3:
         st.metric("📁 Directorio", "Configurado")
     
-    # Próximos pasos
     with st.expander("💡 Próximos Pasos Recomendados"):
         st.markdown("""
         1. **Agregar Proveedores** — Ve a **🏢 Directorio Proveedores** para crear tu base maestra
@@ -438,7 +368,7 @@ else:
     st.info("💡 Selecciona una empresa arriba para ver el estado del entorno")
 
 # ═══════════════════════════════════════════════════════════════
-# 🔑 FOOTER CON INFORMACIÓN DEL SISTEMA
+# 🔑 FOOTER
 # ═══════════════════════════════════════════════════════════════
 
 st.divider()
