@@ -1,13 +1,13 @@
 [theme]
-primaryColor = "#FF4B4B"
+primaryColor = "#666D57"
 backgroundColor = "#000000"
 secondaryBackgroundColor = "#161616"
 textColor = "#F7F5EE"
 font = "sans serif"
 
 [client]
-showErrorDetails = false
-maxMessageSize = 200
+showErrorDetails = true
+toolbarMode = "minimal"
 
 [logger]
 level = "info"
