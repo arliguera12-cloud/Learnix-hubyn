@@ -178,7 +178,8 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         texto_emisor_aislado = re.split(r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b", texto_lineal)[0]
         if len(texto_emisor_aislado) < 100: texto_emisor_aislado = texto_lineal[:1500]
 
-        patron_identificadores = r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*-\s*\d{1}\b|\b\d{9}\b"
+        # --- SANITY CHECK 1: RADAR DE NIT FLEXIBLE (Ignora espacios/guiones si es necesario) ---
+        patron_identificadores = r"\b\d{4}\s*[-]?\s*\d{6}\s*[-]?\s*\d{3}\s*[-]?\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*[-]?\s*\d{1}\b|\b\d{9}\b"
         nits_encontrados = re.findall(patron_identificadores, texto_emisor_aislado)
         nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_encontrados]))
         nits_candidatos = [n for n in nits_limpios if n != nit_receptor_limpio and n != dui_receptor_limpio]
@@ -205,12 +206,17 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                 "EFECTIVO", "FECHA", "HORA", "EMISIÓN", "GENERACIÓN", "TELÉFONO"
             ]
             
+            # --- SANITY CHECK 2: ESCUDO ANTI-ARROBA Y CORREOS ---
+            basura_estricta = ["@", "EMAIL", "CORREO", ".COM", "WWW."]
+            
             regex_nombre_etiqueta = r"(?:Nombre[:\s]+|Nombre o raz[oó]n social[:\s]+|Raz[oó]n Social[:\s]+)(.*?)(?:NIT|NRC|Giro|Actividad|Direcci[oó]n|$)"
             m_nombre_etiqueta = re.search(regex_nombre_etiqueta, texto_emisor_aislado, re.I)
             if m_nombre_etiqueta:
                 candidato = m_nombre_etiqueta.group(1).strip()
-                if len(candidato) > 5 and not any(b in candidato.upper() for b in ["RECEPTOR", cliente_activo['nombre'].upper().split()[0]]):
-                    nom_prov = candidato.upper()
+                # Verifica si el candidato es un correo o algo del cliente
+                if len(candidato) > 5 and not any(b in candidato.upper() for b in ["RECEPTOR"] + cliente_activo['nombre'].upper().split()[0:2]):
+                    if not any(bad in candidato.upper() for bad in basura_estricta):
+                        nom_prov = candidato.upper()
             
             if nom_prov == "⚠️ PROVEEDOR NUEVO":
                 lineas = texto_emisor_aislado.split('\n')
@@ -218,6 +224,9 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                     L = L.strip().upper()
                     if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3: continue
                     if any(b in L for b in palabras_basura): continue
+                    
+                    # Filtra líneas que contengan correos electrónicos
+                    if any(bad in L for bad in basura_estricta): continue
                     
                     es_comercial = any(w in L for w in ["S.A.", "SA ", "C.V.", "CV ", "LTDA.", "LTDA", "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO", "LABORATORIOS", "INDUSTRIAS"])
                     if es_comercial:
@@ -238,7 +247,7 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
         
-        # --- NUEVO RADAR DE FOVIAL, COTRANS Y EXENTOS ---
+        # --- RADAR DE FOVIAL, COTRANS Y EXENTOS ---
         fovial, cotrans = 0.0, 0.0
         m_fovial_line = re.search(r"FOVIAL.{0,40}", texto_completo, re.I)
         if m_fovial_line:
@@ -252,7 +261,6 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
 
         e = round(fovial + cotrans, 2)
 
-        # Buscar explícitamente "Ventas Exentas" por si no es gasolinera
         m_exe = re.search(r"(?:Ventas Exentas|Total Exento)[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
         if m_exe:
             val_exe = limpiar_monto(m_exe.group(1))
@@ -273,7 +281,6 @@ def extraer_compras_nativo_pro(file_bytes, cliente_activo):
                 if val_g >= val_t: continue
                 for val_i in valores:
                     if val_i >= val_g: continue
-                    # Prueba matemática con FOVIAL/COTRANS incluidos: Base * 13% = IVA y Base + IVA + Exentos - Retención = Total
                     if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
                         if abs(round((val_g + val_i + e - ret), 2) - round(val_t, 2)) <= 0.05:
                             g, i, t = val_g, val_i, val_t
@@ -372,6 +379,7 @@ with st.sidebar:
                         fecha_str = str(res.get('fecha', '')).strip()
                         nom_prov_str = str(res.get('nom_prov', '')).strip()
                         
+                        # --- FILTRO 2: Envío a Revisión Manual o Aprobación ---
                         if res.get('tot', 0.0) == 0.0 or not res.get('gen') or not fecha_str or nom_prov_str == "ESCRIBE EL NOMBRE AQUÍ" or nom_prov_str == "": 
                             st.session_state.cola_revision.append({
                                 "archivo": f.name,
@@ -452,7 +460,6 @@ if st.session_state.cola_revision:
             if nom_sugerido == "ESCRIBE EL NOMBRE AQUÍ": nom_sugerido = ""
             f_nom = st.text_input("🏢 Razón Social del Proveedor *", value=nom_sugerido)
             
-            # --- NUEVA CAJA PARA EXENTOS MANUALES ---
             c_mon1, c_mon2 = st.columns(2)
             with c_mon1:
                 f_tot = st.number_input("💰 Total a Pagar ($) *", value=float(datos_actuales.get("tot", 0.0)), format="%.2f")
@@ -481,7 +488,6 @@ if st.session_state.cola_revision:
                         datos_actuales["tot"] = f_tot
                         datos_actuales["exe"] = f_exe
                         
-                        # Recálculo con el exento que hayas puesto
                         if f_tot > 0 and datos_actuales["iva"] == 0:
                             datos_actuales["gra"] = round((f_tot - f_exe) / 1.13, 2)
                             datos_actuales["iva"] = round(f_tot - f_exe - datos_actuales["gra"], 2)
