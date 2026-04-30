@@ -15,3 +15,12 @@ level = "info"
 [server]
 maxUploadSize = 500
 enableXsrfProtection = true
+[client]
+showSidebarNavigation = false
+
+[theme]
+primaryColor = "#003057"
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#161616"
+textColor = "#F7F5EE"
+font = "sans serif"
