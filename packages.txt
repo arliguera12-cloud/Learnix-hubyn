@@ -1,4 +1,3 @@
+# packages.txt
 tesseract-ocr
-poppler-utils
-libtiff5
-libpoppler-cpp-dev
+libtesseract-dev
