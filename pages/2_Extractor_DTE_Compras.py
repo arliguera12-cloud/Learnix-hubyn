@@ -404,6 +404,53 @@ def mostrar_indicador_confianza(confianza):
         return '<span class="indicador-confianza confianza-baja">BAJA</span>'
 
 # ═══════════════════════════════════════════════════════════════
+# HELPERS PARA CACHE FLEXIBLE
+# ═══════════════════════════════════════════════════════════════
+
+def _normalizar_nit_para_cache(nit_raw):
+    """Devuelve solo digitos del NIT para comparacion uniforme."""
+    return re.sub(r'[^0-9]', '', str(nit_raw))
+
+
+def _buscar_en_cache_flexible(nit_prov, prov_db):
+    """
+    Busca el NIT en el cache de 3 formas:
+    1. Busqueda exacta (como viene)
+    2. Solo digitos vs solo digitos de las claves del JSON
+    3. Primeros 8 digitos coinciden (fallback suave)
+    """
+    if not nit_prov or not prov_db:
+        return "", False
+
+    nit_solo_digitos = _normalizar_nit_para_cache(nit_prov)
+
+    # Busqueda 1: exacta
+    if nit_prov in prov_db:
+        nombre = prov_db[nit_prov].get("nombre", "")
+        if nombre and nombre != NOMBRE_PLACEHOLDER:
+            return nombre, True
+
+    # Busqueda 2: solo digitos vs claves normalizadas
+    for clave_json, valor in prov_db.items():
+        clave_normalizada = _normalizar_nit_para_cache(clave_json)
+        if clave_normalizada == nit_solo_digitos:
+            nombre = valor.get("nombre", "") if isinstance(valor, dict) else str(valor)
+            if nombre and nombre != NOMBRE_PLACEHOLDER:
+                return nombre, True
+
+    # Busqueda 3: primeros 8 digitos (fallback suave, solo si longitud >= 8)
+    if len(nit_solo_digitos) >= 8:
+        prefijo = nit_solo_digitos[:8]
+        for clave_json, valor in prov_db.items():
+            clave_normalizada = _normalizar_nit_para_cache(clave_json)
+            if clave_normalizada.startswith(prefijo):
+                nombre = valor.get("nombre", "") if isinstance(valor, dict) else str(valor)
+                if nombre and nombre != NOMBRE_PLACEHOLDER:
+                    return nombre, True
+
+    return "", False
+
+# ═══════════════════════════════════════════════════════════════
 # EXTRACCION DE NIT — V5 (MEGA BÚSQUEDA)
 # ═══════════════════════════════════════════════════════════════
 
@@ -414,30 +461,25 @@ def _extraer_nit_completo_pdf(texto_lineal, texto_visual, file_bytes):
     for texto in textos_busqueda:
         t = re.sub(r'\s+', ' ', texto).upper()
         
-        # Patron 1: NIT con guiones XXXX-XXXXXX-XXX-X
         m = re.search(r'NIT\s*[#:]?\s*(\d{4})\s*-\s*(\d{6})\s*-\s*(\d{3})\s*-\s*(\d)', t)
         if m:
             nit = f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}"
             return nit, "alta"
         
-        # Patron 2: NIT sin guiones directo
         m = re.search(r'NIT\s*[#:]?\s*(\d{14})', t)
         if m:
             return m.group(1), "alta"
         
-        # Patron 3: 14 digitos que empiece con 0 o 1
         m = re.search(r'\b([01]\d{13})\b', t)
         if m:
             nit = m.group(1)
             if int(nit) < 100000000000000:
                 return nit, "media"
         
-        # Patron 4: DUI 9 digitos
         m = re.search(r'DUI\s*[#:]?\s*(\d{8})\s*-?\s*(\d)', t)
         if m:
             return f"{m.group(1)}{m.group(2)}", "media"
     
-    # PASO 2: Buscar en tablas del PDF
     try:
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages[:3]:
@@ -482,7 +524,7 @@ def _buscar_nit_en_todas_lineas(texto_emisor):
     return "", "baja"
 
 # ═══════════════════════════════════════════════════════════════
-# EXTRACCION DE RAZON SOCIAL DE TABLAS (V5 NUEVO)
+# EXTRACCION DE RAZON SOCIAL DE TABLAS
 # ═══════════════════════════════════════════════════════════════
 
 def _extraer_razon_social_de_tablas(file_bytes, nit_prov):
@@ -505,9 +547,7 @@ def _extraer_razon_social_de_tablas(file_bytes, nit_prov):
                             
                             cell_str = str(cell).strip()
                             
-                            # Si encontramos el NIT en esta celda
                             if nit_prov and nit_prov in cell_str.replace('-', ''):
-                                # Buscar en celdas adyacentes
                                 if col_idx + 1 < len(row):
                                     right_cell = str(row[col_idx + 1] or "").strip().upper()
                                     if (len(right_cell) > 5 and len(right_cell) < 70 
@@ -529,7 +569,6 @@ def _extraer_razon_social_de_tablas(file_bytes, nit_prov):
                                         and not re.search(r'^\d+', left_cell)):
                                         return left_cell, "tabla"
                         
-                        # Buscar nombres con palabras clave en cualquier celda
                         for col_idx, cell in enumerate(row):
                             if not cell:
                                 continue
@@ -547,7 +586,7 @@ def _extraer_razon_social_de_tablas(file_bytes, nit_prov):
 
 
 # ═══════════════════════════════════════════════════════════════
-# EXTRACCION DE RAZON SOCIAL CON OCR LOCALIZADO (V5 NUEVO)
+# EXTRACCION DE RAZON SOCIAL CON OCR LOCALIZADO
 # ═══════════════════════════════════════════════════════════════
 
 def _extraer_razon_social_con_ocr(file_bytes, nit_prov):
@@ -579,24 +618,23 @@ def _extraer_razon_social_con_ocr(file_bytes, nit_prov):
     return "", "baja"
 
 # ═══════════════════════════════════════════════════════════════
-# EXTRACCION DE RAZON SOCIAL — V5 MEJORADA (5 NIVELES)
+# EXTRACCION DE RAZON SOCIAL — V6 (CACHE FLEXIBLE)
 # ═══════════════════════════════════════════════════════════════
 
-def _extraer_razon_social_v5(nit_prov, texto_emisor, prov_db, cliente_nombre, file_bytes):
+def _extraer_razon_social_v6(nit_prov, texto_emisor, prov_db, cliente_nombre, file_bytes):
     """
-    ✅ PASO 1: Cache
-    ✅ PASO 2: Patrones estrictos
-    ✅ PASO 3: Tablas (adyacentes al NIT)
-    ✅ PASO 4: OCR localizado
-    ✅ PASO 5: Fallback líneas con marcas
+    PASO 1: Cache flexible (exacto + solo digitos + prefijo)
+    PASO 2: Patrones estrictos en texto
+    PASO 3: Tablas (adyacentes al NIT)
+    PASO 4: OCR localizado
+    PASO 5: Fallback lineas con marcas
     """
-    
-    # PASO 1: CACHE
-    if nit_prov and nit_prov in prov_db:
-        nombre_cache = prov_db[nit_prov].get("nombre", "")
-        if nombre_cache and nombre_cache != NOMBRE_PLACEHOLDER:
-            return nombre_cache, "cache"
-    
+
+    # PASO 1: CACHE FLEXIBLE
+    nombre_cache, encontrado = _buscar_en_cache_flexible(nit_prov, prov_db)
+    if encontrado:
+        return nombre_cache, "cache"
+
     # PASO 2: PATRONES ESTRICTOS
     patrones = [
         (
@@ -620,10 +658,8 @@ def _extraer_razon_social_v5(nit_prov, texto_emisor, prov_db, cliente_nombre, fi
         m = re.search(patron, texto_emisor, re.IGNORECASE | re.MULTILINE)
         if not m:
             continue
-
         candidato = m.group(1).strip()
         candidato = re.sub(r'\s+', ' ', candidato).rstrip('.,;:')
-
         if len(candidato) < 5 or len(candidato) > 65:
             continue
         if any(bad in candidato.upper() for bad in BASURA_ESTRICTA):
@@ -632,9 +668,8 @@ def _extraer_razon_social_v5(nit_prov, texto_emisor, prov_db, cliente_nombre, fi
             continue
         if re.search(r'\d{5,}', candidato):
             continue
-        if len(candidato) > 0 and sum(c.isdigit() for c in candidato) / len(candidato) > 0.30:
+        if sum(c.isdigit() for c in candidato) / max(len(candidato), 1) > 0.30:
             continue
-
         return candidato.upper(), confianza
 
     # PASO 3: TABLAS
@@ -649,7 +684,7 @@ def _extraer_razon_social_v5(nit_prov, texto_emisor, prov_db, cliente_nombre, fi
         if rs_ocr:
             return rs_ocr, conf_ocr
 
-    # PASO 5: FALLBACK
+    # PASO 5: FALLBACK LINEAS CON MARCAS
     for linea in texto_emisor.split('\n')[:30]:
         L = linea.strip().upper()
         if len(L) < 5:
@@ -671,11 +706,11 @@ def _extraer_razon_social_v5(nit_prov, texto_emisor, prov_db, cliente_nombre, fi
     return NOMBRE_PLACEHOLDER, "baja"
 
 # ═══════════════════════════════════════════════════════════════
-# MOTOR DE EXTRACCION DTE COMPRAS — V5
+# MOTOR DE EXTRACCION DTE COMPRAS — V6
 # ═══════════════════════════════════════════════════════════════
 
-def extraer_compras_nativo_pro_v5(file_bytes, cliente_activo, proveedores_cache=None):
-    """Motor V5 — Extracción ultra-robusta con tablas y OCR."""
+def extraer_compras_nativo_pro_v6(file_bytes, cliente_activo, proveedores_cache=None):
+    """Motor V6 — Extracción ultra-robusta con cache flexible."""
     motor = "Nativo"
 
     try:
@@ -759,13 +794,15 @@ def extraer_compras_nativo_pro_v5(file_bytes, cliente_activo, proveedores_cache=
             nit_prov      = ""
             confianza_nit = "baja"
 
-        nom_prov, confianza_rs = _extraer_razon_social_v5(
+        nom_prov, confianza_rs = _extraer_razon_social_v6(
             nit_prov, texto_emisor, prov_db, cliente_activo.get('nombre', ''), file_bytes
         )
 
         es_nuevo = True
-        if nit_prov and nit_prov in prov_db:
-            es_nuevo = False
+        if nit_prov:
+            _, _en_cache = _buscar_en_cache_flexible(nit_prov, prov_db)
+            if _en_cache:
+                es_nuevo = False
 
         if nom_prov == NOMBRE_PLACEHOLDER:
             nom_normalizado = normalizar_nombre_proveedor(nom_prov, "")
@@ -995,7 +1032,7 @@ with st.sidebar:
                     bar.progress((idx + 1) / total)
                     continue
 
-                res = extraer_compras_nativo_pro_v5(file_bytes, cliente, prov_cache)
+                res = extraer_compras_nativo_pro_v6(file_bytes, cliente, prov_cache)
 
                 codigo_gen = res.get('gen', '')
                 dup_memoria = (
