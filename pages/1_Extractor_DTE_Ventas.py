@@ -9,32 +9,32 @@ from io import BytesIO
 import platform
 
 # ═══════════════════════════════════════════════════════════════
-# VERIFICACION DE SEGURIDAD
+# 🔐 VERIFICACIÓN DE SEGURIDAD
 # ═══════════════════════════════════════════════════════════════
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
-    st.warning("Acceso denegado. Por favor, inicia sesion en la pagina principal.")
+    st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
     st.stop()
 
 if "cliente_activo" not in st.session_state or not st.session_state.cliente_activo:
-    st.warning("Debes seleccionar un Cliente Activo en el Directorio antes de extraer Ventas.")
+    st.warning("⚠️ Debes seleccionar un Cliente Activo en el Dashboard antes de extraer Ventas.")
     st.stop()
 
 if not isinstance(st.session_state.cliente_activo, dict):
-    st.warning("El cliente activo no es valido. Regresa al Dashboard y vuelve a seleccionarlo.")
+    st.warning("⚠️ El cliente activo no es válido. Regresa al Dashboard y vuelve a seleccionarlo.")
     st.stop()
 
 cliente = st.session_state.cliente_activo
 
 # ═══════════════════════════════════════════════════════════════
-# CONFIGURACION TECNICA
+# ⚙️ CONFIGURACIÓN TÉCNICA
 # ═══════════════════════════════════════════════════════════════
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-st.set_page_config(page_title="Extractor DTE Ventas", layout="wide", page_icon="=")
+# st.set_page_config() ya ejecutado en app.py
 
 # ═══════════════════════════════════════════════════════════════
-# ESTILOS
+# 🎨 ESTILOS GLOBALES
 # ═══════════════════════════════════════════════════════════════
 estilo_custom = """
 <style>
@@ -111,16 +111,12 @@ estilo_custom = """
         margin-bottom: 15px;
         font-size: 14px;
     }
-    .kpi-ok  { color: #4CAF50; font-weight: bold; }
-    .kpi-err { color: #ff4b4b; font-weight: bold; }
-    .kpi-warn{ color: #ffaa00; font-weight: bold; }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
 
-
 # ═══════════════════════════════════════════════════════════════
-# FUNCIONES UTILITARIAS
+# 💾 FUNCIONES UTILITARIAS
 # ═══════════════════════════════════════════════════════════════
 
 def to_excel_hacienda(df, anexo_tipo):
@@ -128,9 +124,9 @@ def to_excel_hacienda(df, anexo_tipo):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, header=False)
-        workbook  = writer.book
+        workbook = writer.book
         worksheet = writer.sheets['Sheet1']
-        fmt_num   = workbook.add_format({'num_format': '0.00'})
+        fmt_num = workbook.add_format({'num_format': '0.00'})
         fmt_texto = workbook.add_format({'num_format': '@'})
 
         def get_max_len(col_idx):
@@ -142,12 +138,11 @@ def to_excel_hacienda(df, anexo_tipo):
             except Exception:
                 return 12
 
-        # Ancho base para todas las columnas
         worksheet.set_column(0, len(df.columns) - 1, 10.71)
 
         if anexo_tipo == "A":
             worksheet.set_column(0, 0, 10)
-            worksheet.set_column(1, 1, 1,  fmt_texto)
+            worksheet.set_column(1, 1, 1, fmt_texto)
             worksheet.set_column(2, 2, 2)
             for ci in [3, 4, 5, 8]:
                 worksheet.set_column(ci, ci, get_max_len(ci))
@@ -160,7 +155,7 @@ def to_excel_hacienda(df, anexo_tipo):
 
         elif anexo_tipo == "B":
             worksheet.set_column(0, 0, 10)
-            worksheet.set_column(1, 1, 1,  fmt_texto)
+            worksheet.set_column(1, 1, 1, fmt_texto)
             worksheet.set_column(2, 2, 2)
             for ci in [7, 8]:
                 worksheet.set_column(ci, ci, get_max_len(ci))
@@ -174,11 +169,11 @@ def to_excel_hacienda(df, anexo_tipo):
 
 
 def clasificar_tipo_ingreso(actividad):
-    """Clasifica el tipo de ingreso segun la actividad economica."""
+    """Clasifica el tipo de ingreso según la actividad económica."""
     if not actividad:
         return "3"
     act = actividad.lower()
-    if any(w in act for w in ['medico', 'medico', 'abogado', 'contad', 'ingeniero', 'profesiones', 'auditor']):
+    if any(w in act for w in ['medico', 'abogado', 'contad', 'ingeniero', 'profesiones', 'auditor']):
         return "1"
     if any(w in act for w in ['servicio', 'mantenimiento', 'transporte', 'flete', 'taller']):
         return "2"
@@ -192,18 +187,13 @@ def clasificar_tipo_ingreso(actividad):
 
 
 def limpiar_monto(monto_str):
-    """
-    Convierte un string de monto a float de forma segura.
-    Maneja formatos: 1,234.56 / 1.234,56 / 1234.56
-    """
+    """Convierte un string de monto a float de forma segura."""
     try:
         s = str(monto_str).replace(' ', '').replace('$', '').strip()
         if not s:
             return 0.0
-        # Formato 1,234.56 (coma como millar, punto como decimal)
         if ',' in s and '.' in s:
             return float(s.replace(',', ''))
-        # Formato 1.234,56 (punto como millar, coma como decimal)
         if ',' in s and '.' not in s:
             return float(s.replace(',', '.'))
         return float(s)
@@ -212,30 +202,19 @@ def limpiar_monto(monto_str):
 
 
 def separar_zonas_pdf(pagina):
-    """
-    FIX CRITICO: Separa la pagina en zona EMISOR (izquierda)
-    y zona RECEPTOR (derecha) usando coordenadas fisicas.
-    Evita que pdfplumber mezcle datos de ambas partes.
-    """
+    """Separa zonas EMISOR y RECEPTOR usando coordenadas físicas."""
     ancho = pagina.width
-    alto  = pagina.height
+    alto = pagina.height
     alto_header = alto * 0.60
 
-    zona_emisor   = pagina.crop((0,           0, ancho * 0.47, alto_header))
-    zona_receptor = pagina.crop((ancho * 0.47, 0, ancho,       alto_header))
-
-    texto_emisor   = zona_emisor.extract_text(x_tolerance=4)   or ""
+    zona_receptor = pagina.crop((ancho * 0.47, 0, ancho, alto_header))
     texto_receptor = zona_receptor.extract_text(x_tolerance=4) or ""
 
-    return texto_emisor, texto_receptor
+    return texto_receptor
 
 
 def extraer_uuid_limpio(texto):
-    """
-    Extrae y formatea UUID de codigo de generacion DTE.
-    Formato esperado: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-    """
-    # Intento 1: UUID con guiones
+    """Extrae y formatea UUID del código de generación DTE."""
     m = re.search(
         r'([A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12})',
         texto, re.I
@@ -243,13 +222,11 @@ def extraer_uuid_limpio(texto):
     if m:
         return m.group(1).upper()
 
-    # Intento 2: UUID sin guiones (32 chars hex)
     m2 = re.search(r'\b([A-F0-9]{32})\b', texto, re.I)
     if m2:
         raw = m2.group(1).upper()
         return f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
 
-    # Intento 3: Etiqueta explicita
     m3 = re.search(
         r'(?:Generaci[oO]n|C[oO]digo\s*de\s*Generaci[oO]n)\s*[:\s]*([A-F0-9-]{30,})',
         texto, re.I
@@ -263,18 +240,14 @@ def extraer_uuid_limpio(texto):
 
 
 # ═══════════════════════════════════════════════════════════════
-# MOTOR PRINCIPAL DE EXTRACCION — VENTAS
+# 🔧 MOTOR DE EXTRACCIÓN DTE
 # ═══════════════════════════════════════════════════════════════
 
 def extraer_dte_avanzado(f, cliente_activo):
-    """
-    Motor de extraccion de DTE de Ventas (El Salvador).
-    Soporta DTE: 01 (Factura), 03 (CCF), 05 (NC), 06 (ND), 11 (Exportacion).
-    """
+    """Motor de extracción de DTE de Ventas (El Salvador)."""
     motor = "Nativo"
 
     try:
-        # ── RESET DEL CURSOR (FIX: evita error en re-lectura) ──
         if hasattr(f, 'seek'):
             f.seek(0)
 
@@ -282,28 +255,24 @@ def extraer_dte_avanzado(f, cliente_activo):
             pagina = pdf.pages[0]
             texto_prueba = pagina.extract_text() or ""
             ancho = pagina.width
-            alto  = pagina.height
+            alto = pagina.height
 
-            # ── DECISION: NATIVO vs OCR ──
             if len(texto_prueba.strip()) < 100:
-                # PDF imagen → OCR completo
-                motor = "ICR (OCR)"
-                img_completa  = pagina.to_image(resolution=300)
-                texto_raw     = pytesseract.image_to_string(img_completa.original, lang='spa')
-                t_clean       = re.sub(r'\s+', ' ', texto_raw)
+                motor = "OCR"
+                img_completa = pagina.to_image(resolution=300)
+                texto_raw = pytesseract.image_to_string(img_completa.original, lang='spa')
+                t_clean = re.sub(r'\s+', ' ', texto_raw)
 
-                # Receptor: mitad derecha via OCR
                 caja_receptor = (ancho * 0.47, 0, ancho, alto * 0.60)
-                img_receptor  = pagina.crop(caja_receptor).to_image(resolution=300)
+                img_receptor = pagina.crop(caja_receptor).to_image(resolution=300)
                 texto_receptor = pytesseract.image_to_string(img_receptor.original, lang='spa')
 
             else:
-                # PDF nativo → separacion por coordenadas (FIX CRITICO)
-                texto_emisor_coord, texto_receptor = separar_zonas_pdf(pagina)
+                texto_receptor = separar_zonas_pdf(pagina)
                 texto_raw = texto_prueba
-                t_clean   = re.sub(r'\s+', ' ', texto_raw)
+                t_clean = re.sub(r'\s+', ' ', texto_raw)
 
-            # ── ESCUDO ANTI-INTRUSOS ──
+            # Validación anti-intrusos
             nit_emisor_limpio = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
             dui_emisor_limpio = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
 
@@ -324,7 +293,7 @@ def extraer_dte_avanzado(f, cliente_activo):
             if not es_valido:
                 return {"error": f"Documento ajeno al emisor activo ({cliente_activo.get('nombre', 'N/A')})."}
 
-            # ── EXTRACCION DEL RECEPTOR ──
+            # Extracción de receptor
             patron_nit_num = r"\b\d{4}-?\d{6}-?\d{3}-?\d{1}\b|\b\d{8}-?\d{1}\b"
 
             nit_m = re.search(r"N\s*[I1l|]?\s*T\s*[:]?\s*([\d\-\s]{9,20})", texto_receptor, re.I)
@@ -332,7 +301,6 @@ def extraer_dte_avanzado(f, cliente_activo):
                 nit_m = re.search(r"(" + patron_nit_num + r")", texto_receptor)
             nit = re.sub(r'[^0-9]', '', nit_m.group(1)) if nit_m else ""
 
-            # Nombre del receptor
             if "RECEPTOR" in texto_receptor.upper():
                 bloque_nombre = texto_receptor.split("RECEPTOR", 1)[-1]
             elif "Generacion" in texto_receptor or "Generación" in texto_receptor:
@@ -354,25 +322,23 @@ def extraer_dte_avanzado(f, cliente_activo):
                     "", nombre_sucio, flags=re.I
                 ).strip()
                 nombre = re.sub(r"\|", "I", nombre).strip()
-                # Eliminar basura al inicio (puntos, guiones, etc.)
                 nombre = re.sub(r"^[^A-Za-z0-9]+", "", nombre).strip()
             else:
                 nombre = ""
 
-            # ── IDENTIFICADORES DEL DOCUMENTO ──
+            # Identificadores del documento
             tipo_m = re.search(r"DTE-(\d{2})-", t_clean)
-            tipo   = tipo_m.group(1) if tipo_m else "01"
+            tipo = tipo_m.group(1) if tipo_m else "01"
 
             ctrl_m = re.search(r"(DTE-\d{2}-[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+)", t_clean)
-            ctrl   = ctrl_m.group(1) if ctrl_m else ""
+            ctrl = ctrl_m.group(1) if ctrl_m else ""
 
-            # FIX: UUID con funcion especializada
             gen = extraer_uuid_limpio(t_clean)
 
             sello_m = re.search(r"Sello de Recepci[oó]n\s*[:]?\s*([A-Z0-9]{20,})", t_clean, re.I)
-            sello   = sello_m.group(1) if sello_m else ""
+            sello = sello_m.group(1) if sello_m else ""
 
-            f_m  = re.search(r"(\d{4}-\d{2}-\d{2})", t_clean)
+            f_m = re.search(r"(\d{4}-\d{2}-\d{2})", t_clean)
             fecha = ""
             if f_m:
                 partes = f_m.group(1).split('-')
@@ -381,19 +347,13 @@ def extraer_dte_avanzado(f, cliente_activo):
             act_m = re.search(r"Actividad\s+econ[oó]mica\s*[:]?\s*(.*?)(?=\s+Direcci[oó]n)", t_clean, re.I)
             t_ing = clasificar_tipo_ingreso(act_m.group(1) if act_m else "")
 
-            # ── BUSQUEDA DE MONTOS (FIX: variables de scope corregidas) ──
+            # Extracción de montos
             def buscar_montos(texto_buscar, tipo_dte, pdf_page_obj=None):
-                """
-                Extrae montos del DTE.
-                FIX: iva_m y tot_m ahora son locales a esta funcion
-                correctamente — no hay referencia a variables externas.
-                """
                 n, e, g, i, t, x = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-                encontrado   = False
+                encontrado = False
                 iva_calculado = False
 
                 if tipo_dte == "11":
-                    # Exportacion
                     exp_m = re.search(
                         r"(?:Total de Operaciones Afectas|Monto Total de la Operaci[oó]n)"
                         r"\s*[:]?\s*\$?\s*([\d,]+\.\d{2})",
@@ -405,7 +365,6 @@ def extraer_dte_avanzado(f, cliente_activo):
                         encontrado = True
 
                 else:
-                    # CCF / Facturas
                     sum_m = re.search(
                         r"(?:Suma de Ventas|Ventas afectas):?\s*\$?\s*([\d,.]*)\s*([\d,.]*)\s*([\d,.]*)",
                         texto_buscar
@@ -416,7 +375,6 @@ def extraer_dte_avanzado(f, cliente_activo):
                         g = limpiar_monto(sum_m.group(3) or "0")
                         encontrado = True
 
-                    # IVA — variable local correcta
                     iva_local_m = re.search(
                         r"(?:Impuesto al Valor Agregado 13%|IVA 13%|IVA)\s*[:]?\s*\$?\s*([\d,]+\.\d{2})",
                         texto_buscar, re.I
@@ -424,20 +382,18 @@ def extraer_dte_avanzado(f, cliente_activo):
                     if iva_local_m:
                         i = limpiar_monto(iva_local_m.group(1))
 
-                    # Total — variable local correcta
                     tot_local_m = re.search(
                         r"(?:Total a Pagar|Monto Total)[\s$]*([\d,]+\.\d{2})",
                         texto_buscar, re.I
                     )
                     t = limpiar_monto(tot_local_m.group(1)) if tot_local_m else (g + i + e + n)
 
-                # ── FALLBACK OCR para zona de totales ──
                 if g == 0.0 and pdf_page_obj:
                     try:
                         w = pdf_page_obj.width
                         h = pdf_page_obj.height
                         caja_tot = (w * 0.40, h * 0.60, w, h)
-                        img_tot  = pdf_page_obj.crop(caja_tot).to_image(resolution=300)
+                        img_tot = pdf_page_obj.crop(caja_tot).to_image(resolution=300)
                         texto_ocr_tot = pytesseract.image_to_string(img_tot.original, lang='spa')
                         t_ocr = re.sub(r'\s+', ' ', texto_ocr_tot)
 
@@ -450,7 +406,6 @@ def extraer_dte_avanzado(f, cliente_activo):
                             g = limpiar_monto(m_g.group(1))
                             encontrado = True
 
-                        # IVA en zona OCR (FIX: variable local independiente)
                         if i == 0.0:
                             m_i_ocr = re.search(
                                 r"(?:Agregado 13%|IVA 13%|IVA)"
@@ -463,7 +418,6 @@ def extraer_dte_avanzado(f, cliente_activo):
                                 i = round(g * 0.13, 2)
                                 iva_calculado = True
 
-                        # Total en zona OCR
                         if t == 0.0:
                             m_t_ocr = re.search(
                                 r"(?:Total a Pagar|Monto Total)"
@@ -477,12 +431,10 @@ def extraer_dte_avanzado(f, cliente_activo):
 
                 return n, e, g, i, t, x, encontrado, iva_calculado
 
-            # Primera pasada: pagina 1
             nos, exe, gra, iva, tot, exp_serv, exito_ventas, flag_iva = buscar_montos(
                 t_clean, tipo, pagina
             )
 
-            # Segunda pasada: pagina 2 si fallo la primera
             if not exito_ventas and len(pdf.pages) > 1:
                 pagina2 = pdf.pages[1]
                 if "OCR" in motor:
@@ -499,7 +451,7 @@ def extraer_dte_avanzado(f, cliente_activo):
 
             return {
                 "fecha": fecha, "nit": nit, "nom": nombre, "tipo": tipo,
-                "ctrl": ctrl,  "gen": gen, "sello": sello,
+                "ctrl": ctrl, "gen": gen, "sello": sello,
                 "nos": nos, "exe": exe, "gra": gra, "iva": iva,
                 "exp_serv": exp_serv, "tot": tot, "t_ing": t_ing,
                 "motor": motor, "iva_calculado": flag_iva
@@ -510,14 +462,14 @@ def extraer_dte_avanzado(f, cliente_activo):
 
 
 # ═══════════════════════════════════════════════════════════════
-# MODAL DE DESCARGA
+# 📱 MODAL DE DESCARGA
 # ═══════════════════════════════════════════════════════════════
 
 @st.dialog("Seguro de Calidad de Datos")
 def ventana_descarga(df_resultados, tipo_anexo, nombre_archivo):
     st.write(
-        "Recuerda revisar las alertas de **campos vacios**, **rechazados** o "
-        "**calculos manuales** antes de enviar a Hacienda."
+        "Recuerda revisar las alertas de **campos vacíos**, **rechazados** o "
+        "**cálculos manuales** antes de enviar a Hacienda."
     )
     st.download_button(
         label=f"Confirmar y Descargar Anexo {tipo_anexo}",
@@ -529,7 +481,7 @@ def ventana_descarga(df_resultados, tipo_anexo, nombre_archivo):
 
 
 # ═══════════════════════════════════════════════════════════════
-# HEADER
+# 📱 HEADER
 # ═══════════════════════════════════════════════════════════════
 
 st.markdown(
@@ -541,24 +493,26 @@ st.title("Extractor DTE - Ventas")
 
 st.markdown(f"""
 <div class="alerta-activo">
-    <strong>EMISOR ACTUAL (Cliente Activo):</strong>
+    <strong>EMISOR ACTUAL:</strong>
     {cliente.get('nombre', 'N/A')} (NIT: {cliente.get('nit', 'N/A')})
 </div>
 """, unsafe_allow_html=True)
 
+# ═══════════════════════════════════════════════════════════════
+# 🔄 INICIALIZACIÓN DE ESTADO
+# ═══════════════════════════════════════════════════════════════
+
+if 'uploader_key_v' not in st.session_state:
+    st.session_state.uploader_key_v = str(time.time())
+if 'db_ventas' not in st.session_state:
+    st.session_state.db_ventas = pd.DataFrame()
+if 'archivos_procesados_v' not in st.session_state:
+    st.session_state.archivos_procesados_v = set()
+if 'reporte_ventas' not in st.session_state:
+    st.session_state.reporte_ventas = None
 
 # ═══════════════════════════════════════════════════════════════
-# INICIALIZACION DE ESTADO
-# ═══════════════════════════════════════════════════════════════
-
-if 'uploader_key_v'         not in st.session_state: st.session_state.uploader_key_v         = str(time.time())
-if 'db_ventas'              not in st.session_state: st.session_state.db_ventas              = pd.DataFrame()
-if 'archivos_procesados_v'  not in st.session_state: st.session_state.archivos_procesados_v  = set()
-if 'reporte_ventas'         not in st.session_state: st.session_state.reporte_ventas         = None
-
-
-# ═══════════════════════════════════════════════════════════════
-# SIDEBAR — CARGA Y PROCESAMIENTO
+# 📂 SIDEBAR - CARGA Y PROCESAMIENTO
 # ═══════════════════════════════════════════════════════════════
 
 with st.sidebar:
@@ -567,40 +521,37 @@ with st.sidebar:
     st.divider()
 
     archivos = st.file_uploader(
-        "Arrastra tus PDFs aqui",
+        "Arrastra tus PDFs aquí",
         type="pdf",
         accept_multiple_files=True,
         key=st.session_state.uploader_key_v
     )
 
-    # ── BOTON PROCESAR (FIX: use_container_width en lugar de width="stretch") ──
     if archivos and st.button("Procesar Documentos", type="primary", use_container_width=True):
 
-        extracted            = []
-        duplicados_gen       = []
-        vacios_deteccion     = []
-        iva_calculado_files  = []
-        archivos_rechazados  = []
+        extracted = []
+        duplicados_gen = []
+        vacios_deteccion = []
+        iva_calculado_files = []
+        archivos_rechazados = []
 
         nuevos = [f for f in archivos if f.name not in st.session_state.archivos_procesados_v]
 
         if nuevos:
-            bar          = st.progress(0)
+            bar = st.progress(0)
             txt_progreso = st.empty()
-            t_inicio     = time.time()
-            total        = len(nuevos)
+            t_inicio = time.time()
+            total = len(nuevos)
 
             for idx, f in enumerate(nuevos):
 
-                # GC cada 30 archivos para evitar memory leak
                 if idx > 0 and idx % 30 == 0:
                     gc.collect()
 
-                # Texto de progreso
                 if idx > 0:
                     elapsed = time.time() - t_inicio
-                    eta     = int((elapsed / idx) * (total - idx))
-                    m, s    = divmod(eta, 60)
+                    eta = int((elapsed / idx) * (total - idx))
+                    m, s = divmod(eta, 60)
                     txt_progreso.markdown(
                         f"Procesando: **{idx+1}** de **{total}** "
                         f"| Restante: {m:02d}:{s:02d}",
@@ -609,7 +560,6 @@ with st.sidebar:
                 else:
                     txt_progreso.markdown(f"Procesando: **1** de **{total}** | Calculando...")
 
-                # Procesar
                 res = extraer_dte_avanzado(f, cliente)
                 st.session_state.archivos_procesados_v.add(f.name)
 
@@ -617,14 +567,12 @@ with st.sidebar:
                     archivos_rechazados.append(f"{f.name} — {res['error']}")
 
                 else:
-                    # FIX: Validacion correcta del total (no comparacion invertida)
                     tot_val = res.get('tot', 0.0)
                     try:
                         tot_float = float(tot_val)
                     except (TypeError, ValueError):
                         tot_float = 0.0
 
-                    # Campos criticos segun tipo de documento
                     if res['tipo'] in ["01", "11"]:
                         campos = [res['fecha'], res['ctrl'], tot_float]
                         incompleto = (
@@ -644,9 +592,8 @@ with st.sidebar:
                     if res.get('iva_calculado'):
                         iva_calculado_files.append(f.name)
 
-                    # Deteccion de duplicados
                     codigo_gen = res.get('gen', '')
-                    dup_mem  = (
+                    dup_mem = (
                         not st.session_state.db_ventas.empty
                         and codigo_gen != ""
                         and (st.session_state.db_ventas['gen'] == codigo_gen).any()
@@ -666,12 +613,11 @@ with st.sidebar:
 
             txt_progreso.success(f"{total} archivos procesados correctamente.")
 
-            # Guardar reporte y datos
             st.session_state.reporte_ventas = {
-                "rechazados":    archivos_rechazados,
-                "vacios":        vacios_deteccion,
+                "rechazados": archivos_rechazados,
+                "vacios": vacios_deteccion,
                 "duplicados_gen": duplicados_gen,
-                "iva_calc":      iva_calculado_files
+                "iva_calc": iva_calculado_files
             }
 
             if extracted:
@@ -689,7 +635,6 @@ with st.sidebar:
 
     st.divider()
 
-    # ── BOTON LIMPIAR (FIX: use_container_width) ──
     if st.button("Limpiar Memoria y Reiniciar", type="secondary", use_container_width=True):
         for var in ['db_ventas', 'archivos_procesados_v', 'reporte_ventas']:
             st.session_state.pop(var, None)
@@ -697,19 +642,17 @@ with st.sidebar:
         gc.collect()
         st.rerun()
 
-    # Estadisticas del sidebar
     if not st.session_state.db_ventas.empty:
         st.divider()
         st.caption(f"Registros en memoria: {len(st.session_state.db_ventas)}")
 
-
 # ═══════════════════════════════════════════════════════════════
-# DASHBOARD DE REPORTE
+# 📊 REPORTE DE EXTRACCIÓN
 # ═══════════════════════════════════════════════════════════════
 
 if st.session_state.reporte_ventas:
     rep = st.session_state.reporte_ventas
-    st.markdown("### Reporte de Extraccion")
+    st.markdown("### 📋 Reporte de Extracción")
 
     c1, c2, c3, c4 = st.columns(4)
 
@@ -767,9 +710,8 @@ if st.session_state.reporte_ventas:
 
     st.divider()
 
-
 # ═══════════════════════════════════════════════════════════════
-# TABLAS DE RESULTADOS CON FORMATO HACIENDA
+# 📊 TABLAS DE RESULTADOS
 # ═══════════════════════════════════════════════════════════════
 
 if not st.session_state.db_ventas.empty:
@@ -778,23 +720,22 @@ if not st.session_state.db_ventas.empty:
     tab1, tab2, tab3 = st.tabs([
         "F-07 Ventas a Contribuyentes (CCF)",
         "F-07 Ventas Consumidor (Facturas)",
-        "Auditoria Total"
+        "Auditoría Total"
     ])
 
-    # ── TAB 1: CCF (DTE 03, 05, 06) ──
     with tab1:
         df_a = df[df["tipo"].isin(["03", "05", "06"])].copy()
 
         if df_a.empty:
-            st.info("No hay CCF procesados aun. Carga DTE tipo 03, 05 o 06.")
+            st.info("No hay CCF procesados aún. Carga DTE tipo 03, 05 o 06.")
         else:
-            df_a["clase"]      = "4"
+            df_a["clase"] = "4"
             df_a["ctrl_vacio"] = ""
-            df_a["v_terc"]     = 0.00
-            df_a["d_terc"]     = 0.00
-            df_a["dui"]        = ""
-            df_a["t_op"]       = "1"
-            df_a["n_anexo"]    = "1"
+            df_a["v_terc"] = 0.00
+            df_a["d_terc"] = 0.00
+            df_a["dui"] = ""
+            df_a["t_op"] = "1"
+            df_a["n_anexo"] = "1"
 
             cols = [
                 "fecha", "clase", "tipo", "ctrl", "sello", "gen",
@@ -813,7 +754,6 @@ if not st.session_state.db_ventas.empty:
             cols_num = ["10.Exentas", "11.No Sujetas", "12.Gravadas", "13.Debito",
                         "14.V. Terceros", "15.D. Terceros", "16.Total"]
 
-            # FIX: use_container_width en lugar de width="stretch"
             st.dataframe(
                 res_a.style.format({c: "{:.2f}" for c in cols_num}),
                 hide_index=True,
@@ -827,26 +767,25 @@ if not st.session_state.db_ventas.empty:
                 if st.button("Preparar Excel CCF", type="primary", use_container_width=True):
                     ventana_descarga(res_a, "A", "F07_Ventas_Contribuyentes.xlsx")
 
-    # ── TAB 2: FACTURAS (DTE 01, 11) ──
     with tab2:
         df_b = df[df["tipo"].isin(["01", "11"])].copy()
 
         if df_b.empty:
-            st.info("No hay Facturas procesadas aun. Carga DTE tipo 01 o 11.")
+            st.info("No hay Facturas procesadas aún. Carga DTE tipo 01 o 11.")
         else:
-            df_b["clase"]              = "4"
-            df_b["res"]                = "N/A"
-            df_b["ser"]                = "N/A"
-            df_b["int"]                = "N/A"
-            df_b["maq"]                = ""
-            df_b["pre_ctrl"]           = "N/A"
+            df_b["clase"] = "4"
+            df_b["res"] = "N/A"
+            df_b["ser"] = "N/A"
+            df_b["int"] = "N/A"
+            df_b["maq"] = ""
+            df_b["pre_ctrl"] = "N/A"
             df_b["vtas_int_exe_no_suj"] = 0.00
-            df_b["n_anexo"]            = "2"
-            df_b["exp_ca"]             = 0.00
-            df_b["exp_fca"]            = 0.00
-            df_b["v_zf"]               = 0.00
-            df_b["v_ter"]              = 0.00
-            df_b["t_op"]               = "1"
+            df_b["n_anexo"] = "2"
+            df_b["exp_ca"] = 0.00
+            df_b["exp_fca"] = 0.00
+            df_b["v_zf"] = 0.00
+            df_b["v_ter"] = 0.00
+            df_b["t_op"] = "1"
 
             if "exp_serv" not in df_b.columns:
                 df_b["exp_serv"] = 0.00
@@ -874,7 +813,6 @@ if not st.session_state.db_ventas.empty:
                 "18.ZF y DPA", "19.V. Terceros", "20.Total"
             ]
 
-            # FIX: use_container_width
             st.dataframe(
                 res_b.style.format({c: "{:.2f}" for c in cols_num_b}),
                 hide_index=True,
@@ -888,7 +826,6 @@ if not st.session_state.db_ventas.empty:
                 if st.button("Preparar Excel Facturas", type="primary", use_container_width=True):
                     ventana_descarga(res_b, "B", "F07_Ventas_Consumidor.xlsx")
 
-    # ── TAB 3: AUDITORIA COMPLETA ──
     with tab3:
         col_aud1, col_aud2, col_aud3 = st.columns(3)
         with col_aud1:
@@ -902,5 +839,4 @@ if not st.session_state.db_ventas.empty:
 
         st.divider()
 
-        # FIX: use_container_width
         st.dataframe(df, use_container_width=True)
