@@ -1,3 +1,4 @@
 tesseract-ocr
-tesseract-ocr-spa
-libzbar0
+poppler-utils
+libtiff5
+libpoppler-cpp-dev
