@@ -47,8 +47,11 @@ db_clientes = cargar_clientes()
 st.title("👥 Directorio de Clientes (Portafolio)")
 st.write("Administra las empresas que auditas. Estos datos se usarán en el Dashboard principal.")
 
-# --- ALERTA DE CLIENTE ACTIVO ---
-cliente_activo_nit = st.session_state.get("cliente_activo", {}).get("nit", None)
+# --- LA SOLUCIÓN AL ERROR (BLINDAJE CONTRA EL NONE) ---
+cliente_activo = st.session_state.get("cliente_activo")
+# Verificamos que realmente sea un diccionario válido y no "None"
+cliente_activo_nit = cliente_activo.get("nit") if isinstance(cliente_activo, dict) else None
+
 if cliente_activo_nit and cliente_activo_nit in db_clientes:
     nombre_activo = db_clientes[cliente_activo_nit]['nombre']
     st.success(f"✅ **Cliente Activo actual:** {nombre_activo} (NIT: {cliente_activo_nit})")
