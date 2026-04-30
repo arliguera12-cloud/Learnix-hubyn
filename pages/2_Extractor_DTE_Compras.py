@@ -11,30 +11,30 @@ from io import BytesIO
 import platform
 
 # ═══════════════════════════════════════════════════════════════
-# 🔐 VERIFICACIÓN DE SEGURIDAD
+# VERIFICACION DE SEGURIDAD
 # ═══════════════════════════════════════════════════════════════
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
-    st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
+    st.warning("Acceso denegado. Por favor, inicia sesion en la pagina principal.")
     st.stop()
 
 if "cliente_activo" not in st.session_state or not st.session_state.cliente_activo:
-    st.warning("⚠️ Debes seleccionar un Cliente Activo antes de extraer Compras.")
+    st.warning("Debes seleccionar un Cliente Activo antes de extraer Compras.")
     st.stop()
 
 if not isinstance(st.session_state.cliente_activo, dict):
-    st.warning("⚠️ El cliente activo no es válido. Regresa al Dashboard y vuelve a seleccionarlo.")
+    st.warning("El cliente activo no es valido. Regresa al Dashboard y vuelvelo a seleccionar.")
     st.stop()
 
 cliente = st.session_state.cliente_activo
 
 # ═══════════════════════════════════════════════════════════════
-# ⚙️ CONFIGURACIÓN TÉCNICA
+# CONFIGURACION TECNICA
 # ═══════════════════════════════════════════════════════════════
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # ═══════════════════════════════════════════════════════════════
-# 🎨 ESTILOS GLOBALES
+# ESTILOS GLOBALES
 # ═══════════════════════════════════════════════════════════════
 estilo_custom = """
 <style>
@@ -121,40 +121,62 @@ estilo_custom = """
     }
     .indicador-confianza {
         display: inline-block;
-        padding: 4px 12px;
+        padding: 3px 10px;
         border-radius: 20px;
-        font-size: 12px;
+        font-size: 11px;
         font-weight: bold;
-        margin-left: 8px;
+        margin-left: 6px;
+        letter-spacing: 0.5px;
     }
     .confianza-alta {
         background-color: #1b5e20;
         color: #81c784;
+        border: 1px solid #2e7d32;
     }
     .confianza-media {
         background-color: #e65100;
         color: #ffb74d;
+        border: 1px solid #bf360c;
     }
     .confianza-baja {
-        background-color: #b71c1c;
-        color: #ef5350;
+        background-color: #7f1010;
+        color: #ef9a9a;
+        border: 1px solid #b71c1c;
+    }
+    .confianza-cache {
+        background-color: #1a237e;
+        color: #90caf9;
+        border: 1px solid #283593;
     }
     .badge-revision {
         display: inline-block;
-        padding: 2px 8px;
+        padding: 3px 10px;
         border-radius: 12px;
         font-size: 11px;
         font-weight: bold;
-        margin-left: 5px;
         background-color: #ff6f00;
         color: white;
+        letter-spacing: 0.5px;
+    }
+    .confianza-row {
+        display: flex;
+        gap: 20px;
+        align-items: center;
+        padding: 10px 0 6px 0;
+        flex-wrap: wrap;
+    }
+    .confianza-item {
+        display: flex;
+        align-items: center;
+        font-size: 13px;
+        color: #aaaaaa;
     }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 📋 CONSTANTES
+# CONSTANTES
 # ═══════════════════════════════════════════════════════════════
 
 NOMBRE_PLACEHOLDER = "ESCRIBE EL NOMBRE AQUI"
@@ -184,11 +206,10 @@ MARCAS_COMERCIALES = [
 ]
 
 # ═══════════════════════════════════════════════════════════════
-# 💾 BASE DE DATOS DE PROVEEDORES
+# BASE DE DATOS DE PROVEEDORES
 # ═══════════════════════════════════════════════════════════════
 
 def cargar_proveedores_json():
-    """Carga el directorio de proveedores con migración automática."""
     if not os.path.exists(ARCHIVO_PROVEEDORES):
         return {}
     try:
@@ -203,7 +224,6 @@ def cargar_proveedores_json():
 
 
 def guardar_proveedor_rapido(nit, nombre):
-    """Guarda/actualiza un proveedor preservando el NRC existente."""
     if not os.path.exists("data"):
         os.makedirs("data")
     db = cargar_proveedores_json()
@@ -217,7 +237,6 @@ def guardar_proveedor_rapido(nit, nombre):
 
 
 def guardar_lote_proveedores(nuevos_proveedores: dict):
-    """Guarda múltiples proveedores nuevos en una sola operación."""
     if not nuevos_proveedores:
         return
     if not os.path.exists("data"):
@@ -231,21 +250,20 @@ def guardar_lote_proveedores(nuevos_proveedores: dict):
         with open(ARCHIVO_PROVEEDORES, "w", encoding="utf-8") as f:
             json.dump(db, f, indent=4, ensure_ascii=False)
     except Exception as err:
-        st.error(f"Error al guardar lote de proveedores: {err}")
+        st.error(f"Error al guardar lote: {err}")
 
 # ═══════════════════════════════════════════════════════════════
-# 📊 EXPORTACIÓN EXCEL
+# EXPORTACION EXCEL
 # ═══════════════════════════════════════════════════════════════
 
 def to_excel_hacienda_compras(df):
-    """Exporta DataFrame al formato exacto de Hacienda para F-07 Compras."""
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, header=False, sheet_name='Compras_F07')
         workbook = writer.book
         worksheet = writer.sheets['Compras_F07']
 
-        fmt_texto = workbook.add_format({'num_format': '@'})
+        fmt_texto  = workbook.add_format({'num_format': '@'})
         fmt_num_izq = workbook.add_format({'num_format': '0.00', 'align': 'left'})
 
         def get_max_len(col_idx):
@@ -257,47 +275,42 @@ def to_excel_hacienda_compras(df):
             except Exception:
                 return 17
 
-        worksheet.set_column(0, 0, 10, fmt_texto)
-        worksheet.set_column(1, 1, 1, fmt_texto)
-        worksheet.set_column(2, 2, 2, fmt_texto)
-        worksheet.set_column(3, 3, get_max_len(3), fmt_texto)
-        worksheet.set_column(4, 4, 14, fmt_texto)
-        worksheet.set_column(5, 5, get_max_len(5), fmt_texto)
-        worksheet.set_column(6, 14, 10.71, fmt_num_izq)
-        worksheet.set_column(15, 15, 9, fmt_texto)
-        worksheet.set_column(16, 20, 1, fmt_texto)
+        worksheet.set_column(0,  0,  10,  fmt_texto)
+        worksheet.set_column(1,  1,  1,   fmt_texto)
+        worksheet.set_column(2,  2,  2,   fmt_texto)
+        worksheet.set_column(3,  3,  get_max_len(3), fmt_texto)
+        worksheet.set_column(4,  4,  14,  fmt_texto)
+        worksheet.set_column(5,  5,  get_max_len(5), fmt_texto)
+        worksheet.set_column(6,  14, 10.71, fmt_num_izq)
+        worksheet.set_column(15, 15, 9,  fmt_texto)
+        worksheet.set_column(16, 20, 1,  fmt_texto)
 
     output.seek(0)
     return output.getvalue()
 
 # ═══════════════════════════════════════════════════════════════
-# 🔧 FUNCIONES UTILITARIAS
+# FUNCIONES UTILITARIAS
 # ═══════════════════════════════════════════════════════════════
 
 def limpiar_monto(monto_str):
-    """Convierte string de monto a float de forma segura."""
     try:
         s = re.sub(r'[^\d.,]', '', str(monto_str)).strip()
         if not s:
             return 0.0
-
         ultimo_sep = re.search(r'([.,])(\d{1,4})$', s)
         if ultimo_sep:
             decimals = ultimo_sep.group(2)
-            enteros = re.sub(r'[^\d]', '', s[:ultimo_sep.start()])
+            enteros  = re.sub(r'[^\d]', '', s[:ultimo_sep.start()])
             if not enteros:
                 enteros = "0"
-            valor = float(f"{enteros}.{decimals}")
-            return round(valor, 2)
+            return round(float(f"{enteros}.{decimals}"), 2)
         else:
             return float(re.sub(r'[^\d]', '', s))
-
     except (ValueError, AttributeError):
         return 0.0
 
 
 def extraer_y_formatear_fecha(texto):
-    """Extrae y formatea fecha al formato DD/MM/YYYY."""
     m = re.search(
         r"\b(20[2-3]\d)\s*[-/]\s*(0[1-9]|1[0-2])\s*[-/]\s*([0-2]\d|3[01])\b",
         texto
@@ -339,7 +352,6 @@ def extraer_y_formatear_fecha(texto):
 
 
 def normalizar_nombre_proveedor(nombre_raw, cliente_nombre):
-    """Limpia y valida un nombre de proveedor candidato."""
     if not nombre_raw:
         return NOMBRE_PLACEHOLDER
 
@@ -367,176 +379,171 @@ def normalizar_nombre_proveedor(nombre_raw, cliente_nombre):
 
 
 def mostrar_indicador_confianza(confianza):
-    """Retorna HTML para mostrar indicador visual de confianza."""
-    confianza = str(confianza).lower().strip()
-    
-    if confianza == "alta":
-        return '<span class="indicador-confianza confianza-alta">✓ Alta</span>'
-    elif confianza == "media":
-        return '<span class="indicador-confianza confianza-media">⚠ Media</span>'
+    """Retorna HTML del badge de confianza para NIT / Razon Social."""
+    c = str(confianza).lower().strip()
+    if c == "alta":
+        return '<span class="indicador-confianza confianza-alta">ALTA</span>'
+    elif c == "media":
+        return '<span class="indicador-confianza confianza-media">MEDIA</span>'
+    elif c == "cache":
+        return '<span class="indicador-confianza confianza-cache">CACHE</span>'
     else:
-        return '<span class="indicador-confianza confianza-baja">✗ Baja</span>'
+        return '<span class="indicador-confianza confianza-baja">BAJA</span>'
 
 # ═══════════════════════════════════════════════════════════════
-# 🔧 MOTOR DE EXTRACCIÓN MEJORADO - NIT Y RAZÓN SOCIAL
+# EXTRACCION DE NIT  (CORREGIDA — no hace return prematuro)
 # ═══════════════════════════════════════════════════════════════
 
-def extraer_nit_y_razon_social_mejorado(texto_emisor, texto_completo):
+def _extraer_solo_nit(texto_emisor):
     """
-    ✅ Extrae NIT del emisor y RAZÓN SOCIAL con manejo robusto de formatos
-    inconsistentes en DTEs de El Salvador.
+    Extrae SOLO el NIT del bloque del emisor.
+    Devuelve (nit_str, confianza).  nit_str es solo digitos.
+    NO hace return prematuro para que el llamador continue con RS.
     """
-    
-    resultado = {
-        "nit_encontrado": "",
-        "razon_social": "",
-        "confianza_nit": "baja",
-        "confianza_rs": "baja"
-    }
-    
-    # Texto limpio para búsquedas
-    t_clean = re.sub(r'\s+', ' ', texto_emisor).upper()
-    
-    # ═════════════════════════════════════════════════════════════════
-    # 1️⃣ EXTRACCIÓN DE NIT (MÚLTIPLES FORMATOS)
-    # ═════════════════════════════════════════════════════════════════
-    
-    # Patrón 1: NIT con guiones (XXXX-XXXXXX-XXX-X) - Formato estándar El Salvador
-    patron_nit_guiones = r'NIT\s*[#:]?\s*(\d{4})\s*[-]?\s*(\d{6})\s*[-]?\s*(\d{3})\s*[-]?\s*(\d{1})'
-    match = re.search(patron_nit_guiones, t_clean)
-    
-    if match:
-        nit_raw = f"{match.group(1)}{match.group(2)}{match.group(3)}{match.group(4)}"
-        resultado["nit_encontrado"] = nit_raw
-        resultado["confianza_nit"] = "alta"
-        return resultado
-    
-    # Patrón 2: NIT sin guiones (14 dígitos seguidos)
-    patron_nit_digitos = r'NIT\s*[#:]?\s*(\d{14})'
-    match = re.search(patron_nit_digitos, t_clean)
-    
-    if match:
-        resultado["nit_encontrado"] = match.group(1)
-        resultado["confianza_nit"] = "alta"
-        return resultado
-    
-    # Patrón 3: Búsqueda flexible con palabras clave
-    patron_flexible = r'(?:DOCUMENTO\s+DE\s+IDENTIFICACI[OÓ]N|NIT|IDENTIFICACI[OÓ]N\s+TRIBUTARIA)[:\s]*(\d{14})'
-    match = re.search(patron_flexible, t_clean, re.IGNORECASE)
-    
-    if match:
-        resultado["nit_encontrado"] = match.group(1)
-        resultado["confianza_nit"] = "media"
-        return resultado
-    
-    # Patrón 4: DUI (9 dígitos con guión final)
-    patron_dui = r'DUI\s*[#:]?\s*(\d{8})\s*[-]?\s*(\d{1})'
-    match = re.search(patron_dui, t_clean)
-    
-    if match:
-        dui = f"{match.group(1)}{match.group(2)}"
-        resultado["nit_encontrado"] = dui
-        resultado["confianza_nit"] = "media"
-        return resultado
-    
-    # ═════════════════════════════════════════════════════════════════
-    # 2️⃣ EXTRACCIÓN DE RAZÓN SOCIAL (ULTRA ROBUSTA)
-    # ═════════════════════════════════════════════════════════════════
-    
-    patrones_razon = [
-        {
-            "patron": r"(?:RAZ[ÓO]N\s*SOCIAL|NOMBRE\s+O\s+RAZ[ÓO]N\s*SOCIAL)[:\s]*([A-Z][^,\n]{8,80}?)(?=\n|NIT|NRC|GIRO|ACTIVIDAD|DIRECCI[ÓO]N|$)",
-            "confianza": "alta"
-        },
-        {
-            "patron": r"(?:^|\n)\s*NOMBRE[:\s]*([A-Z][^,\n]{8,80}?)(?=\n|NIT|NRC|GIRO)",
-            "confianza": "alta"
-        },
-        {
-            "patron": r"NOMBRE\s*COMERCIAL[:\s]*([A-Z][^,\n]{5,80}?)(?=\n|NIT|GIRO)",
-            "confianza": "media"
-        },
-        {
-            "patron": r"(?:NIT|N\.I\.T\.)[:\s]*\d+\s*(?:\n|\s{4,})\s*([A-Z][^,\n]{8,80}?)(?=\n|GIRO|ACTIVIDAD)",
-            "confianza": "media"
-        },
-        {
-            "patron": r"(?:^|\n)\s*([A-Z][A-Z\s\.\&\,0-9]{8,80})(?=\n|NIT|NRC|GIRO)",
-            "confianza": "baja"
-        }
+    t = re.sub(r'\s+', ' ', texto_emisor).upper()
+
+    # Patron 1 — NIT con guiones XXXX-XXXXXX-XXX-X
+    m = re.search(
+        r'NIT\s*[#:]?\s*(\d{4})\s*-\s*(\d{6})\s*-\s*(\d{3})\s*-\s*(\d)',
+        t
+    )
+    if m:
+        return f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}", "alta"
+
+    # Patron 2 — NIT con guiones sin espacios entre grupos
+    m = re.search(
+        r'NIT\s*[#:]?\s*(\d{4}-\d{6}-\d{3}-\d)',
+        t
+    )
+    if m:
+        return re.sub(r'[^0-9]', '', m.group(1)), "alta"
+
+    # Patron 3 — NIT 14 digitos pegados tras etiqueta
+    m = re.search(r'NIT\s*[#:.]?\s*(\d{14})', t)
+    if m:
+        return m.group(1), "alta"
+
+    # Patron 4 — Cualquier 14 digitos que empiece con 0
+    #            (evita capturar totales grandes)
+    m = re.search(r'\b(0\d{13})\b', t)
+    if m:
+        return m.group(1), "media"
+
+    # Patron 5 — DUI 8+1
+    m = re.search(r'DUI\s*[#:]?\s*(\d{8})\s*-?\s*(\d)', t)
+    if m:
+        return f"{m.group(1)}{m.group(2)}", "media"
+
+    return "", "baja"
+
+
+def _extraer_solo_razon_social(texto_emisor, cliente_nombre):
+    """
+    Extrae SOLO la Razon Social del bloque del emisor.
+    Devuelve (nombre_str, confianza).
+    Usa patrones ESTRICTOS para no capturar basura.
+    """
+    # Lista ordenada de mayor a menor confianza
+    patrones = [
+        # Etiqueta explícita "Nombre o razon social" / "Razon Social"
+        (
+            r"(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE\s+O\s+RAZ[OÓ]N\s*SOCIAL)\s*[:\-]?\s*"
+            r"([A-Z][A-Za-z0-9\s\.\,\&\-]{4,60}?)(?=\s{2,}|\n|NIT|NRC|GIRO|ACTIVIDAD|$)",
+            "alta"
+        ),
+        # Etiqueta "Nombre:" sola
+        (
+            r"(?<!\w)NOMBRE\s*[:\-]\s*"
+            r"([A-Z][A-Za-z0-9\s\.\,\&\-]{4,60}?)(?=\s{2,}|\n|NIT|NRC|GIRO|ACTIVIDAD|$)",
+            "alta"
+        ),
+        # Nombre Comercial
+        (
+            r"NOMBRE\s+COMERCIAL\s*[:\-]?\s*"
+            r"([A-Z][A-Za-z0-9\s\.\,\&\-]{4,60}?)(?=\s{2,}|\n|NIT|NRC|GIRO|$)",
+            "media"
+        ),
+        # Linea que contiene indicador de persona juridica (SA, SRL, etc.)
+        # pero que no sea una linea de basura numerica
+        (
+            r"(?:^|\n)\s*"
+            r"([A-Z][A-Za-z\s]{3,50}"
+            r"(?:S\.A\.|S\.A|C\.V\.|SOCIEDAD|S\.R\.L\.|LIMITADA|LTDA)"
+            r"[A-Za-z\s\.]*)"
+            r"(?=\s*\n|\s{3,}|$)",
+            "media"
+        ),
     ]
-    
-    for patron_obj in patrones_razon:
-        match = re.search(patron_obj["patron"], texto_emisor, re.MULTILINE | re.IGNORECASE)
-        
-        if match:
-            razon_candidato = match.group(1).strip()
-            razon_candidato = re.sub(r'\s+', ' ', razon_candidato)
-            razon_candidato = razon_candidato.rstrip('.,;:')
-            
-            # Validaciones
-            if (
-                len(razon_candidato) >= 8
-                and len(razon_candidato) <= 80
-                and not any(bad in razon_candidato.upper() for bad in BASURA_ESTRICTA)
-                and "RECEPTOR" not in razon_candidato.upper()
-                and "CLIENTE" not in razon_candidato.upper()
-            ):
-                resultado["razon_social"] = razon_candidato.upper()
-                resultado["confianza_rs"] = patron_obj["confianza"]
-                break
-    
-    return resultado
+
+    for patron, confianza in patrones:
+        m = re.search(patron, texto_emisor, re.IGNORECASE | re.MULTILINE)
+        if not m:
+            continue
+
+        candidato = m.group(1).strip()
+        candidato = re.sub(r'\s+', ' ', candidato).rstrip('.,;:')
+
+        # Rechazar si es muy corto o muy largo
+        if len(candidato) < 5 or len(candidato) > 65:
+            continue
+        # Rechazar si tiene caracteres de correo / URL
+        if any(bad in candidato.upper() for bad in BASURA_ESTRICTA):
+            continue
+        # Rechazar si contiene palabras de cabecera del DTE
+        if any(b in candidato.upper() for b in PALABRAS_BASURA):
+            continue
+        # Rechazar si es el nombre del receptor
+        palabras_cli = cliente_nombre.upper().split()[:2]
+        if any(p in candidato.upper() for p in palabras_cli if len(p) > 3):
+            continue
+        # Rechazar si tiene demasiados digitos consecutivos (probable NIT/fecha)
+        if re.search(r'\d{5,}', candidato):
+            continue
+        # Rechazar si la proporcion de digitos es mayor al 30 %
+        if len(candidato) > 0 and sum(c.isdigit() for c in candidato) / len(candidato) > 0.30:
+            continue
+
+        return candidato.upper(), confianza
+
+    return "", "baja"
 
 
-def extraer_nit_alternativo_tabla(pdf_bytes):
+def _extraer_nit_de_tablas(file_bytes):
     """
-    ✅ ALTERNATIVA: Extrae NIT de la TABLA de detalles del DTE
-    Si falla en encabezado, busca en los datos estructurados.
+    Fallback: busca un NIT de 14 digitos dentro de las tablas del PDF.
     """
-    
     try:
-        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages[:2]:
-                tables = page.extract_tables()
-                
-                if not tables:
-                    continue
-                
-                for table in tables:
+                for table in (page.extract_tables() or []):
                     for row in table:
-                        for cell in row:
+                        for cell in (row or []):
                             if not cell:
                                 continue
-                            
-                            cell_str = str(cell).upper()
-                            
-                            # Buscar NIT en celdas (14 dígitos)
-                            m_nit = re.search(r'\d{14}', cell_str)
-                            if m_nit:
-                                return m_nit.group(0)
-                            
-                            # Buscar NIT formateado
-                            m_nit_fmt = re.search(
-                                r'(\d{4})\s*[-]?\s*(\d{6})\s*[-]?\s*(\d{3})\s*[-]?\s*(\d{1})',
-                                cell_str
+                            cell_str = str(cell)
+                            # 14 digitos seguidos
+                            m = re.search(r'\b(\d{14})\b', cell_str)
+                            if m:
+                                return m.group(1)
+                            # Formato XXXX-XXXXXX-XXX-X
+                            m2 = re.search(
+                                r'(\d{4})-(\d{6})-(\d{3})-(\d)', cell_str
                             )
-                            if m_nit_fmt:
-                                return f"{m_nit_fmt.group(1)}{m_nit_fmt.group(2)}{m_nit_fmt.group(3)}{m_nit_fmt.group(4)}"
-    
+                            if m2:
+                                return f"{m2.group(1)}{m2.group(2)}{m2.group(3)}{m2.group(4)}"
     except Exception:
         pass
-    
     return ""
 
 # ═══════════════════════════════════════════════════════════════
-# 🔧 MOTOR DE EXTRACCIÓN DTE COMPRAS (VERSIÓN MEJORADA V2)
+# MOTOR DE EXTRACCION DTE COMPRAS  (VERSION 3 — estable)
 # ═══════════════════════════════════════════════════════════════
 
-def extraer_compras_nativo_pro_v2(file_bytes, cliente_activo, proveedores_cache=None):
+def extraer_compras_nativo_pro_v3(file_bytes, cliente_activo, proveedores_cache=None):
     """
-    ✅ MOTOR DE EXTRACCIÓN MEJORADO CON EXTRACCIÓN ROBUSTA DE NIT Y RAZÓN SOCIAL
-    Incluye indicadores de confianza para validar calidad de extracción.
+    Motor de extraccion DTE Compras El Salvador.
+    Combina el flujo robusto original con extraccion mejorada de NIT/RS
+    y SIN los bugs de retorno prematuro ni patrones demasiado permisivos.
     """
     motor = "Nativo"
 
@@ -544,56 +551,48 @@ def extraer_compras_nativo_pro_v2(file_bytes, cliente_activo, proveedores_cache=
         texto_lineal = ""
         texto_visual = ""
 
-        # Extracción de texto del PDF
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
-                t_lin = page.extract_text(layout=False) or ""
-                t_vis = page.extract_text() or ""
-                texto_lineal += t_lin + "\n"
-                texto_visual += t_vis + "\n"
+                texto_lineal += (page.extract_text(layout=False) or "") + "\n"
+                texto_visual += (page.extract_text() or "") + "\n"
 
         texto_completo = texto_lineal + "\n" + texto_visual
 
-        # Si el texto es muy poco, usar OCR
         if len(texto_completo.strip()) < 80:
             motor = "OCR"
             with pdfplumber.open(BytesIO(file_bytes)) as pdf:
                 for page in pdf.pages:
-                    img = page.to_image(resolution=300)
+                    img     = page.to_image(resolution=300)
                     ocr_txt = pytesseract.image_to_string(img.original, lang='spa')
-                    texto_lineal += ocr_txt + "\n"
-                    texto_completo = texto_lineal
+                    texto_lineal  += ocr_txt + "\n"
+            texto_completo = texto_lineal
 
         if len(texto_completo.strip()) < 50:
             return {"error": "El PDF no tiene texto legible ni imagen procesable."}
 
-        t_clean = re.sub(r'\s+', ' ', texto_completo)
+        t_clean     = re.sub(r'\s+', ' ', texto_completo)
         t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
 
-        # ═════════════════════════════════════════════════════════════════
-        # DETECCIÓN DEL TIPO DE DTE
-        # ═════════════════════════════════════════════════════════════════
+        # ── Tipo y numero de control DTE ──────────────────────────────
         m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_spaces)
         tipo = "01"
         ctrl = ""
 
         if m_ctrl:
             ctrl = m_ctrl.group(1).replace("O", "0")
-            m_tipo = re.search(r"DTE-(\d{2})", ctrl)
-            if m_tipo:
-                tipo = m_tipo.group(1)
+            m_t  = re.search(r"DTE-(\d{2})", ctrl)
+            if m_t:
+                tipo = m_t.group(1)
 
         if not ctrl:
-            return {"error_tipo": "No se detectó un Número de Control DTE válido."}
+            return {"error_tipo": "No se detecto un Numero de Control DTE valido."}
         if tipo not in ["03", "05", "06"]:
             return {"error_tipo": f"El documento es DTE-{tipo}. Solo se admiten 03, 05 y 06."}
 
         nit_receptor = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
         dui_receptor = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
 
-        # ═════════════════════════════════════════════════════════════════
-        # CÓDIGO DE GENERACIÓN (UUID)
-        # ═════════════════════════════════════════════════════════════════
+        # ── UUID / Codigo de generacion ───────────────────────────────
         gen = ""
         m_url = re.search(r"CODGEN=([A-F0-9-]+)", t_no_spaces)
         if m_url:
@@ -608,52 +607,40 @@ def extraer_compras_nativo_pro_v2(file_bytes, cliente_activo, proveedores_cache=
                 if len(raw) >= 32:
                     gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:32]}"
 
-        # ═════════════════════════════════════════════════════════════════
-        # EXTRACCIÓN DE FECHA
-        # ═════════════════════════════════════════════════════════════════
+        # ── Fecha ─────────────────────────────────────────────────────
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        # ═════════════════════════════════════════════════════════════════
-        # ✅ EXTRACCIÓN MEJORADA DE NIT Y RAZÓN SOCIAL
-        # ═════════════════════════════════════════════════════════════════
-        nit_prov = ""
-        dui_prov = ""
-        nom_prov = NOMBRE_PLACEHOLDER
-        es_nuevo = True
-        confianza_nit = "baja"
-        confianza_rs = "baja"
-
-        # Separar sección del emisor
+        # ── Bloque del EMISOR (todo lo que precede a "RECEPTOR") ──────
         partes_emisor = re.split(
             r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b",
             texto_lineal
         )
-        texto_emisor = partes_emisor[0] if len(partes_emisor) > 0 else texto_lineal
+        texto_emisor = partes_emisor[0] if partes_emisor else texto_lineal
         if len(texto_emisor.strip()) < 100:
             texto_emisor = texto_lineal[:1500]
 
-        # 🔴 PASO 1: Extracción mejorada
-        datos_nit_rs = extraer_nit_y_razon_social_mejorado(texto_emisor, texto_completo)
-        
-        if datos_nit_rs["nit_encontrado"]:
-            nit_prov = datos_nit_rs["nit_encontrado"]
-            confianza_nit = datos_nit_rs["confianza_nit"]
-        
-        if datos_nit_rs["razon_social"]:
-            nom_prov = normalizar_nombre_proveedor(
-                datos_nit_rs["razon_social"],
-                cliente_activo.get('nombre', '')
-            )
-            confianza_rs = datos_nit_rs["confianza_rs"]
-        
-        # 🔴 PASO 2: Si el NIT está vacío, buscar en tabla
-        if not nit_prov:
-            nit_tabla = extraer_nit_alternativo_tabla(file_bytes)
-            if nit_tabla:
-                nit_prov = nit_tabla
-                confianza_nit = "media"
-        
-        # 🔴 PASO 3: Fallback - método anterior
+        # ── Carga cache de proveedores ────────────────────────────────
+        prov_db = proveedores_cache if proveedores_cache is not None else cargar_proveedores_json()
+
+        # ────────────────────────────────────────────────────────────
+        # EXTRACCION DE NIT  — 3 pasos en cascada
+        # ────────────────────────────────────────────────────────────
+        nit_prov      = ""
+        dui_prov      = ""
+        nom_prov      = NOMBRE_PLACEHOLDER
+        es_nuevo      = True
+        confianza_nit = "baja"
+        confianza_rs  = "baja"
+
+        # PASO A: patrones mejorados sobre bloque emisor
+        nit_prov, confianza_nit = _extraer_solo_nit(texto_emisor)
+
+        # Descartar si es el receptor
+        if nit_prov in (nit_receptor, dui_receptor):
+            nit_prov      = ""
+            confianza_nit = "baja"
+
+        # PASO B: si no se encontro, usar método original (regex amplio + cache)
         if not nit_prov:
             patron_ids = (
                 r"\b\d{4}\s*[-]?\s*\d{6}\s*[-]?\s*\d{3}\s*[-]?\s*\d{1}\b"
@@ -661,52 +648,105 @@ def extraer_compras_nativo_pro_v2(file_bytes, cliente_activo, proveedores_cache=
                 r"|\b\d{8}\s*[-]?\s*\d{1}\b"
                 r"|\b\d{9}\b"
             )
-            nits_raw = re.findall(patron_ids, texto_emisor)
+            nits_raw     = re.findall(patron_ids, texto_emisor)
             nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_raw]))
-            nits_candidatos = [
+            candidatos   = [
                 n for n in nits_limpios
-                if n != nit_receptor and n != dui_receptor
+                if n not in (nit_receptor, dui_receptor) and len(n) >= 9
             ]
-            
-            prov_db = proveedores_cache if proveedores_cache is not None else cargar_proveedores_json()
-            
-            for n in nits_candidatos:
+
+            # Preferir el que ya este en cache
+            for n in candidatos:
                 if n in prov_db:
-                    nit_prov = n
-                    nom_prov = prov_db[n].get("nombre", NOMBRE_PLACEHOLDER)
-                    es_nuevo = False
-                    confianza_nit = "alta"
+                    nit_prov      = n
+                    nom_prov      = prov_db[n].get("nombre", NOMBRE_PLACEHOLDER)
+                    es_nuevo      = False
+                    confianza_nit = "cache"
+                    confianza_rs  = "cache"
                     break
-            
-            if not nit_prov and nits_candidatos:
-                nit_prov = nits_candidatos[0]
+
+            if not nit_prov and candidatos:
+                nit_prov      = candidatos[0]
                 confianza_nit = "baja"
 
-        # Validar DUI
+        # PASO C: fallback en tablas del PDF
+        if not nit_prov:
+            nit_prov = _extraer_nit_de_tablas(file_bytes)
+            if nit_prov:
+                confianza_nit = "media"
+
+        # Verificar cache para el NIT recien encontrado
+        if nit_prov and es_nuevo and nit_prov in prov_db:
+            nom_prov      = prov_db[nit_prov].get("nombre", NOMBRE_PLACEHOLDER)
+            es_nuevo      = False
+            confianza_nit = "cache"
+            confianza_rs  = "cache"
+
+        # DUI si son 9 digitos
         if len(nit_prov) == 9:
             dui_prov = nit_prov
 
-        # ═════════════════════════════════════════════════════════════════
-        # EXTRACCIÓN DE MONTOS
-        # ═════════════════════════════════════════════════════════════════
+        # ────────────────────────────────────────────────────────────
+        # EXTRACCION DE RAZON SOCIAL (solo si es proveedor nuevo)
+        # ────────────────────────────────────────────────────────────
+        if es_nuevo and nom_prov == NOMBRE_PLACEHOLDER:
+
+            # Paso 1: patrones estrictos
+            rs_candidato, confianza_rs = _extraer_solo_razon_social(
+                texto_emisor, cliente_activo.get('nombre', '')
+            )
+
+            if rs_candidato:
+                nom_prov = normalizar_nombre_proveedor(
+                    rs_candidato, cliente_activo.get('nombre', '')
+                )
+
+            # Paso 2: metodo original — buscar linea con marca comercial
+            if nom_prov == NOMBRE_PLACEHOLDER:
+                nombre_encontrado = ""
+                for linea in texto_emisor.split('\n')[:30]:
+                    L = linea.strip().upper()
+                    if len(L) < 5:
+                        continue
+                    if sum(c.isdigit() for c in L) / max(len(L), 1) > 0.3:
+                        continue
+                    if any(b in L for b in PALABRAS_BASURA):
+                        continue
+                    if any(bad in L for bad in BASURA_ESTRICTA):
+                        continue
+                    if re.search(r'\d{5,}', L):
+                        continue
+                    if any(marca in L for marca in MARCAS_COMERCIALES):
+                        clean = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
+                        palabras_cli = cliente_activo.get('nombre', '').upper().split()[:2]
+                        if clean and not any(p in clean for p in palabras_cli if len(p) > 3):
+                            nombre_encontrado = clean
+                            break
+
+                if nombre_encontrado:
+                    nom_prov     = normalizar_nombre_proveedor(
+                        nombre_encontrado, cliente_activo.get('nombre', '')
+                    )
+                    confianza_rs = "media"
+
+        # ────────────────────────────────────────────────────────────
+        # EXTRACCION DE MONTOS
+        # ────────────────────────────────────────────────────────────
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
 
-        # Buscar FOVIAL
         m_fovial = re.search(r"FOVIAL.{0,50}", texto_completo, re.I)
         if m_fovial:
             nums = re.findall(r"\d+[.,]\d{2,4}", m_fovial.group(0))
             if nums:
                 e = max(limpiar_monto(n) for n in nums)
 
-        # Buscar COTRANS
         m_cotrans = re.search(r"COTRANS.{0,50}", texto_completo, re.I)
         if m_cotrans:
             nums = re.findall(r"\d+[.,]\d{2,4}", m_cotrans.group(0))
             if nums:
                 e += max(limpiar_monto(n) for n in nums)
 
-        # Buscar Exentos
         m_exe = re.search(
             r"(?:Ventas\s+Exentas|Total\s+Exento)[^\d]{0,30}?"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})",
@@ -717,7 +757,6 @@ def extraer_compras_nativo_pro_v2(file_bytes, cliente_activo, proveedores_cache=
             if val_exe > e:
                 e = val_exe
 
-        # Buscar Retención
         m_ret = re.search(
             r"(?:Retenido|Retenci[oo]n)[^0-9]*"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})",
@@ -726,9 +765,7 @@ def extraer_compras_nativo_pro_v2(file_bytes, cliente_activo, proveedores_cache=
         if m_ret:
             ret = limpiar_monto(m_ret.group(1))
 
-        # ═════════════════════════════════════════════════════════════════
-        # ALGORITMO MATEMÁTICO PARA DESGLOSE
-        # ═════════════════════════════════════════════════════════════════
+        # Algoritmo matematico principal
         montos_raw = re.findall(
             r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})",
             t_clean
@@ -756,7 +793,6 @@ def extraer_compras_nativo_pro_v2(file_bytes, cliente_activo, proveedores_cache=
                             encontrado = True
                             break
 
-        # Fallback textual
         if not encontrado:
             m_t = re.search(
                 r"(?:TOTAL\s+A\s+PAGAR|TOTAL\s+PAGAR|MONTO\s+TOTAL|"
@@ -784,43 +820,40 @@ def extraer_compras_nativo_pro_v2(file_bytes, cliente_activo, proveedores_cache=
                 if g < 0:
                     g = 0.0
 
-        # ═════════════════════════════════════════════════════════════════
-        # RETORNO DE RESULTADOS
-        # ═════════════════════════════════════════════════════════════════
         return {
-            "fecha": fecha,
-            "nit_prov": nit_prov,
-            "dui_prov": dui_prov,
-            "nom_prov": nom_prov,
-            "tipo": tipo,
-            "ctrl": ctrl,
-            "gen": gen,
-            "exe": round(e, 2),
-            "gra": max(0.0, g),
-            "iva": max(0.0, i),
-            "ret": ret,
-            "perc": perc,
-            "tot": t,
-            "estado": "OK",
-            "iva_calc": iva_calculado,
-            "es_nuevo": es_nuevo,
-            "nit_nuevo": nit_prov,
-            "motor": motor,
+            "fecha":         fecha,
+            "nit_prov":      nit_prov,
+            "dui_prov":      dui_prov,
+            "nom_prov":      nom_prov,
+            "tipo":          tipo,
+            "ctrl":          ctrl,
+            "gen":           gen,
+            "exe":           round(e,   2),
+            "gra":           max(0.0, g),
+            "iva":           max(0.0, i),
+            "ret":           ret,
+            "perc":          perc,
+            "tot":           t,
+            "estado":        "OK",
+            "iva_calc":      iva_calculado,
+            "es_nuevo":      es_nuevo,
+            "nit_nuevo":     nit_prov,
+            "motor":         motor,
             "confianza_nit": confianza_nit,
-            "confianza_rs": confianza_rs
+            "confianza_rs":  confianza_rs,
         }
 
     except Exception as err:
         return {"error": str(err)}
 
 # ═══════════════════════════════════════════════════════════════
-# 📱 MODAL DE DESCARGA
+# MODAL DE DESCARGA
 # ═══════════════════════════════════════════════════════════════
 
 @st.dialog("Seguro de Calidad de Compras")
 def ventana_descarga_compras(df_resultados, nombre_archivo):
     st.write(
-        "Asegúrate de haber procesado únicamente los comprobantes "
+        "Asegurate de haber procesado unicamente los comprobantes "
         "que deseas declarar en el anexo de Compras antes de descargar."
     )
     st.download_button(
@@ -833,7 +866,7 @@ def ventana_descarga_compras(df_resultados, nombre_archivo):
     )
 
 # ═══════════════════════════════════════════════════════════════
-# 📱 HEADER
+# HEADER
 # ═══════════════════════════════════════════════════════════════
 
 st.markdown(
@@ -851,22 +884,17 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 🔄 INICIALIZACIÓN DE ESTADO
+# INICIALIZACION DE ESTADO
 # ═══════════════════════════════════════════════════════════════
 
-if 'cola_revision' not in st.session_state:
-    st.session_state.cola_revision = []
-if 'comp_uploader_key' not in st.session_state:
-    st.session_state.comp_uploader_key = str(time.time())
-if 'db_compras' not in st.session_state:
-    st.session_state.db_compras = pd.DataFrame()
-if 'archivos_comp' not in st.session_state:
-    st.session_state.archivos_comp = set()
-if 'reporte_compras' not in st.session_state:
-    st.session_state.reporte_compras = None
+if 'cola_revision'      not in st.session_state: st.session_state.cola_revision      = []
+if 'comp_uploader_key'  not in st.session_state: st.session_state.comp_uploader_key  = str(time.time())
+if 'db_compras'         not in st.session_state: st.session_state.db_compras         = pd.DataFrame()
+if 'archivos_comp'      not in st.session_state: st.session_state.archivos_comp      = set()
+if 'reporte_compras'    not in st.session_state: st.session_state.reporte_compras    = None
 
 # ═══════════════════════════════════════════════════════════════
-# 📂 SIDEBAR - CARGA Y PROCESAMIENTO
+# SIDEBAR — CARGA Y PROCESAMIENTO
 # ═══════════════════════════════════════════════════════════════
 
 with st.sidebar:
@@ -883,23 +911,22 @@ with st.sidebar:
 
     if archivos and st.button("Procesar Compras", type="primary", use_container_width=True):
 
-        extracted = []
-        duplicados = []
+        extracted          = []
+        duplicados         = []
         iva_calculado_files = []
-        intrusos = []
-        invalidos = []
-        corruptos = []
+        intrusos           = []
+        invalidos          = []
+        corruptos          = []
         nuevos_proveedores = {}
 
         nuevos = [f for f in archivos if f.name not in st.session_state.archivos_comp]
 
         if nuevos:
-            bar = st.progress(0)
-            txt_progreso = st.empty()
-            t_inicio = time.time()
-            total = len(nuevos)
-
-            prov_cache = cargar_proveedores_json()
+            bar           = st.progress(0)
+            txt_progreso  = st.empty()
+            t_inicio      = time.time()
+            total         = len(nuevos)
+            prov_cache    = cargar_proveedores_json()
 
             for idx, f in enumerate(nuevos):
 
@@ -908,11 +935,11 @@ with st.sidebar:
 
                 if idx > 0:
                     elapsed = time.time() - t_inicio
-                    eta = int((elapsed / idx) * (total - idx))
-                    m_t, s = divmod(eta, 60)
+                    eta     = int((elapsed / idx) * (total - idx))
+                    m_t2, s = divmod(eta, 60)
                     txt_progreso.markdown(
                         f"Procesando: **{idx+1}** de **{total}** "
-                        f"| Restante: {m_t:02d}:{s:02d}"
+                        f"| Restante: {m_t2:02d}:{s:02d}"
                     )
                 else:
                     txt_progreso.markdown(f"Procesando: **1** de **{total}** | Extrayendo...")
@@ -925,7 +952,7 @@ with st.sidebar:
                     bar.progress((idx + 1) / total)
                     continue
 
-                res = extraer_compras_nativo_pro_v2(file_bytes, cliente, prov_cache)
+                res = extraer_compras_nativo_pro_v3(file_bytes, cliente, prov_cache)
 
                 codigo_gen = res.get('gen', '')
                 dup_memoria = (
@@ -950,13 +977,11 @@ with st.sidebar:
                     duplicados.append(f.name)
 
                 elif "error" not in res:
-                    fecha_str = str(res.get('fecha', '')).strip()
+                    fecha_str    = str(res.get('fecha', '')).strip()
                     nom_prov_str = str(res.get('nom_prov', '')).strip()
 
                     nom_es_placeholder = (
-                        nom_prov_str == NOMBRE_PLACEHOLDER
-                        or nom_prov_str == "ESCRIBE EL NOMBRE AQUI"
-                        or nom_prov_str == ""
+                        nom_prov_str in (NOMBRE_PLACEHOLDER, "ESCRIBE EL NOMBRE AQUI", "")
                     )
 
                     try:
@@ -974,21 +999,17 @@ with st.sidebar:
                     if necesita_revision:
                         st.session_state.cola_revision.append({
                             "archivo": f.name,
-                            "bytes": file_bytes,
-                            "datos": res
+                            "bytes":   file_bytes,
+                            "datos":   res
                         })
                     else:
                         if res.get('iva_calc'):
                             iva_calculado_files.append(f.name)
                         if res.get("es_nuevo") and res.get("nit_nuevo"):
                             nuevos_proveedores[res["nit_nuevo"]] = res["nom_prov"]
-                            prov_cache[res["nit_nuevo"]] = {
-                                "nombre": res["nom_prov"],
-                                "nrc": ""
-                            }
+                            prov_cache[res["nit_nuevo"]] = {"nombre": res["nom_prov"], "nrc": ""}
                         res["archivo"] = f.name
                         extracted.append(res)
-
                 else:
                     corruptos.append(f.name)
 
@@ -1000,12 +1021,12 @@ with st.sidebar:
                 guardar_lote_proveedores(nuevos_proveedores)
 
             st.session_state.reporte_compras = {
-                "intrusos": intrusos,
-                "invalidos": invalidos,
-                "duplicados": duplicados,
-                "iva_calc": iva_calculado_files,
+                "intrusos":          intrusos,
+                "invalidos":         invalidos,
+                "duplicados":        duplicados,
+                "iva_calc":          iva_calculado_files,
                 "nuevos_proveedores": nuevos_proveedores,
-                "corruptos": corruptos
+                "corruptos":         corruptos
             }
 
             if extracted:
@@ -1035,16 +1056,21 @@ with st.sidebar:
         st.caption(f"Registros: {len(st.session_state.db_compras)}")
         en_cola = len(st.session_state.cola_revision)
         if en_cola > 0:
-            st.warning(f"{en_cola} en bandeja de revisión")
+            st.warning(f"{en_cola} en bandeja de revision")
 
 # ═══════════════════════════════════════════════════════════════
-# 📋 BANDEJA DE REVISIÓN MANUAL - CON INDICADORES DE CONFIANZA
+# BANDEJA DE REVISION MANUAL — CON INDICADORES DE CONFIANZA
 # ═══════════════════════════════════════════════════════════════
 
 if st.session_state.cola_revision:
+
+    total_cola  = len(st.session_state.cola_revision)
+    item_actual = st.session_state.cola_revision[0]
+    datos       = item_actual["datos"]
+
     st.markdown("""
     <div class="inbox-revision">
-        <h3 style="margin-top:0; color:#ffaa00;">Bandeja de Revisión Manual</h3>
+        <h3 style="margin-top:0; color:#ffaa00;">Bandeja de Revision Manual</h3>
         <p style="color:#aaa; margin-bottom:0;">
             Se encontraron datos borrosos o incompletos.
             Revisa la imagen y completa los campos requeridos.
@@ -1052,36 +1078,26 @@ if st.session_state.cola_revision:
     </div>
     """, unsafe_allow_html=True)
 
-    total_cola = len(st.session_state.cola_revision)
-    item_actual = st.session_state.cola_revision[0]
-    datos = item_actual["datos"]
+    # ── Indicadores de confianza ──────────────────────────────────────
+    conf_nit = datos.get("confianza_nit", "baja")
+    conf_rs  = datos.get("confianza_rs",  "baja")
 
-    # ═════════════════════════════════════════════════════════════════
-    # INDICADORES DE CONFIANZA
-    # ═════════════════════════════════════════════════════════════════
-    col_prog1, col_prog2, col_prog3 = st.columns(3)
-    
-    with col_prog1:
-        conf_nit = datos.get('confianza_nit', 'baja')
-        st.markdown(
-            f"<div><strong>NIT Extraído:</strong> {mostrar_indicador_confianza(conf_nit)}</div>",
-            unsafe_allow_html=True
-        )
-    
-    with col_prog2:
-        conf_rs = datos.get('confianza_rs', 'baja')
-        st.markdown(
-            f"<div><strong>Razón Social:</strong> {mostrar_indicador_confianza(conf_rs)}</div>",
-            unsafe_allow_html=True
-        )
-    
-    with col_prog3:
-        st.markdown(
-            f"<div><strong>Documento:</strong> <span class='badge-revision'>REVISIÓN REQUERIDA</span></div>",
-            unsafe_allow_html=True
-        )
-
-    st.info(f"Documento **1 de {total_cola}** en revisión.")
+    st.markdown(f"""
+    <div class="confianza-row">
+        <div class="confianza-item">
+            <strong>NIT Extraido:</strong>&nbsp;{mostrar_indicador_confianza(conf_nit)}
+            &nbsp;<span style="color:#888;font-size:12px;">{datos.get('nit_prov','—')}</span>
+        </div>
+        <div class="confianza-item">
+            <strong>Razon Social:</strong>&nbsp;{mostrar_indicador_confianza(conf_rs)}
+            &nbsp;<span style="color:#888;font-size:12px;">{datos.get('nom_prov','—')[:40]}</span>
+        </div>
+        <div class="confianza-item">
+            <span class="badge-revision">REVISION REQUERIDA</span>
+            &nbsp;<span style="color:#888;font-size:12px;">Doc {1} de {total_cola}</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     col_img, col_form = st.columns([1.2, 1], gap="large")
 
@@ -1089,7 +1105,7 @@ if st.session_state.cola_revision:
         try:
             with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
                 img = pdf.pages[0].to_image(resolution=250).original
-                st.image(img, caption=f"Vista Previa: {item_actual['archivo']}", use_container_width=True)
+                st.image(img, caption=item_actual['archivo'], use_container_width=True)
 
                 texto_crudo = ""
                 for page in pdf.pages:
@@ -1097,7 +1113,7 @@ if st.session_state.cola_revision:
                         page.extract_text(layout=True) or page.extract_text() or ""
                     ) + "\n"
 
-                st.markdown("**Texto extraído del PDF:**")
+                st.markdown("**Texto extraido del PDF:**")
                 st.text_area(
                     "Texto",
                     value=texto_crudo.strip(),
@@ -1108,7 +1124,7 @@ if st.session_state.cola_revision:
             st.error("No se pudo cargar la vista previa del PDF.")
 
     with col_form:
-        st.markdown("### Corrección Rápida")
+        st.markdown("### Correccion Rapida")
 
         nom_sugerido = datos.get("nom_prov", "")
         if nom_sugerido in [NOMBRE_PLACEHOLDER, "ESCRIBE EL NOMBRE AQUI"]:
@@ -1121,12 +1137,12 @@ if st.session_state.cola_revision:
                 placeholder="15/03/2024"
             )
             f_gen = st.text_input(
-                "Código de Generación (UUID) *",
+                "Codigo de Generacion (UUID) *",
                 value=datos.get("gen", ""),
                 placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
             )
             f_nom = st.text_input(
-                "Razón Social del Proveedor *",
+                "Razon Social del Proveedor *",
                 value=nom_sugerido,
                 placeholder="Empresa Proveedora S.A. de C.V."
             )
@@ -1137,39 +1153,34 @@ if st.session_state.cola_revision:
                     tot_default = float(datos.get("tot", 0.0))
                 except (TypeError, ValueError):
                     tot_default = 0.0
-                f_tot = st.number_input("Total a Pagar ($) *", value=tot_default, format="%.2f", min_value=0.0)
-
+                f_tot = st.number_input(
+                    "Total a Pagar ($) *", value=tot_default,
+                    format="%.2f", min_value=0.0
+                )
             with c_mon2:
                 try:
                     exe_default = float(datos.get("exe", 0.0))
                 except (TypeError, ValueError):
                     exe_default = 0.0
-                f_exe = st.number_input("Exento/Fovial ($)", value=exe_default, format="%.2f", min_value=0.0)
+                f_exe = st.number_input(
+                    "Exento/Fovial ($)", value=exe_default,
+                    format="%.2f", min_value=0.0
+                )
 
             st.write("")
             c_btn1, c_btn2 = st.columns(2)
-
             with c_btn1:
-                submit_aprobar = st.form_submit_button(
-                    "Aprobar y Guardar",
-                    type="primary",
-                    use_container_width=True
-                )
+                submit_aprobar   = st.form_submit_button("Aprobar y Guardar",  type="primary", use_container_width=True)
             with c_btn2:
-                submit_descartar = st.form_submit_button(
-                    "Descartar Archivo",
-                    use_container_width=True
-                )
+                submit_descartar = st.form_submit_button("Descartar Archivo", use_container_width=True)
 
         if submit_aprobar:
             if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
                 st.error("Rellena todos los campos marcados con (*) para continuar.")
             else:
                 nit_actual = datos.get("nit_prov", "")
-
                 if nit_actual:
                     guardar_proveedor_rapido(nit_actual, f_nom.upper())
-
                     for item in st.session_state.cola_revision[1:]:
                         if item["datos"].get("nit_prov") == nit_actual:
                             item["datos"]["nom_prov"] = f_nom.upper()
@@ -1179,15 +1190,15 @@ if st.session_state.cola_revision:
                 except (TypeError, ValueError):
                     iva_actual = 0.0
 
-                datos["fecha"] = f_fecha.strip()
-                datos["gen"] = f_gen.strip().upper()
+                datos["fecha"]   = f_fecha.strip()
+                datos["gen"]     = f_gen.strip().upper()
                 datos["nom_prov"] = f_nom.strip().upper()
-                datos["tot"] = round(f_tot, 2)
-                datos["exe"] = round(f_exe, 2)
+                datos["tot"]     = round(f_tot, 2)
+                datos["exe"]     = round(f_exe, 2)
 
                 if f_tot > 0 and iva_actual == 0.0:
-                    datos["gra"] = round((f_tot - f_exe) / 1.13, 2)
-                    datos["iva"] = round(f_tot - f_exe - datos["gra"], 2)
+                    datos["gra"]      = round((f_tot - f_exe) / 1.13, 2)
+                    datos["iva"]      = round(f_tot - f_exe - datos["gra"], 2)
                     datos["iva_calc"] = True
 
                 datos["archivo"] = item_actual["archivo"]
@@ -1210,41 +1221,33 @@ if st.session_state.cola_revision:
     st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# 📊 DASHBOARD DE ALERTAS
+# DASHBOARD DE ALERTAS
 # ═══════════════════════════════════════════════════════════════
 
 if st.session_state.reporte_compras:
     rep = st.session_state.reporte_compras
-    st.markdown("### 🚨 Alertas de Procesamiento")
+    st.markdown("### Alertas de Procesamiento")
 
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
         n = len(rep.get("corruptos", []))
         if n:
-            st.error(f"**{n} Dañados** (PDF corrupto).")
+            st.error(f"**{n} Danados** (PDF corrupto).")
             with st.expander("Ver lista"):
-                st.markdown(
-                    '<div class="scroll-list">'
-                    + "".join(f"• {a}<br>" for a in rep["corruptos"])
-                    + '</div>', unsafe_allow_html=True
-                )
+                st.markdown('<div class="scroll-list">' + "".join(f"- {a}<br>" for a in rep["corruptos"]) + '</div>', unsafe_allow_html=True)
         else:
-            st.success("**0 Dañados.**")
+            st.success("**0 Danados.**")
 
     with c2:
-        intrusos_n = len(rep.get("intrusos", []))
+        intrusos_n  = len(rep.get("intrusos", []))
         invalidos_n = len(rep.get("invalidos", []))
-        total_rej = intrusos_n + invalidos_n
+        total_rej   = intrusos_n + invalidos_n
         if total_rej:
             st.error(f"**{total_rej} Rechazados** ({intrusos_n} ajenos, {invalidos_n} tipo incorrecto).")
             with st.expander("Ver lista"):
                 todos = rep.get("intrusos", []) + rep.get("invalidos", [])
-                st.markdown(
-                    '<div class="scroll-list">'
-                    + "".join(f"• {a}<br>" for a in todos)
-                    + '</div>', unsafe_allow_html=True
-                )
+                st.markdown('<div class="scroll-list">' + "".join(f"- {a}<br>" for a in todos) + '</div>', unsafe_allow_html=True)
         else:
             st.success("**0 Rechazados.**")
 
@@ -1253,11 +1256,7 @@ if st.session_state.reporte_compras:
         if n:
             st.error(f"**{n} Omitidos** (Duplicados).")
             with st.expander("Ver lista"):
-                st.markdown(
-                    '<div class="scroll-list">'
-                    + "".join(f"• {a}<br>" for a in rep["duplicados"])
-                    + '</div>', unsafe_allow_html=True
-                )
+                st.markdown('<div class="scroll-list">' + "".join(f"- {a}<br>" for a in rep["duplicados"]) + '</div>', unsafe_allow_html=True)
         else:
             st.success("**0 Omitidos.**")
 
@@ -1266,35 +1265,26 @@ if st.session_state.reporte_compras:
         if n:
             st.info(f"**{n} IVA Calc.** (Calculado al 13%).")
             with st.expander("Ver lista"):
-                st.markdown(
-                    '<div class="scroll-list">'
-                    + "".join(f"• {a}<br>" for a in rep["iva_calc"])
-                    + '</div>', unsafe_allow_html=True
-                )
+                st.markdown('<div class="scroll-list">' + "".join(f"- {a}<br>" for a in rep["iva_calc"]) + '</div>', unsafe_allow_html=True)
         else:
             st.success("**0 IVA Calc.**")
 
     st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# 📊 TABLAS DE RESULTADOS Y EXPORTACIÓN
+# TABLA DE RESULTADOS Y EXPORTACION
 # ═══════════════════════════════════════════════════════════════
 
 if not st.session_state.db_compras.empty:
     df = st.session_state.db_compras.copy()
 
-    st.markdown("### 🔍 Filtros de Auditoría Rápida")
+    st.markdown("### Filtros de Auditoria Rapida")
     col_f1, col_f2 = st.columns([2, 1])
-
     with col_f1:
         busqueda = st.text_input("Buscar Proveedor", placeholder="Nombre, NIT o UUID...")
     with col_f2:
         tipos_disponibles = df['tipo'].unique().tolist() if 'tipo' in df.columns else []
-        filtro_tipo = st.multiselect(
-            "Filtrar por Tipo DTE",
-            options=tipos_disponibles,
-            default=tipos_disponibles
-        )
+        filtro_tipo = st.multiselect("Filtrar por Tipo DTE", options=tipos_disponibles, default=tipos_disponibles)
 
     df_filtrado = df.copy()
 
@@ -1312,44 +1302,40 @@ if not st.session_state.db_compras.empty:
         df_filtrado = df_filtrado[df_filtrado['tipo'].isin(filtro_tipo)]
 
     st.divider()
-
-    tab1, tab2 = st.tabs([
-        "F-07 Compras a Contribuyentes",
-        "Auditoría Total"
-    ])
+    tab1, tab2 = st.tabs(["F-07 Compras a Contribuyentes", "Auditoria Total"])
 
     with tab1:
         if df_filtrado.empty:
             st.info("No hay registros que coincidan con los filtros aplicados.")
         else:
             df_h = pd.DataFrame({
-                "A. Fecha Emisión": df_filtrado["fecha"],
-                "B. Clase": "4",
-                "C. Tipo Doc": df_filtrado["tipo"],
-                "D. Num Documento": df_filtrado["gen"],
-                "E. NIT/NRC Prov": df_filtrado["nit_prov"],
-                "F. Nombre Prov": df_filtrado["nom_prov"],
-                "G. Compra Ext/NS": df_filtrado["exe"],
-                "H. Internación Ext/NS": 0.00,
-                "I. Importación Ext/NS": 0.00,
-                "J. Compra Gravada": df_filtrado["gra"],
+                "A. Fecha Emision":        df_filtrado["fecha"],
+                "B. Clase":                "4",
+                "C. Tipo Doc":             df_filtrado["tipo"],
+                "D. Num Documento":        df_filtrado["gen"],
+                "E. NIT/NRC Prov":         df_filtrado["nit_prov"],
+                "F. Nombre Prov":          df_filtrado["nom_prov"],
+                "G. Compra Ext/NS":        df_filtrado["exe"],
+                "H. Internacion Ext/NS":   0.00,
+                "I. Importacion Ext/NS":   0.00,
+                "J. Compra Gravada":       df_filtrado["gra"],
                 "K. Inter. Gravada Bienes": 0.00,
                 "L. Impor. Gravada Bienes": 0.00,
-                "M. Impor. Gravada Serv": 0.00,
-                "N. Crédito Fiscal (IVA)": df_filtrado["iva"],
-                "O. Total Compras": df_filtrado["tot"],
-                "P. DUI Prov": df_filtrado["dui_prov"],
-                "Q. Tipo Operación": "1",
-                "R. Clasificación": "1",
-                "S. Sector": "1",
-                "T. Tipo Costo/Gasto": "1",
-                "U. Num Anexo": "3"
+                "M. Impor. Gravada Serv":  0.00,
+                "N. Credito Fiscal (IVA)": df_filtrado["iva"],
+                "O. Total Compras":        df_filtrado["tot"],
+                "P. DUI Prov":             df_filtrado["dui_prov"],
+                "Q. Tipo Operacion":       "1",
+                "R. Clasificacion":        "1",
+                "S. Sector":               "1",
+                "T. Tipo Costo/Gasto":     "1",
+                "U. Num Anexo":            "3"
             })
 
             cols_num = [
-                "G. Compra Ext/NS", "H. Internación Ext/NS", "I. Importación Ext/NS",
+                "G. Compra Ext/NS", "H. Internacion Ext/NS", "I. Importacion Ext/NS",
                 "J. Compra Gravada", "K. Inter. Gravada Bienes", "L. Impor. Gravada Bienes",
-                "M. Impor. Gravada Serv", "N. Crédito Fiscal (IVA)", "O. Total Compras"
+                "M. Impor. Gravada Serv", "N. Credito Fiscal (IVA)", "O. Total Compras"
             ]
 
             st.dataframe(
@@ -1359,14 +1345,10 @@ if not st.session_state.db_compras.empty:
             )
 
             col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
-            with col_kpi1:
-                st.metric("Registros", len(df_h))
-            with col_kpi2:
-                st.metric("Total Gravado", f"${df_h['J. Compra Gravada'].sum():,.2f}")
-            with col_kpi3:
-                st.metric("Total IVA CF", f"${df_h['N. Crédito Fiscal (IVA)'].sum():,.2f}")
-            with col_kpi4:
-                st.metric("Total General", f"${df_h['O. Total Compras'].sum():,.2f}")
+            with col_kpi1: st.metric("Registros",     len(df_h))
+            with col_kpi2: st.metric("Total Gravado", f"${df_h['J. Compra Gravada'].sum():,.2f}")
+            with col_kpi3: st.metric("Total IVA CF",  f"${df_h['N. Credito Fiscal (IVA)'].sum():,.2f}")
+            with col_kpi4: st.metric("Total General", f"${df_h['O. Total Compras'].sum():,.2f}")
 
             st.write("")
             if st.button("Generar Excel para Hacienda", type="primary", use_container_width=True):
@@ -1380,5 +1362,4 @@ if not st.session_state.db_compras.empty:
             motores = df['motor'].value_counts().to_dict() if 'motor' in df.columns else {}
             for motor_name, count in motores.items():
                 st.write(f"Motor {motor_name}: **{count}** documentos")
-
         st.dataframe(df_filtrado, use_container_width=True)
