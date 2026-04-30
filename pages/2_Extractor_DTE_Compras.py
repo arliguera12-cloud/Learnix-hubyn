@@ -1175,7 +1175,7 @@ if st.session_state.cola_revision:
         </div>
         <div class="confianza-item">
             <span class="badge-revision">REVISION REQUERIDA</span>
-            &nbsp;<span style="color:#888;font-size:12px;">Doc 1 de {total_cola}</span>
+            &nbsp;<span style="color:#888;font-size:12px;">Doc {1} de {total_cola}</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1210,6 +1210,17 @@ if st.session_state.cola_revision:
         nom_sugerido = datos.get("nom_prov", "")
         if nom_sugerido in [NOMBRE_PLACEHOLDER, "ESCRIBE EL NOMBRE AQUI"]:
             nom_sugerido = ""
+
+        # ─────────────────────────────────────────────────────────
+        # NUEVO: Mostrar si es proveedor nuevo
+        # ─────────────────────────────────────────────────────────
+        nit_actual = datos.get("nit_prov", "")
+        es_nuevo_proveedor = datos.get("es_nuevo", True)
+        
+        if nit_actual and es_nuevo_proveedor:
+            st.info(f"🆕 **Proveedor Nuevo:** NIT {nit_actual} no está en directorio")
+        elif nit_actual:
+            st.success(f"✅ **Proveedor Existente:** NIT {nit_actual}")
 
         with st.form(key=f"form_rev_{item_actual['archivo']}_{total_cola}"):
             f_fecha = st.text_input(
@@ -1249,17 +1260,43 @@ if st.session_state.cola_revision:
                 )
 
             st.write("")
-            c_btn1, c_btn2 = st.columns(2)
+            c_btn1, c_btn2, c_btn3 = st.columns(3)
             with c_btn1:
                 submit_aprobar   = st.form_submit_button("Aprobar y Guardar",  type="primary", use_container_width=True)
             with c_btn2:
-                submit_descartar = st.form_submit_button("Descartar Archivo", use_container_width=True)
+                submit_guardar_prov = st.form_submit_button("💾 Guardar Proveedor", use_container_width=True)
+            with c_btn3:
+                submit_descartar = st.form_submit_button("❌ Descartar", use_container_width=True)
 
+        # ─────────────────────────────────────────────────────────
+        # LÓGICA: Guardar solo proveedor (sin aprobar factura)
+        # ─────────────────────────────────────────────────────────
+        if submit_guardar_prov:
+            if not f_nom or not nit_actual:
+                st.error("⚠️ Debes llenar la Razón Social y tener un NIT válido.")
+            else:
+                guardar_proveedor_rapido(nit_actual, f_nom.upper())
+                
+                # Actualizar cache en memory para procesamiento posterior
+                prov_cache = cargar_proveedores_json()
+                
+                # Actualizar el nombre en todos los items de la cola con el mismo NIT
+                for item in st.session_state.cola_revision:
+                    if item["datos"].get("nit_prov") == nit_actual:
+                        item["datos"]["nom_prov"] = f_nom.upper()
+                        item["datos"]["es_nuevo"] = False
+                
+                st.success(f"✅ **Proveedor guardado:** {f_nom.upper()} (NIT: {nit_actual})")
+                st.info("💡 Puedes continuar revisando este documento o pasar al siguiente.")
+                time.sleep(1)
+
+        # ─────────────────────────────────────────────────────────
+        # LÓGICA: Aprobar factura (requiere todos los datos)
+        # ─────────────────────────────────────────────────────────
         if submit_aprobar:
             if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
-                st.error("Rellena todos los campos marcados con (*) para continuar.")
+                st.error("⚠️ Rellena todos los campos marcados con (*) para continuar.")
             else:
-                nit_actual = datos.get("nit_prov", "")
                 if nit_actual:
                     guardar_proveedor_rapido(nit_actual, f_nom.upper())
                     for item in st.session_state.cola_revision[1:]:
@@ -1293,10 +1330,17 @@ if st.session_state.cola_revision:
                     )
 
                 st.session_state.cola_revision.pop(0)
+                st.success("✅ Factura aprobada y guardada.")
+                time.sleep(1)
                 st.rerun()
 
+        # ─────────────────────────────────────────────────────────
+        # LÓGICA: Descartar
+        # ─────────────────────────────────────────────────────────
         if submit_descartar:
             st.session_state.cola_revision.pop(0)
+            st.warning("❌ Documento descartado.")
+            time.sleep(1)
             st.rerun()
 
     st.divider()
