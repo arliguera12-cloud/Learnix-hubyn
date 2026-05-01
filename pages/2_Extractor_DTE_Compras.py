@@ -209,6 +209,30 @@ MARCAS_COMERCIALES = [
     "COMERCIAL", "SERVICIOS", "IMPORTADORA", "EXPORTADORA"
 ]
 
+# Etiquetas de pie de tabla CCF — en orden de aparicion tipica
+ETIQUETAS_PIE_CCF = {
+    "gravado": [
+        "subtotal gravado", "venta gravada", "ventas gravadas",
+        "compra gravada", "monto gravado", "monto sujeto a iva",
+        "sub total gravado", "total gravado"
+    ],
+    "exento": [
+        "venta exenta", "ventas exentas", "monto exento",
+        "total exento", "subtotal exento", "sub total exento",
+        "compra exenta", "no gravado", "no sujeto"
+    ],
+    "iva": [
+        "impuesto al valor agregado", "i.v.a.", "iva",
+        "debito fiscal", "credito fiscal", "13%",
+        "impuesto 13", "iva 13"
+    ],
+    "total": [
+        "total a pagar", "total operacion", "total de la operacion",
+        "monto total", "total pagar", "total general",
+        "total compra", "valor total"
+    ]
+}
+
 # ═══════════════════════════════════════════════════════════════
 # BASE DE DATOS DE PROVEEDORES
 # ═══════════════════════════════════════════════════════════════
@@ -626,110 +650,107 @@ def _extraer_razon_social_v6(nit_prov, texto_emisor, prov_db, cliente_nombre, fi
     return NOMBRE_PLACEHOLDER, "baja"
 
 # ═══════════════════════════════════════════════════════════════
-# EXTRACCION DE MONTOS DESDE TABLAS PDF — CCF ESPECIFICO
+# EXTRACTOR DE PIE DE TABLA CCF
 # ═══════════════════════════════════════════════════════════════
 
-def _extraer_montos_desde_tablas_ccf(file_bytes):
+def _buscar_monto_en_linea(linea_texto):
     """
-    Extrae montos del resumen al PIE de tabla de un CCF.
+    Extrae el primer monto numerico valido de una linea de texto.
+    Maneja formatos: 1,234.56 / 1.234,56 / 1234.56 / $1,234.56
+    """
+    linea_limpia = re.sub(r'[^\d.,]', ' ', linea_texto).strip()
+    # Patron: numero con separador decimal de 2 cifras al final
+    matches = re.findall(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', linea_limpia)
+    if matches:
+        return limpiar_monto(matches[-1])   # el ultimo suele ser el monto final
+    # Fallback: numero simple con decimales
+    m = re.search(r'(\d+)[.,](\d{2})$', linea_limpia.strip())
+    if m:
+        return limpiar_monto(f"{m.group(1)}.{m.group(2)}")
+    return 0.0
 
-    Los CCF tienen una tabla de detalle de items y al final
-    un bloque de resumen con etiquetas como:
-        | Subtotal Gravado | 90.00 |
-        | Venta Exenta     |  5.00 |
-        | IVA (13%)        | 11.70 |
-        | Total a Pagar    |106.70 |
 
-    Esta funcion escanea TODAS las tablas de todas las paginas
-    buscando ese bloque resumen al pie.
+def _extraer_montos_de_tablas_ccf(file_bytes):
+    """
+    Estrategia especializada para CCF:
+    Busca el PIE de las tablas en busca de las filas de resumen
+    (Subtotal Gravado, Exento, IVA, Total).
+
+    Retorna dict con: g, exe, i, t y fuente por campo.
     """
     resultado = {
-        "g": 0.0, "i": 0.0, "exe": 0.0, "t": 0.0,
-        "fuente": "no encontrado"
+        "g":       0.0, "g_fuente":   "no encontrado",
+        "exe":     0.0, "exe_fuente": "no encontrado",
+        "i":       0.0, "i_fuente":   "no encontrado",
+        "t":       0.0, "t_fuente":   "no encontrado",
     }
-
-    # Palabras clave que identifican cada fila del resumen
-    LABELS_GRAVADO = [
-        "SUBTOTAL GRAVADO", "GRAVADO", "VENTA GRAVADA",
-        "MONTO GRAVADO", "TOTAL GRAVADO", "SUJETO A IVA",
-        "MONTO SUJETO"
-    ]
-    LABELS_EXENTO = [
-        "VENTA EXENTA", "EXENTO", "NO GRAVADO", "EXENTA",
-        "MONTO EXENTO", "TOTAL EXENTO", "NO SUJETO", "SUBTOTAL EXENTO"
-    ]
-    LABELS_IVA = [
-        "IVA", "I.V.A", "IMPUESTO AL VALOR", "13%",
-        "DEBITO FISCAL", "CREDITO FISCAL"
-    ]
-    LABELS_TOTAL = [
-        "TOTAL A PAGAR", "TOTAL PAGAR", "TOTAL OPERACION",
-        "MONTO TOTAL", "TOTAL DE LA OPERACION", "VENTA TOTAL",
-        "TOTAL"
-    ]
-
-    def _es_monto_valido(valor_str):
-        """Verifica que el string sea un monto numerico valido."""
-        limpio = limpiar_monto(valor_str)
-        return limpio > 0.0, limpio
-
-    def _label_coincide(celda, lista_labels):
-        """Comprueba si la celda contiene alguna de las etiquetas."""
-        celda_up = str(celda or "").upper().strip()
-        return any(lbl in celda_up for lbl in lista_labels)
 
     try:
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
-                tablas = page.extract_tables() or []
-                for tabla in tablas:
-                    if not tabla:
+                tables = page.extract_tables() or []
+                for table in tables:
+                    if not table:
                         continue
-
-                    for row in tabla:
+                    # Recorremos las filas en REVERSO (pie de tabla = ultimas filas)
+                    for row in reversed(table):
                         if not row:
                             continue
+                        # Concatenar todas las celdas como texto unico de la fila
+                        texto_fila = " ".join(
+                            str(c).strip() for c in row if c
+                        ).upper().strip()
 
-                        # Filtrar celdas nulas para trabajar con el texto real
-                        celdas = [str(c or "").strip() for c in row]
-
-                        # Buscar filas de 2 columnas: [etiqueta, valor]
-                        # o de N columnas donde la ultima es el valor
-                        if len(celdas) < 2:
+                        if len(texto_fila) < 2:
                             continue
 
-                        etiqueta = celdas[0]
-                        # El valor puede estar en la ultima columna no vacia
-                        valor_str = ""
-                        for c in reversed(celdas[1:]):
-                            if c:
-                                valor_str = c
-                                break
+                        # Buscar el monto en la fila
+                        monto_fila = _buscar_monto_en_linea(texto_fila)
+                        if monto_fila <= 0:
+                            # Intentar cada celda individualmente
+                            for celda in reversed(row):
+                                if celda and str(celda).strip():
+                                    m = _buscar_monto_en_linea(str(celda))
+                                    if m > 0:
+                                        monto_fila = m
+                                        break
 
-                        if not etiqueta or not valor_str:
+                        if monto_fila <= 0:
                             continue
 
-                        ok, monto = _es_monto_valido(valor_str)
-                        if not ok:
-                            continue
+                        texto_lower = texto_fila.lower()
 
-                        if _label_coincide(etiqueta, LABELS_GRAVADO):
-                            if resultado["g"] == 0.0:
-                                resultado["g"] = monto
-                                resultado["fuente"] = "tabla-resumen"
+                        # ── TOTAL (prioridad maxima) ──────────────────
+                        if resultado["t"] == 0.0:
+                            for etiq in ETIQUETAS_PIE_CCF["total"]:
+                                if etiq in texto_lower:
+                                    resultado["t"]       = monto_fila
+                                    resultado["t_fuente"] = f"tabla:'{etiq}'=>{monto_fila}"
+                                    break
 
-                        elif _label_coincide(etiqueta, LABELS_EXENTO):
-                            if resultado["exe"] == 0.0:
-                                resultado["exe"] = monto
+                        # ── IVA ───────────────────────────────────────
+                        if resultado["i"] == 0.0:
+                            for etiq in ETIQUETAS_PIE_CCF["iva"]:
+                                if etiq in texto_lower:
+                                    resultado["i"]       = monto_fila
+                                    resultado["i_fuente"] = f"tabla:'{etiq}'=>{monto_fila}"
+                                    break
 
-                        elif _label_coincide(etiqueta, LABELS_IVA):
-                            if resultado["i"] == 0.0:
-                                resultado["i"] = monto
+                        # ── EXENTO ────────────────────────────────────
+                        if resultado["exe"] == 0.0:
+                            for etiq in ETIQUETAS_PIE_CCF["exento"]:
+                                if etiq in texto_lower:
+                                    resultado["exe"]       = monto_fila
+                                    resultado["exe_fuente"] = f"tabla:'{etiq}'=>{monto_fila}"
+                                    break
 
-                        elif _label_coincide(etiqueta, LABELS_TOTAL):
-                            # Tomar el mayor Total encontrado
-                            if monto > resultado["t"]:
-                                resultado["t"] = monto
+                        # ── GRAVADO ───────────────────────────────────
+                        if resultado["g"] == 0.0:
+                            for etiq in ETIQUETAS_PIE_CCF["gravado"]:
+                                if etiq in texto_lower:
+                                    resultado["g"]       = monto_fila
+                                    resultado["g_fuente"] = f"tabla:'{etiq}'=>{monto_fila}"
+                                    break
 
     except Exception:
         pass
@@ -737,268 +758,243 @@ def _extraer_montos_desde_tablas_ccf(file_bytes):
     return resultado
 
 
-def _extraer_montos_pie_texto_ccf(t_clean):
+def _extraer_montos_de_lineas_ccf(t_clean):
     """
-    Extrae montos del bloque de texto al PIE del CCF.
-
-    Muchos CCF tienen el resumen como texto corrido al final:
-        Subtotal Gravado $90.00 Venta Exenta $5.00 IVA $11.70 Total $106.70
-
-    Esta funcion busca ese patron en el texto limpio.
+    Estrategia de lineas de texto para CCF.
+    Analiza linea a linea buscando pares etiqueta + monto.
+    Mas flexible que regex fijo porque el CCF puede tener
+    espacios variables entre etiqueta y valor.
     """
-    resultado = {"g": 0.0, "i": 0.0, "exe": 0.0, "t": 0.0, "fuente": "no encontrado"}
+    resultado = {
+        "g": 0.0, "g_fuente": "no encontrado",
+        "exe": 0.0, "exe_fuente": "no encontrado",
+        "i": 0.0, "i_fuente": "no encontrado",
+        "t": 0.0, "t_fuente": "no encontrado",
+    }
 
-    bloques_resumen = re.findall(
-        r"(?:Subtotal|Total|Exento|IVA|Gravado).{0,300}",
-        t_clean, re.I
-    )
+    lineas = t_clean.split('\n') if '\n' in t_clean else re.split(r'(?<=[.?!])\s+', t_clean)
 
-    # Patron completo de resumen en linea: etiqueta + monto
-    PAT_GRAVADO = (
-        r"(?:Subtotal\s+Gravado|Monto\s+Gravado|Venta\s+Gravada|"
-        r"Sujeto\s+a\s+IVA)[^\d]{0,20}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})"
-    )
-    PAT_EXENTO  = (
-        r"(?:Venta\s+Exenta|Exento|No\s+Gravado|Monto\s+Exento|"
-        r"Subtotal\s+Exento|No\s+Sujeto)[^\d]{0,20}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})"
-    )
-    PAT_IVA     = (
-        r"(?:Impuesto\s+al\s+Valor\s+Agregado|I\.?V\.?A\.?)"
-        r"(?:\s*\(?\s*13\s*%\s*\)?)?\s*[:\-]?\s*"
-        r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})"
-    )
-    PAT_TOTAL   = (
-        r"(?:Total\s+a\s+Pagar|Total\s+Operaci[oo]n|Monto\s+Total|"
-        r"Total\s+de\s+la\s+Operaci[oo]n|Total\s+Pagar)"
-        r"[^\d]{0,20}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})"
-    )
+    # Si no hay saltos de linea reales, dividir por puntos o separadores logicos
+    if len(lineas) < 5:
+        lineas = re.split(r'\s{3,}', t_clean)
 
-    for bloque in bloques_resumen:
-        if resultado["g"] == 0.0:
-            mg = re.search(PAT_GRAVADO, bloque, re.I)
-            if mg:
-                resultado["g"] = limpiar_monto(mg.group(1))
-                resultado["fuente"] = "pie-texto"
+    for linea in lineas:
+        linea_upper = linea.upper().strip()
+        linea_lower = linea.lower().strip()
+        if len(linea_upper) < 2:
+            continue
 
-        if resultado["exe"] == 0.0:
-            me = re.search(PAT_EXENTO, bloque, re.I)
-            if me:
-                resultado["exe"] = limpiar_monto(me.group(1))
+        monto = _buscar_monto_en_linea(linea)
+        if monto <= 0:
+            continue
 
+        # ── TOTAL ──────────────────────────────────────────────
+        if resultado["t"] == 0.0:
+            for etiq in ETIQUETAS_PIE_CCF["total"]:
+                if etiq in linea_lower:
+                    resultado["t"]       = monto
+                    resultado["t_fuente"] = f"linea:'{etiq}'=>{monto}"
+                    break
+
+        # ── IVA ────────────────────────────────────────────────
         if resultado["i"] == 0.0:
-            mi = re.search(PAT_IVA, bloque, re.I)
-            if mi:
-                resultado["i"] = limpiar_monto(mi.group(1))
+            for etiq in ETIQUETAS_PIE_CCF["iva"]:
+                if etiq in linea_lower:
+                    resultado["i"]       = monto
+                    resultado["i_fuente"] = f"linea:'{etiq}'=>{monto}"
+                    break
 
-        mt = re.search(PAT_TOTAL, bloque, re.I)
-        if mt:
-            val = limpiar_monto(mt.group(1))
-            if val > resultado["t"]:
-                resultado["t"] = val
+        # ── EXENTO ─────────────────────────────────────────────
+        if resultado["exe"] == 0.0:
+            for etiq in ETIQUETAS_PIE_CCF["exento"]:
+                if etiq in linea_lower:
+                    resultado["exe"]       = monto
+                    resultado["exe_fuente"] = f"linea:'{etiq}'=>{monto}"
+                    break
+
+        # ── GRAVADO ────────────────────────────────────────────
+        if resultado["g"] == 0.0:
+            for etiq in ETIQUETAS_PIE_CCF["gravado"]:
+                if etiq in linea_lower:
+                    resultado["g"]       = monto
+                    resultado["g_fuente"] = f"linea:'{etiq}'=>{monto}"
+                    break
 
     return resultado
 
 # ═══════════════════════════════════════════════════════════════
-# MOTOR V10 — EXTRACCION DE MONTOS COMPLETA
+# MOTOR V10: EXTRACCION DE MONTOS CCF CON 4 ESTRATEGIAS
 # ═══════════════════════════════════════════════════════════════
 
-def _extraer_montos_v10(texto_completo, t_clean, tipo, e, ret, file_bytes):
+def _extraer_montos_v10(texto_completo, t_clean, tipo, e_fovial, ret, file_bytes):
     """
-    Motor V10: Manejo COMPLETO de CCF con TODOS los formatos.
+    Motor V10: 4 estrategias en cascada para CCF y facturas.
 
-    JERARQUIA DE PRIORIDAD (de mayor a menor):
-    ─────────────────────────────────────────
-    1. ETIQUETAS EXPLICITAS en texto lineal   → maxima confianza
-    2. TABLAS DE RESUMEN al pie del CCF       → alta confianza
-    3. TEXTO DE PIE (resumen corrido)         → media confianza
-    4. ALGEBRA (Total - IVA - Exento = Grav)  → respaldo
-    5. FALLBACK CUADRUPLE LOOP                → ultimo recurso
+    ORDEN DE PRIORIDAD:
+      E1 — Regex con etiquetas explicitas (texto plano)
+      E2 — Analisis linea a linea (CCF sin estructura clara)
+      E3 — Extraccion de tablas PDF (CCF con tabla de pie)
+      E4 — Fallback cuadruple-loop (ULTIMO RECURSO)
 
     FORMULA CORRECTA:
-        Total = Gravado + IVA(13%) + Exento + Fovial/Cotrans - Retenciones
-        Exento NO genera IVA pero SI suma al Total
+      Total = Gravado + IVA(13%) + Exento - Retenciones
+      (Exento NO genera IVA pero SI suma al Total)
     """
     g, i, exe, t = 0.0, 0.0, 0.0, 0.0
     iva_calculado = False
     debug = {
-        "P1_etiquetas": "pendiente",
-        "P2_tablas_ccf": "pendiente",
-        "P3_pie_texto":  "pendiente",
-        "P4_algebra":    "no aplicado",
-        "P5_fallback":   "no aplicado",
-        "P6_validacion": "no aplicada",
-        "P7_aseguranza": "no aplicada",
-        "fuente_final":  "desconocida",
+        "E1_regex":      {},
+        "E2_lineas":     {},
+        "E3_tablas":     {},
+        "E4_fallback":   "no aplicado",
+        "P_algebra":     "no aplicado",
+        "P_validacion":  "no aplicada",
+        "P_aseguranza":  "no aplicada",
         "montos_raw":    [],
-        "resultado":     ""
+        "resultado":     "",
+        "estrategia_ganadora": "ninguna"
     }
 
-    # ─────────────────────────────────────────────────────────
-    # PASO 1: ETIQUETAS EXPLICITAS EN TEXTO LINEAL
-    # Maxima prioridad — si el PDF tiene etiquetas claras,
-    # las tomamos directamente sin pasar a tablas.
-    # ─────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════
+    # E1: REGEX CON ETIQUETAS EXPLICITAS
+    # ══════════════════════════════════════════════════════════
+    e1 = {"g": 0.0, "i": 0.0, "exe": 0.0, "t": 0.0}
 
-    # 1A — Total por etiqueta
-    PAT_TOTAL_EXPLICITO = [
-        r"(?:TOTAL\s+A\s+PAGAR|MONTO\s+TOTAL\s+DE\s+LA\s+OPERACI[OO]N|"
-        r"TOTAL\s+DE\s+LA\s+OPERACI[OO]N|TOTAL\s+OPERACI[OO]N|"
-        r"VENTA\s+TOTAL|TOTAL\s+PAGAR|TOTAL\s+\$)"
+    # Total
+    for patron in [
+        r"(?:TOTAL\s+A\s+PAGAR|MONTO\s+TOTAL\s+(?:DE\s+LA\s+)?OPERACI[OO]N|"
+        r"TOTAL\s+(?:DE\s+LA\s+)?OPERACI[OO]N|VENTA\s+TOTAL|TOTAL\s+PAGAR|TOTAL\s+\$)"
         r"[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
-    ]
-    for pat in PAT_TOTAL_EXPLICITO:
-        m = re.search(pat, t_clean, re.I)
+    ]:
+        m = re.search(patron, t_clean, re.I)
         if m:
-            t = limpiar_monto(m.group(1))
-            debug["P1_etiquetas"] = f"Total OK => {t}"
+            e1["t"] = limpiar_monto(m.group(1))
             break
 
-    # 1B — IVA por etiqueta
-    PAT_IVA_EXPLICITO = [
-        r"(?:Impuesto\s+al\s+Valor\s+Agregado|I\.V\.A\.?|IVA)"
-        r"(?:\s*\(?13\s*%\)?)?\s*[:\-]?\s*"
+    # IVA
+    for patron in [
+        r"(?:Impuesto\s+al\s+Valor\s+Agregado|D[eé]bito\s+Fiscal|Cr[eé]dito\s+Fiscal|"
+        r"I\.V\.A\.?|IVA)(?:\s*\(?13\s*%\)?)?\s*[:\-]?\s*"
         r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
-        r"(?:13\s*%\s*(?:de\s*)?IVA|IVA\s*13\s*%)"
-        r"[^\d]{0,20}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
-    ]
-    for pat in PAT_IVA_EXPLICITO:
-        m = re.search(pat, t_clean, re.I)
+        r"(?:13\s*%\s*(?:de\s*)?IVA|IVA\s*13\s*%)[^\d]{0,20}?"
+        r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+    ]:
+        m = re.search(patron, t_clean, re.I)
         if m:
-            i = limpiar_monto(m.group(1))
-            debug["P1_etiquetas"] += f" | IVA OK => {i}"
+            e1["i"] = limpiar_monto(m.group(1))
             break
 
-    # 1C — Gravado por etiqueta
-    PAT_GRAVADO_EXPLICITO = [
+    # Gravado
+    for patron in [
         r"Subtotal\s+Gravado[^\d]{0,10}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
-        r"(?:Monto\s+Sujeto\s+a\s+IVA|Venta\s+Gravada|Compras?\s+Gravadas?)"
-        r"[^\d]{0,20}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
-        r"Sub\s*[Tt]otal[^\d]{0,15}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
-    ]
-    for pat in PAT_GRAVADO_EXPLICITO:
-        matches = re.findall(pat, t_clean, re.I)
+        r"(?:Monto\s+Sujeto\s+a\s+IVA|Venta\s+Gravada|Ventas\s+Gravadas|"
+        r"Compras?\s+Gravadas?)[^\d]{0,20}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+        r"Sub\s*[Tt]otal\s+Gravado[^\d]{0,10}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+    ]:
+        matches = re.findall(patron, t_clean, re.I)
         if matches:
-            g_cand = limpiar_monto(matches[0])
-            if g_cand > 0:
-                g = g_cand
-                debug["P1_etiquetas"] += f" | Gravado OK => {g}"
+            cand = limpiar_monto(matches[0])
+            if cand > 0:
+                e1["g"] = cand
                 break
 
-    # 1D — Exento por etiqueta (PRIORIDAD SOBRE CALCULO)
-    PAT_EXENTO_EXPLICITO = [
-        r"(?:Ventas?\s+Exentas?|Monto\s+Exento|Total\s+Exento|Compras?\s+Exentas?)"
+    # Exento
+    for patron in [
+        r"(?:Ventas?\s+Exentas?|Monto\s+Exento|Total\s+Exento|"
+        r"Compras?\s+Exentas?|Subtotal\s+Exento|Sub\s+Total\s+Exento|"
+        r"Venta\s+No\s+Sujeta|No\s+Sujeta|No\s+Gravado)"
         r"[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
-        r"(?:Exento|No\s+Gravado)[^\d]{0,25}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
-        r"Subtotal\s+Exento[^\d]{0,10}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
-        r"(?:Venta\s+No\s+Sujeta|No\s+Sujeta)[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
-    ]
-    for pat in PAT_EXENTO_EXPLICITO:
-        m = re.search(pat, t_clean, re.I)
+    ]:
+        m = re.search(patron, t_clean, re.I)
         if m:
-            exe_cand = limpiar_monto(m.group(1))
-            if exe_cand > 0:
-                exe = exe_cand
-                debug["P1_etiquetas"] += f" | Exento OK => {exe}"
+            cand = limpiar_monto(m.group(1))
+            if cand > 0:
+                e1["exe"] = cand
                 break
 
-    # Evaluar si P1 fue suficiente (todos los campos encontrados)
-    p1_completo = (g > 0 and i > 0 and t > 0)
-    if not p1_completo:
-        debug["P1_etiquetas"] += " | INCOMPLETO — activando P2"
+    debug["E1_regex"] = {
+        "g": e1["g"], "i": e1["i"], "exe": e1["exe"], "t": e1["t"]
+    }
+
+    # ── Si E1 encontro los 4 campos, usarla directamente ──────
+    if e1["t"] > 0 and (e1["g"] > 0 or e1["exe"] > 0):
+        g, i, exe, t = e1["g"], e1["i"], e1["exe"], e1["t"]
+        debug["estrategia_ganadora"] = "E1_regex"
     else:
-        debug["P1_etiquetas"] += " | COMPLETO"
-        debug["fuente_final"] = "etiquetas-texto"
+        # ══════════════════════════════════════════════════════
+        # E2: ANALISIS LINEA A LINEA (CCF sin estructura clara)
+        # ══════════════════════════════════════════════════════
+        e2 = _extraer_montos_de_lineas_ccf(texto_completo)
+        debug["E2_lineas"] = {
+            "g":   e2["g"],   "g_fuente":   e2["g_fuente"],
+            "i":   e2["i"],   "i_fuente":   e2["i_fuente"],
+            "exe": e2["exe"], "exe_fuente": e2["exe_fuente"],
+            "t":   e2["t"],   "t_fuente":   e2["t_fuente"],
+        }
 
-    # ─────────────────────────────────────────────────────────
-    # PASO 2: TABLAS CCF (si P1 fue incompleto)
-    # Escanea TODAS las tablas buscando el bloque de resumen
-    # al pie (Subtotal Gravado / Exento / IVA / Total)
-    # ─────────────────────────────────────────────────────────
-    if not p1_completo:
-        res_tabla = _extraer_montos_desde_tablas_ccf(file_bytes)
-
-        if res_tabla["fuente"] != "no encontrado":
-            if g == 0.0 and res_tabla["g"] > 0:
-                g = res_tabla["g"]
-            if i == 0.0 and res_tabla["i"] > 0:
-                i = res_tabla["i"]
-            if exe == 0.0 and res_tabla["exe"] > 0:
-                exe = res_tabla["exe"]
-            if t == 0.0 and res_tabla["t"] > 0:
-                t = res_tabla["t"]
-
-            debug["P2_tablas_ccf"] = (
-                f"OK => G={res_tabla['g']} | I={res_tabla['i']} | "
-                f"EXE={res_tabla['exe']} | T={res_tabla['t']}"
-            )
-            debug["fuente_final"] = "tabla-resumen-ccf"
+        if e2["t"] > 0 and (e2["g"] > 0 or e2["exe"] > 0):
+            g   = e2["g"]   if e2["g"]   > 0 else e1["g"]
+            i   = e2["i"]   if e2["i"]   > 0 else e1["i"]
+            exe = e2["exe"] if e2["exe"] > 0 else e1["exe"]
+            t   = e2["t"]
+            debug["estrategia_ganadora"] = "E2_lineas"
         else:
-            debug["P2_tablas_ccf"] = "no encontrado en tablas"
+            # ══════════════════════════════════════════════════
+            # E3: EXTRACCION DE TABLAS PDF (pie de tabla CCF)
+            # ══════════════════════════════════════════════════
+            e3 = _extraer_montos_de_tablas_ccf(file_bytes)
+            debug["E3_tablas"] = {
+                "g":   e3["g"],   "g_fuente":   e3["g_fuente"],
+                "i":   e3["i"],   "i_fuente":   e3["i_fuente"],
+                "exe": e3["exe"], "exe_fuente": e3["exe_fuente"],
+                "t":   e3["t"],   "t_fuente":   e3["t_fuente"],
+            }
 
-    # Evaluar si P2 completo lo que faltaba
-    p2_completo = (g > 0 and i > 0 and t > 0)
+            # Combinar lo mejor de E1 + E2 + E3
+            g   = e3["g"]   if e3["g"]   > 0 else (e2["g"]   if e2["g"]   > 0 else e1["g"])
+            i   = e3["i"]   if e3["i"]   > 0 else (e2["i"]   if e2["i"]   > 0 else e1["i"])
+            exe = e3["exe"] if e3["exe"] > 0 else (e2["exe"] if e2["exe"] > 0 else e1["exe"])
+            t   = e3["t"]   if e3["t"]   > 0 else (e2["t"]   if e2["t"]   > 0 else e1["t"])
 
-    # ─────────────────────────────────────────────────────────
-    # PASO 3: PIE DE TEXTO (si P1 y P2 incompletos)
-    # Busca el bloque de resumen como texto corrido al final
-    # ─────────────────────────────────────────────────────────
-    if not p2_completo:
-        res_pie = _extraer_montos_pie_texto_ccf(t_clean)
+            if t > 0 and (g > 0 or exe > 0):
+                debug["estrategia_ganadora"] = "E3_tablas"
 
-        if res_pie["fuente"] != "no encontrado":
-            if g == 0.0 and res_pie["g"] > 0:
-                g = res_pie["g"]
-            if i == 0.0 and res_pie["i"] > 0:
-                i = res_pie["i"]
-            if exe == 0.0 and res_pie["exe"] > 0:
-                exe = res_pie["exe"]
-            if t == 0.0 and res_pie["t"] > 0:
-                t = res_pie["t"]
+    # ══════════════════════════════════════════════════════════
+    # ALGEBRA: Calcular lo que falte usando lo que se encontro
+    # Solo si la extraccion no fue completa
+    # ══════════════════════════════════════════════════════════
+    algebra_log = []
 
-            debug["P3_pie_texto"] = (
-                f"OK => G={res_pie['g']} | I={res_pie['i']} | "
-                f"EXE={res_pie['exe']} | T={res_pie['t']}"
-            )
-            debug["fuente_final"] = "pie-texto-ccf"
-        else:
-            debug["P3_pie_texto"] = "no encontrado en pie de texto"
-
-    # ─────────────────────────────────────────────────────────
-    # PASO 4: ALGEBRA
-    # Solo si todavia faltan campos tras P1 + P2 + P3
-    # FORMULA: Total = G + I + Exento + e - ret
-    # ─────────────────────────────────────────────────────────
-    if g == 0.0 and t > 0:
-        if i > 0:
-            # G = T - I - Exento
-            g = max(0.0, round(t - i - exe, 2))
-            debug["P4_algebra"] = f"G = T - I - EXE: {t} - {i} - {exe} = {g}"
-        elif tipo == "03":
-            # G = (T - Exento) / 1.13
-            g = round((t - exe) / 1.13, 2)
-            i = round((t - exe) - g, 2)
-            iva_calculado = True
-            debug["P4_algebra"] = f"Tipo-03: ({t} - {exe}) / 1.13 = {g}, I={i}"
-
-    # Si tiene G pero no I, calcular IVA
+    # Si no hay IVA pero hay Gravado -> calcular IVA
     if g > 0 and i == 0.0:
         i = round(g * 0.13, 2)
         iva_calculado = True
-        debug["P4_algebra"] = f"I = G x 0.13: {g} x 0.13 = {i}"
+        algebra_log.append(f"I = {g} x 0.13 = {i}")
 
-    # Si tiene G e I pero no T, calcular Total
-    if g > 0 and i > 0 and t == 0.0:
-        t = round(g + i + exe + e - ret, 2)
-        debug["P4_algebra"] = (
-            debug.get("P4_algebra", "") +
-            f" | T inferido = {g} + {i} + {exe} + {e} - {ret} = {t}"
-        )
+    # Si no hay Gravado pero hay Total e IVA -> despejar Gravado
+    if g == 0.0 and t > 0 and i > 0:
+        g = max(0.0, round(t - i - exe, 2))
+        algebra_log.append(f"G = {t} - {i} - {exe} = {g}")
 
-    # ─────────────────────────────────────────────────────────
-    # PASO 5: FALLBACK CUADRUPLE LOOP — ULTIMO RECURSO
-    # Solo si tras todos los pasos anteriores no tenemos T
-    # ─────────────────────────────────────────────────────────
-    if t == 0.0:
+    # Si no hay Gravado ni IVA pero hay Total (tipo 03) -> descomponer
+    if g == 0.0 and i == 0.0 and t > 0 and tipo == "03":
+        g = round((t - exe) / 1.13, 2)
+        i = round((t - exe) - g, 2)
+        iva_calculado = True
+        algebra_log.append(f"Tipo-03: ({t} - {exe}) / 1.13 = G:{g}, I:{i}")
+
+    # Si no hay Total pero tenemos todo lo demas -> calcular Total
+    if t == 0.0 and g > 0 and i > 0:
+        t = round(g + i + exe - ret, 2)
+        algebra_log.append(f"T = {g} + {i} + {exe} - {ret} = {t}")
+
+    debug["P_algebra"] = " | ".join(algebra_log) if algebra_log else "no necesario"
+
+    # ══════════════════════════════════════════════════════════
+    # E4: FALLBACK CUADRUPLE-LOOP (ULTIMO RECURSO)
+    # Solo si todavia no tenemos datos utiles
+    # ══════════════════════════════════════════════════════════
+    if t == 0.0 or (g == 0.0 and exe == 0.0):
         montos_raw = re.findall(
             r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
             t_clean
@@ -1009,7 +1005,7 @@ def _extraer_montos_v10(texto_completo, t_clean, tipo, e, ret, file_bytes):
         )
         valores = [v for v in valores if v > 0.01]
         debug["montos_raw"] = valores[:12]
-        debug["P5_fallback"] = f"Iniciado con {len(valores)} valores"
+        debug["E4_fallback"] = f"Iniciado con {len(valores)} valores"
 
         encontrado = False
         for val_t in valores:
@@ -1021,68 +1017,81 @@ def _extraer_montos_v10(texto_completo, t_clean, tipo, e, ret, file_bytes):
                 for val_i in valores:
                     if val_i >= val_g:
                         continue
+                    # Primer intento: sin exento
+                    if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
+                        total_calc = round(val_g + val_i, 2)
+                        if abs(total_calc - round(val_t, 2)) <= 0.10:
+                            g, i, exe, t = val_g, val_i, 0.0, val_t
+                            encontrado = True
+                            debug["E4_fallback"] = f"OK(sin exe) => G={g}, I={i}, T={t}"
+                            break
+                    # Segundo intento: con exento
                     for val_exe in valores:
                         if val_exe >= val_g:
                             continue
                         if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
-                            total_calc = round(val_g + val_i + val_exe + e - ret, 2)
+                            total_calc = round(val_g + val_i + val_exe, 2)
                             if abs(total_calc - round(val_t, 2)) <= 0.10:
                                 g, i, exe, t = val_g, val_i, val_exe, val_t
                                 encontrado = True
-                                debug["P5_fallback"] = (
-                                    f"OK => G={g}, I={i}, EXE={exe}, T={t}"
-                                )
-                                debug["fuente_final"] = "fallback-loop"
+                                debug["E4_fallback"] = f"OK(con exe) => G={g}, I={i}, EXE={exe}, T={t}"
                                 break
+                    if encontrado:
+                        break
+                if encontrado:
+                    break
 
         if not encontrado:
-            debug["P5_fallback"] = "Sin combinacion valida — revision manual requerida"
+            debug["E4_fallback"] = "Sin combinacion valida"
+        if debug["estrategia_ganadora"] == "ninguna" and encontrado:
+            debug["estrategia_ganadora"] = "E4_fallback"
 
-    # ─────────────────────────────────────────────────────────
-    # PASO 6: VALIDACION TRIBUTARIA
-    # IVA debe ser G x 13%. Si hay discrepancia > $1, corregir.
-    # ─────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════
+    # VALIDACION TRIBUTARIA
+    # IVA debe ser ~13% del Gravado
+    # ══════════════════════════════════════════════════════════
     if g > 0 and i > 0:
         iva_esperado = round(g * 0.13, 2)
         diferencia   = abs(iva_esperado - i)
-
         if diferencia > 1.00:
             i_viejo = i
             i = iva_esperado
-            debug["P6_validacion"] = (
-                f"IVA corregido: {i_viejo} -> {i} "
-                f"(G={g} x 0.13 = {iva_esperado})"
-            )
+            iva_calculado = True
+            debug["P_validacion"] = f"IVA {i_viejo} -> corregido a {i} (G x 0.13 = {iva_esperado})"
         else:
-            debug["P6_validacion"] = (
-                f"OK: IVA {i} ~ {iva_esperado} (dif={diferencia:.2f})"
-            )
+            debug["P_validacion"] = f"OK: IVA {i} ~ {iva_esperado} (dif={diferencia:.2f})"
 
-    # ─────────────────────────────────────────────────────────
-    # PASO 7: ASEGURANZA ALGEBRAICA FINAL
-    # Total DEBE ser G + I + Exento (aproximadamente).
-    # Si Gravado > Total o la suma no cierra, recalcular G.
-    # ─────────────────────────────────────────────────────────
+    # Recalcular Total si ahora tenemos los componentes
+    if g > 0 and i > 0 and t == 0.0:
+        t = round(g + i + exe - ret, 2)
+        debug["P_validacion"] += f" | T inferido = {t}"
+
+    # ══════════════════════════════════════════════════════════
+    # ASEGURANZA FINAL
+    # Total debe ser = Gravado + IVA + Exento
+    # ══════════════════════════════════════════════════════════
     if g > 0 and i > 0 and t > 0:
-        total_alg = round(g + i + exe, 2)
+        total_algebraico = round(g + i + exe, 2)
 
         if g > t:
+            # Gravado no puede ser mayor que el Total
             g_viejo = g
             g = max(0.0, round(t - i - exe, 2))
-            debug["P7_aseguranza"] = (
+            debug["P_aseguranza"] = (
                 f"CORRECCION: G {g_viejo} > T {t}. "
-                f"G = {t} - {i} - {exe} = {g}"
+                f"Recalculado G = {t} - {i} - {exe} = {g}"
             )
-        elif abs(total_alg - t) > 0.50:
+        elif abs(total_algebraico - t) > 0.50:
+            # Los componentes no cuadran con el total
             g_viejo = g
             g = max(0.0, round(t - i - exe, 2))
-            debug["P7_aseguranza"] = (
-                f"CORRECCION: {g_viejo}+{i}+{exe}={total_alg} != {t}. "
-                f"G recalculado = {g}"
+            debug["P_aseguranza"] = (
+                f"CORRECCION: {g_viejo}+{i}+{exe}={total_algebraico} ≠ {t}. "
+                f"Recalculado G={g}"
             )
         else:
-            debug["P7_aseguranza"] = (
-                f"OK: {g}+{i}+{exe}={total_alg} ~ {t}"
+            debug["P_aseguranza"] = (
+                f"OK: {g} + {i} + {exe} = {total_algebraico} ≈ {t}"
             )
 
     g   = max(0.0, g)
@@ -1091,13 +1100,13 @@ def _extraer_montos_v10(texto_completo, t_clean, tipo, e, ret, file_bytes):
 
     debug["resultado"] = (
         f"FINAL => G={g:.2f} | I={i:.2f} | EXE={exe:.2f} | T={t:.2f} | "
-        f"FUENTE={debug['fuente_final']} | IVA_CALC={iva_calculado}"
+        f"IVA_CALC={iva_calculado} | ESTRATEGIA={debug['estrategia_ganadora']}"
     )
 
     return g, i, exe, t, iva_calculado, debug
 
 # ═══════════════════════════════════════════════════════════════
-# HELPER: RENDERIZAR DEBUG
+# HELPER: RENDERIZAR DEBUG EN EXPANDER
 # ═══════════════════════════════════════════════════════════════
 
 def _render_debug_montos(debug: dict):
@@ -1105,25 +1114,72 @@ def _render_debug_montos(debug: dict):
         st.info("Sin datos de debug disponibles.")
         return
 
-    filas = [
-        ("P1 Etiquetas Explicitas", debug.get("P1_etiquetas",   "—")),
-        ("P2 Tablas CCF",           debug.get("P2_tablas_ccf",  "—")),
-        ("P3 Pie de Texto",         debug.get("P3_pie_texto",   "—")),
-        ("P4 Algebra",              debug.get("P4_algebra",     "—")),
-        ("P5 Fallback Loop",        debug.get("P5_fallback",    "—")),
-        ("P6 Validacion IVA",       debug.get("P6_validacion",  "—")),
-        ("P7 Aseguranza Final",     debug.get("P7_aseguranza",  "—")),
-        ("Fuente Final",            debug.get("fuente_final",   "—")),
-    ]
+    estrategia = debug.get("estrategia_ganadora", "ninguna")
+    colores_estrategia = {
+        "E1_regex":   "#3fb950",
+        "E2_lineas":  "#79c0ff",
+        "E3_tablas":  "#d2a8ff",
+        "E4_fallback":"#d29922",
+        "ninguna":    "#f85149",
+    }
+    color_est = colores_estrategia.get(estrategia, "#aaaaaa")
 
     html = '<div class="debug-box">'
-    for label, valor in filas:
-        valor_str = str(valor)
-        if valor_str.startswith("OK") or valor_str.startswith("COMPLETO"):
+    html += (
+        f'<div style="margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #30363d;">'
+        f'<strong style="color:#cdd9e5">Estrategia ganadora:</strong> '
+        f'<span style="color:{color_est}; font-weight:bold;">{estrategia.upper()}</span>'
+        f'</div>'
+    )
+
+    # E1: Regex
+    e1 = debug.get("E1_regex", {})
+    if e1:
+        html += (
+            f'<div><strong style="color:#cdd9e5">E1 Regex:</strong> '
+            f'<span class="debug-ok">G={e1.get("g",0):.2f} | '
+            f'EXE={e1.get("exe",0):.2f} | '
+            f'I={e1.get("i",0):.2f} | '
+            f'T={e1.get("t",0):.2f}</span></div>'
+        )
+
+    # E2: Lineas
+    e2 = debug.get("E2_lineas", {})
+    if e2:
+        html += (
+            f'<div><strong style="color:#cdd9e5">E2 Lineas:</strong> '
+            f'<span style="color:#79c0ff">'
+            f'G={e2.get("g",0):.2f}({e2.get("g_fuente","—")}) | '
+            f'EXE={e2.get("exe",0):.2f} | '
+            f'I={e2.get("i",0):.2f} | '
+            f'T={e2.get("t",0):.2f}</span></div>'
+        )
+
+    # E3: Tablas
+    e3 = debug.get("E3_tablas", {})
+    if e3:
+        html += (
+            f'<div><strong style="color:#cdd9e5">E3 Tablas:</strong> '
+            f'<span style="color:#d2a8ff">'
+            f'G={e3.get("g",0):.2f}({e3.get("g_fuente","—")}) | '
+            f'EXE={e3.get("exe",0):.2f} | '
+            f'I={e3.get("i",0):.2f} | '
+            f'T={e3.get("t",0):.2f}</span></div>'
+        )
+
+    # Algebra, Validacion, Aseguranza
+    for label, key, cls in [
+        ("Algebra",    "P_algebra",    ""),
+        ("Validacion", "P_validacion", ""),
+        ("Aseguranza", "P_aseguranza", ""),
+        ("E4 Fallback","E4_fallback",  ""),
+    ]:
+        valor_str = str(debug.get(key, "—"))
+        if valor_str.startswith("OK") or valor_str == "no necesario":
             cls = "debug-ok"
-        elif any(w in valor_str.upper() for w in ["CORRECCION", "INCONSISTENTE", "WARN"]):
+        elif any(w in valor_str.upper() for w in ["CORRECCION", "WARN"]):
             cls = "debug-warn"
-        elif any(w in valor_str.lower() for w in ["no encontrado", "no aplicado", "incompleto", "pendiente"]):
+        elif "no " in valor_str.lower() or valor_str == "—":
             cls = "debug-err"
         else:
             cls = ""
@@ -1134,10 +1190,11 @@ def _render_debug_montos(debug: dict):
 
     montos = debug.get("montos_raw", [])
     if montos:
-        ms = ", ".join([f"${m:.2f}" for m in montos[:6]])
+        montos_str = ", ".join([f"${m:.2f}" for m in montos[:8]])
         html += (
-            f'<div style="margin-top:6px"><strong style="color:#cdd9e5">'
-            f'Montos detectados:</strong> <span style="color:#79c0ff">{ms}</span></div>'
+            f'<div style="margin-top:6px">'
+            f'<strong style="color:#cdd9e5">Montos E4 (pool):</strong> '
+            f'<span style="color:#79c0ff">{montos_str}</span></div>'
         )
 
     resultado = debug.get("resultado", "")
@@ -1151,36 +1208,11 @@ def _render_debug_montos(debug: dict):
     st.markdown(html, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# MODAL DE DESCARGA
-# ═══════════════════════════════════════════════════════════════
-
-@st.dialog("Seguro de Calidad de Compras")
-def ventana_descarga_compras(df_resultados, nombre_archivo):
-    st.write(
-        "Asegurate de haber procesado unicamente los comprobantes "
-        "que deseas declarar en el anexo de Compras antes de descargar."
-    )
-    st.download_button(
-        label="Confirmar y Descargar Anexo F-07",
-        data=to_excel_hacienda_compras(df_resultados),
-        file_name=nombre_archivo,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary",
-        use_container_width=True
-    )
-
-# ═══════════════════════════════════════════════════════════════
 # MOTOR PRINCIPAL — V10
 # ═══════════════════════════════════════════════════════════════
 
 def extraer_compras_nativo_pro_v10(file_bytes, cliente_activo, proveedores_cache=None):
-    """
-    Motor V10 — Soporta TODOS los formatos de CCF:
-      - CCF con etiquetas explicitas
-      - CCF con resumen en tabla al pie
-      - CCF con resumen como texto corrido
-      - CCF escaneados (OCR)
-    """
+    """Motor V10: 4 estrategias en cascada para CCF y facturas."""
     motor = "Nativo"
 
     try:
@@ -1209,7 +1241,6 @@ def extraer_compras_nativo_pro_v10(file_bytes, cliente_activo, proveedores_cache
         t_clean     = re.sub(r'\s+', ' ', texto_completo)
         t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
 
-        # Detectar tipo DTE
         m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_spaces)
         tipo = "01"
         ctrl = ""
@@ -1228,7 +1259,6 @@ def extraer_compras_nativo_pro_v10(file_bytes, cliente_activo, proveedores_cache
         nit_receptor = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
         dui_receptor = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
 
-        # Codigo de generacion UUID
         gen = ""
         m_url = re.search(r"CODGEN=([A-F0-9-]+)", t_no_spaces)
         if m_url:
@@ -1245,7 +1275,6 @@ def extraer_compras_nativo_pro_v10(file_bytes, cliente_activo, proveedores_cache
 
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        # Separar texto del emisor del receptor
         partes_emisor = re.split(
             r"(?i)\b(?:RECEPTOR|CLIENTE:|CLIENTE\s|SOCIO/EMPRESA)\b",
             texto_lineal
@@ -1256,10 +1285,7 @@ def extraer_compras_nativo_pro_v10(file_bytes, cliente_activo, proveedores_cache
 
         prov_db = proveedores_cache if proveedores_cache is not None else cargar_proveedores_json()
 
-        # NIT del proveedor
-        nit_prov, confianza_nit = _extraer_nit_completo_pdf(
-            texto_lineal, texto_visual, file_bytes
-        )
+        nit_prov, confianza_nit = _extraer_nit_completo_pdf(texto_lineal, texto_visual, file_bytes)
         if not nit_prov:
             nit_prov, confianza_nit = _buscar_nit_en_todas_lineas(texto_emisor)
 
@@ -1267,7 +1293,6 @@ def extraer_compras_nativo_pro_v10(file_bytes, cliente_activo, proveedores_cache
             nit_prov      = ""
             confianza_nit = "baja"
 
-        # Razon social del proveedor
         nom_prov, confianza_rs = _extraer_razon_social_v6(
             nit_prov, texto_emisor, prov_db, cliente_activo.get('nombre', ''), file_bytes
         )
@@ -1282,20 +1307,20 @@ def extraer_compras_nativo_pro_v10(file_bytes, cliente_activo, proveedores_cache
         if len(nit_prov) == 9:
             dui_prov = nit_prov
 
-        # Fovial / Cotrans / Retenciones
-        e, ret, perc = 0.0, 0.0, 0.0
+        # ─── FOVIAL / COTRANS / RETENCIONES ───────────────────
+        e_fovial, ret, perc = 0.0, 0.0, 0.0
 
         m_fovial = re.search(r"FOVIAL.{0,50}", texto_completo, re.I)
         if m_fovial:
             nums = re.findall(r"\d+[.,]\d{2,4}", m_fovial.group(0))
             if nums:
-                e = max(limpiar_monto(n) for n in nums)
+                e_fovial = max(limpiar_monto(n) for n in nums)
 
         m_cotrans = re.search(r"COTRANS.{0,50}", texto_completo, re.I)
         if m_cotrans:
             nums = re.findall(r"\d+[.,]\d{2,4}", m_cotrans.group(0))
             if nums:
-                e += max(limpiar_monto(n) for n in nums)
+                e_fovial += max(limpiar_monto(n) for n in nums)
 
         m_ret = re.search(
             r"(?:Retenido|Retenci[oo]n)[^0-9]*"
@@ -1305,9 +1330,9 @@ def extraer_compras_nativo_pro_v10(file_bytes, cliente_activo, proveedores_cache
         if m_ret:
             ret = limpiar_monto(m_ret.group(1))
 
-        # ── MOTOR V10 ──────────────────────────────────────────
+        # ─── MOTOR V10 ─────────────────────────────────────────
         g, i, exe, t, iva_calculado, debug_montos = _extraer_montos_v10(
-            texto_completo, t_clean, tipo, e, ret, file_bytes
+            texto_completo, t_clean, tipo, e_fovial, ret, file_bytes
         )
 
         return {
@@ -1318,12 +1343,12 @@ def extraer_compras_nativo_pro_v10(file_bytes, cliente_activo, proveedores_cache
             "tipo":          tipo,
             "ctrl":          ctrl,
             "gen":           gen,
-            "exe":           round(exe, 2),
-            "gra":           round(g,   2),
-            "iva":           round(i,   2),
-            "ret":           round(ret, 2),
+            "exe":           round(exe,      2),
+            "gra":           round(g,        2),
+            "iva":           round(i,        2),
+            "ret":           round(ret,      2),
             "perc":          perc,
-            "tot":           round(t,   2),
+            "tot":           round(t,        2),
             "estado":        "OK",
             "iva_calc":      iva_calculado,
             "es_nuevo":      es_nuevo,
@@ -1336,6 +1361,25 @@ def extraer_compras_nativo_pro_v10(file_bytes, cliente_activo, proveedores_cache
 
     except Exception as err:
         return {"error": str(err)}
+
+# ═══════════════════════════════════════════════════════════════
+# MODAL DE DESCARGA
+# ═══════════════════════════════════════════════════════════════
+
+@st.dialog("Seguro de Calidad de Compras")
+def ventana_descarga_compras(df_resultados, nombre_archivo):
+    st.write(
+        "Asegurate de haber procesado unicamente los comprobantes "
+        "que deseas declarar en el anexo de Compras antes de descargar."
+    )
+    st.download_button(
+        label="Confirmar y Descargar Anexo F-07",
+        data=to_excel_hacienda_compras(df_resultados),
+        file_name=nombre_archivo,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        use_container_width=True
+    )
 
 # ═══════════════════════════════════════════════════════════════
 # HEADER
@@ -1413,7 +1457,9 @@ with st.sidebar:
                         f"| Restante: {m_t2:02d}:{s:02d}"
                     )
                 else:
-                    txt_progreso.markdown(f"Procesando: **1** de **{total}** | Extrayendo...")
+                    txt_progreso.markdown(
+                        f"Procesando: **1** de **{total}** | Extrayendo..."
+                    )
 
                 file_bytes = f.read()
 
@@ -1445,10 +1491,12 @@ with st.sidebar:
                 elif dup_memoria or dup_lote:
                     duplicados.append(f.name)
                 elif "error" not in res:
-                    fecha_str          = str(res.get('fecha', '')).strip()
-                    nom_prov_str       = str(res.get('nom_prov', '')).strip()
-                    nit_prov_str       = str(res.get('nit_prov', '')).strip()
-                    nom_es_placeholder = nom_prov_str in (NOMBRE_PLACEHOLDER, "ESCRIBE EL NOMBRE AQUI", "")
+                    fecha_str    = str(res.get('fecha', '')).strip()
+                    nom_prov_str = str(res.get('nom_prov', '')).strip()
+                    nit_prov_str = str(res.get('nit_prov', '')).strip()
+                    nom_es_placeholder = nom_prov_str in (
+                        NOMBRE_PLACEHOLDER, "ESCRIBE EL NOMBRE AQUI", ""
+                    )
 
                     try:
                         tot_float = float(res.get('tot', 0.0))
@@ -1474,7 +1522,9 @@ with st.sidebar:
                             iva_calculado_files.append(f.name)
                         if res.get("es_nuevo") and res.get("nit_nuevo"):
                             nuevos_proveedores[res["nit_nuevo"]] = res["nom_prov"]
-                            prov_cache[res["nit_nuevo"]] = {"nombre": res["nom_prov"], "nrc": ""}
+                            prov_cache[res["nit_nuevo"]] = {
+                                "nombre": res["nom_prov"], "nrc": ""
+                            }
                         res["archivo"] = f.name
                         extracted.append(res)
                 else:
@@ -1551,7 +1601,7 @@ if st.session_state.cola_revision:
     st.markdown(f"""
     <div class="confianza-row">
         <div class="confianza-item">
-            <strong>NIT:</strong>&nbsp;{mostrar_indicador_confianza(conf_nit)}
+            <strong>NIT Extraido:</strong>&nbsp;{mostrar_indicador_confianza(conf_nit)}
             &nbsp;<span style="color:#888;font-size:12px;">{datos.get('nit_prov','—')}</span>
         </div>
         <div class="confianza-item">
@@ -1574,7 +1624,9 @@ if st.session_state.cola_revision:
                 st.image(img, caption=item_actual['archivo'], use_container_width=True)
                 texto_crudo = ""
                 for page in pdf.pages:
-                    texto_crudo += (page.extract_text(layout=True) or page.extract_text() or "") + "\n"
+                    texto_crudo += (
+                        page.extract_text(layout=True) or page.extract_text() or ""
+                    ) + "\n"
                 st.markdown("**Texto extraido del PDF:**")
                 st.text_area(
                     "Texto", value=texto_crudo.strip(),
@@ -1602,24 +1654,369 @@ if st.session_state.cola_revision:
         st.markdown("**Montos detectados por el motor:**")
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         with col_m1:
-            st.markdown(f'<div class="metric-box"><strong>Gravado</strong><br/>${datos.get("gra", 0):.2f}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="metric-box"><strong>Gravado</strong>'
+                f'<br/>${datos.get("gra", 0):.2f}</div>',
+                unsafe_allow_html=True
+            )
         with col_m2:
-            st.markdown(f'<div class="metric-box"><strong>Exento</strong><br/>${datos.get("exe", 0):.2f}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="metric-box"><strong>Exento</strong>'
+                f'<br/>${datos.get("exe", 0):.2f}</div>',
+                unsafe_allow_html=True
+            )
         with col_m3:
-            st.markdown(f'<div class="metric-box"><strong>IVA</strong><br/>${datos.get("iva", 0):.2f}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="metric-box"><strong>IVA</strong>'
+                f'<br/>${datos.get("iva", 0):.2f}</div>',
+                unsafe_allow_html=True
+            )
         with col_m4:
-            st.markdown(f'<div class="metric-box"><strong>Total</strong><br/>${datos.get("tot", 0):.2f}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="metric-box"><strong>Total</strong>'
+                f'<br/>${datos.get("tot", 0):.2f}</div>',
+                unsafe_allow_html=True
+            )
 
-        # Validacion inmediata
+        # Validacion inmediata de coherencia
         try:
             gra_v = float(datos.get('gra', 0))
             exe_v = float(datos.get('exe', 0))
             iva_v = float(datos.get('iva', 0))
             tot_v = float(datos.get('tot', 0))
-            suma  = round(gra_v + exe_v + iva_v, 2)
-            if abs(suma - tot_v) > 0.50:
+            total_alg = round(gra_v + exe_v + iva_v, 2)
+            if abs(total_alg - tot_v) > 0.50:
                 st.error(
-                    f"INCONSISTENCIA: ${gra_v:.2f} + ${exe_v:.2f} + ${iva_v:.2f} = "
-                    f"${suma:.2f} != Total ${tot_v:.2f}"
+                    f"Inconsistencia: ${gra_v:.2f} + ${exe_v:.2f} + ${iva_v:.2f} "
+                    f"= ${total_alg:.2f} ≠ ${tot_v:.2f}"
                 )
-            elif gra_v > 0 and iva_v > 0 and
+            elif gra_v > 0 and tot_v > 0:
+                st.success(
+                    f"Coherencia OK: ${gra_v:.2f} + ${exe_v:.2f} + ${iva_v:.2f} "
+                    f"= ${total_alg:.2f}"
+                )
+        except Exception:
+            pass
+
+        # ── DEBUG ─────────────────────────────────────────────
+        with st.expander("Ver diagnostico detallado (V10)"):
+            _render_debug_montos(datos.get("_debug", {}))
+
+        st.divider()
+
+        # ── FORMULARIO ────────────────────────────────────────
+        with st.form(key=f"form_rev_{item_actual['archivo']}_{total_cola}"):
+
+            f_fecha = st.text_input(
+                "Fecha (DD/MM/YYYY) *",
+                value=datos.get("fecha", ""),
+                placeholder="15/03/2024"
+            )
+            f_gen = st.text_input(
+                "Codigo de Generacion (UUID) *",
+                value=datos.get("gen", ""),
+                placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+            )
+            f_nom = st.text_input(
+                "Razon Social del Proveedor *",
+                value=nom_sugerido,
+                placeholder="Empresa Proveedora S.A. de C.V."
+            )
+
+            c_mon1, c_mon2 = st.columns(2)
+            with c_mon1:
+                try:
+                    tot_default = float(datos.get("tot", 0.0))
+                except (TypeError, ValueError):
+                    tot_default = 0.0
+                f_tot = st.number_input(
+                    "Total a Pagar ($) *",
+                    value=tot_default, format="%.2f", min_value=0.0
+                )
+            with c_mon2:
+                try:
+                    ret_default = float(datos.get("ret", 0.0))
+                except (TypeError, ValueError):
+                    ret_default = 0.0
+                f_ret = st.number_input(
+                    "Retenciones ($)",
+                    value=ret_default, format="%.2f", min_value=0.0
+                )
+
+            st.markdown("---")
+            st.markdown("**Correccion avanzada de montos** *(opcional)*")
+
+            c_adv_exe, c_adv_gra, c_adv_iva = st.columns(3)
+
+            with c_adv_exe:
+                try:
+                    exe_default = float(datos.get("exe", 0.0))
+                except (TypeError, ValueError):
+                    exe_default = 0.0
+                f_exe_manual = st.number_input(
+                    "Exento ($)", value=exe_default,
+                    format="%.2f", min_value=0.0,
+                    help="Ventas exentas: NO generan IVA pero SI suman al Total"
+                )
+
+            with c_adv_gra:
+                try:
+                    gra_default = float(datos.get("gra", 0.0))
+                except (TypeError, ValueError):
+                    gra_default = 0.0
+                f_gra = st.number_input(
+                    "Gravado ($)", value=gra_default,
+                    format="%.2f", min_value=0.0,
+                    help="Subtotal gravado (genera IVA al 13%)"
+                )
+
+            with c_adv_iva:
+                try:
+                    iva_default = float(datos.get("iva", 0.0))
+                except (TypeError, ValueError):
+                    iva_default = 0.0
+                f_iva = st.number_input(
+                    "IVA ($)", value=iva_default,
+                    format="%.2f", min_value=0.0,
+                    help="IVA = Gravado x 13%"
+                )
+
+            # Validacion tributaria en tiempo real
+            if f_gra > 0:
+                iva_esp   = round(f_gra * 0.13, 2)
+                total_esp = round(f_gra + iva_esp + f_exe_manual, 2)
+                if f_iva > 0 and abs(iva_esp - f_iva) > 0.05:
+                    st.warning(
+                        f"IVA inconsistente: ${f_iva:.2f} vs "
+                        f"${f_gra:.2f} x 13% = ${iva_esp:.2f}"
+                    )
+                elif f_iva > 0:
+                    st.success(
+                        f"Correcto: ${f_gra:.2f} + ${f_exe_manual:.2f} + "
+                        f"${iva_esp:.2f} = ${total_esp:.2f}"
+                    )
+
+            st.write("")
+            c_btn1, c_btn2, c_btn3 = st.columns(3)
+            with c_btn1:
+                submit_aprobar      = st.form_submit_button(
+                    "Aprobar y Guardar", type="primary", use_container_width=True
+                )
+            with c_btn2:
+                submit_guardar_prov = st.form_submit_button(
+                    "Guardar Proveedor", use_container_width=True
+                )
+            with c_btn3:
+                submit_descartar    = st.form_submit_button(
+                    "Descartar", use_container_width=True
+                )
+
+        # ── LOGICA: Guardar proveedor ──────────────────────────
+        if submit_guardar_prov:
+            if not f_nom or not nit_actual:
+                st.error("Debes llenar la Razon Social y tener un NIT valido.")
+            else:
+                guardar_proveedor_rapido(nit_actual, f_nom.upper())
+                for item in st.session_state.cola_revision:
+                    if item["datos"].get("nit_prov") == nit_actual:
+                        item["datos"]["nom_prov"] = f_nom.upper()
+                        item["datos"]["es_nuevo"] = False
+                st.success(f"Proveedor guardado: {f_nom.upper()} (NIT: {nit_actual})")
+                time.sleep(1)
+                st.rerun()
+
+        # ── LOGICA: Aprobar ────────────────────────────────────
+        if submit_aprobar:
+            if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
+                st.error("Rellena todos los campos marcados con (*) para continuar.")
+            else:
+                if nit_actual:
+                    guardar_proveedor_rapido(nit_actual, f_nom.upper())
+                    for item in st.session_state.cola_revision[1:]:
+                        if item["datos"].get("nit_prov") == nit_actual:
+                            item["datos"]["nom_prov"] = f_nom.upper()
+
+                datos["fecha"]    = f_fecha.strip()
+                datos["gen"]      = f_gen.strip().upper()
+                datos["nom_prov"] = f_nom.strip().upper()
+                datos["tot"]      = round(f_tot, 2)
+                datos["ret"]      = round(f_ret, 2)
+
+                if f_gra > 0:
+                    datos["gra"] = round(f_gra, 2)
+                    datos["iva"] = round(f_iva, 2) if f_iva > 0 else round(f_gra * 0.13, 2)
+                    datos["exe"] = round(f_exe_manual, 2)
+                elif f_tot > 0:
+                    try:
+                        iva_actual = float(datos.get("iva", 0.0))
+                    except (TypeError, ValueError):
+                        iva_actual = 0.0
+                    if iva_actual == 0.0:
+                        base = f_tot - f_ret - f_exe_manual
+                        datos["gra"]      = round(base / 1.13, 2)
+                        datos["iva"]      = round(base - datos["gra"], 2)
+                        datos["exe"]      = round(f_exe_manual, 2)
+                        datos["iva_calc"] = True
+
+                datos["archivo"] = item_actual["archivo"]
+                datos.pop("_debug", None)
+
+                nuevo_df = pd.DataFrame([datos])
+                if st.session_state.db_compras.empty:
+                    st.session_state.db_compras = nuevo_df
+                else:
+                    st.session_state.db_compras = pd.concat(
+                        [st.session_state.db_compras, nuevo_df], ignore_index=True
+                    )
+
+                st.session_state.cola_revision.pop(0)
+                st.success("Factura aprobada y guardada.")
+                time.sleep(1)
+                st.rerun()
+
+        # ── LOGICA: Descartar ──────────────────────────────────
+        if submit_descartar:
+            st.session_state.cola_revision.pop(0)
+            st.warning("Documento descartado.")
+            time.sleep(1)
+            st.rerun()
+
+    st.divider()
+
+# ═══════════════════════════════════════════════════════════════
+# DASHBOARD DE ALERTAS
+# ═══════════════════════════════════════════════════════════════
+
+if st.session_state.reporte_compras:
+    rep = st.session_state.reporte_compras
+    st.markdown("### Alertas de Procesamiento")
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        n = len(rep.get("corruptos", []))
+        if n:
+            st.error(f"**{n} Danados** (PDF corrupto).")
+            with st.expander("Ver lista"):
+                st.markdown(
+                    '<div class="scroll-list">'
+                    + "".join(f"- {a}<br>" for a in rep["corruptos"])
+                    + '</div>', unsafe_allow_html=True
+                )
+        else:
+            st.success("**0 Danados.**")
+
+    with c2:
+        intrusos_n  = len(rep.get("intrusos", []))
+        invalidos_n = len(rep.get("invalidos", []))
+        total_rej   = intrusos_n + invalidos_n
+        if total_rej:
+            st.error(
+                f"**{total_rej} Rechazados** "
+                f"({intrusos_n} ajenos, {invalidos_n} tipo incorrecto)."
+            )
+            with st.expander("Ver lista"):
+                todos = rep.get("intrusos", []) + rep.get("invalidos", [])
+                st.markdown(
+                    '<div class="scroll-list">'
+                    + "".join(f"- {a}<br>" for a in todos)
+                    + '</div>', unsafe_allow_html=True
+                )
+        else:
+            st.success("**0 Rechazados.**")
+
+    with c3:
+        n = len(rep.get("duplicados", []))
+        if n:
+            st.error(f"**{n} Omitidos** (Duplicados).")
+            with st.expander("Ver lista"):
+                st.markdown(
+                    '<div class="scroll-list">'
+                    + "".join(f"- {a}<br>" for a in rep["duplicados"])
+                    + '</div>', unsafe_allow_html=True
+                )
+        else:
+            st.success("**0 Omitidos.**")
+
+    with c4:
+        n = len(rep.get("iva_calc", []))
+        if n:
+            st.info(f"**{n} IVA Calc.** (Calculado al 13%).")
+            with st.expander("Ver lista"):
+                st.markdown(
+                    '<div class="scroll-list">'
+                    + "".join(f"- {a}<br>" for a in rep["iva_calc"])
+                    + '</div>', unsafe_allow_html=True
+                )
+        else:
+            st.success("**0 IVA Calc.**")
+
+    st.divider()
+
+# ═══════════════════════════════════════════════════════════════
+# TABLA DE RESULTADOS Y EXPORTACION
+# ═══════════════════════════════════════════════════════════════
+
+if not st.session_state.db_compras.empty:
+    df = st.session_state.db_compras.copy()
+
+    st.markdown("### Filtros de Auditoria Rapida")
+    col_f1, col_f2 = st.columns([2, 1])
+    with col_f1:
+        busqueda = st.text_input("Buscar Proveedor", placeholder="Nombre, NIT o UUID...")
+    with col_f2:
+        tipos_disponibles = df['tipo'].unique().tolist() if 'tipo' in df.columns else []
+        filtro_tipo = st.multiselect(
+            "Filtrar por Tipo DTE",
+            options=tipos_disponibles,
+            default=tipos_disponibles
+        )
+
+    df_filtrado = df.copy()
+
+    if busqueda:
+        termino = busqueda.upper()
+        mask = (
+            df_filtrado['nom_prov'].str.upper().str.contains(termino, na=False)
+            | df_filtrado['nit_prov'].str.contains(termino, na=False)
+            | df_filtrado['dui_prov'].str.contains(termino, na=False)
+            | df_filtrado['gen'].str.upper().str.contains(termino, na=False)
+        )
+        df_filtrado = df_filtrado[mask]
+
+    if filtro_tipo:
+        df_filtrado = df_filtrado[df_filtrado['tipo'].isin(filtro_tipo)]
+
+    st.divider()
+    tab1, tab2 = st.tabs(["F-07 Compras a Contribuyentes", "Auditoria Total"])
+
+    with tab1:
+        if df_filtrado.empty:
+            st.info("No hay registros que coincidan con los filtros aplicados.")
+        else:
+            df_h = pd.DataFrame({
+                "A. Fecha Emision":         df_filtrado["fecha"],
+                "B. Clase":                 "4",
+                "C. Tipo Doc":              df_filtrado["tipo"],
+                "D. Num Documento":         df_filtrado["gen"],
+                "E. NIT/NRC Prov":          df_filtrado["nit_prov"],
+                "F. Nombre Prov":           df_filtrado["nom_prov"],
+                "G. Compra Ext/NS":         df_filtrado["exe"],
+                "H. Internacion Ext/NS":    0.00,
+                "I. Importacion Ext/NS":    0.00,
+                "J. Compra Gravada":        df_filtrado["gra"],
+                "K. Inter. Gravada Bienes": 0.00,
+                "L. Impor. Gravada Bienes": 0.00,
+                "M. Impor. Gravada Serv":   0.00,
+                "N. Credito Fiscal (IVA)":  df_filtrado["iva"],
+                "O. Total Compras":         df_filtrado["tot"],
+                "P. DUI Prov":              df_filtrado["dui_prov"],
+                "Q. Tipo Operacion":        "1",
+                "R. Clasificacion":         "1",
+                "S. Sector":                "1",
+                "T. Tipo Costo/Gasto":      "1",
+                "U. Num Anexo":             "3"
+            })
+
+            cols_num = [
+                "G. Compra Ext/NS", "H. Internacion
