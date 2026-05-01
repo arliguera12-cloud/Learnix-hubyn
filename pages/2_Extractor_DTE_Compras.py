@@ -169,6 +169,14 @@ estilo_custom = """
     .debug-ok  { color: #3fb950; }
     .debug-err { color: #f85149; }
     .debug-warn{ color: #d29922; }
+    .metric-box {
+        background-color: #161616;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 12px;
+        margin: 4px 0;
+        text-align: center;
+    }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
@@ -624,14 +632,17 @@ def _extraer_razon_social_v6(nit_prov, texto_emisor, prov_db, cliente_nombre, fi
     return NOMBRE_PLACEHOLDER, "baja"
 
 # ═══════════════════════════════════════════════════════════════
-# EXTRACCION DE MONTOS — V8 CON DEBUG INTEGRADO
+# EXTRACCION DE MONTOS — V8 CON TODOS LOS FIXES INTEGRADOS
 # ═══════════════════════════════════════════════════════════════
 
-def _extraer_montos_v8(texto_completo, t_clean, tipo, e, ret):
+def _extraer_montos_v8_fixed(texto_completo, t_clean, tipo, e, ret):
     """
-    Motor V8: Extraccion por etiquetas especificas + calculo algebraico
-    + fallback triple-loop + validacion tributaria + log de debug completo.
-    Retorna: (g, i, t, iva_calculado, debug_info)
+    Motor V8 FIXED: 7 pasos con correcciones algebraicas y validaciones.
+    
+    FIXES INTEGRADOS:
+    - P4: Algebra corregida (no divide por 2.13)
+    - P7: Aseguranza final de coherencia
+    - Previene Gravado > Total
     """
     g, i, t = 0.0, 0.0, 0.0
     iva_calculado = False
@@ -642,6 +653,7 @@ def _extraer_montos_v8(texto_completo, t_clean, tipo, e, ret):
         "P4_algebra":    "no aplicado",
         "P5_fallback":   "no aplicado",
         "P6_validacion": "no aplicada",
+        "P7_aseguranza": "no aplicada",
         "montos_raw":    [],
         "resultado":     ""
     }
@@ -657,7 +669,7 @@ def _extraer_montos_v8(texto_completo, t_clean, tipo, e, ret):
         m = re.search(patron, t_clean, re.I)
         if m:
             t = limpiar_monto(m.group(1))
-            debug["P1_total"] = f"OK => {t} (patron coincidio)"
+            debug["P1_total"] = f"OK => {t}"
             break
 
     # ─── PASO 2: IVA POR ETIQUETA ─────────────────────────────
@@ -676,7 +688,6 @@ def _extraer_montos_v8(texto_completo, t_clean, tipo, e, ret):
             break
 
     # ─── PASO 3: GRAVADO POR ETIQUETA ─────────────────────────
-    # CRITICO: usa findall y toma el PRIMER match, no el mayor
     patrones_gravado = [
         r"Subtotal\s+Gravado[^\d]{0,10}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
         r"(?:Monto\s+Sujeto\s+a\s+IVA|Venta\s+Gravada|Compras?\s+Gravadas?)"
@@ -687,29 +698,29 @@ def _extraer_montos_v8(texto_completo, t_clean, tipo, e, ret):
         matches = re.findall(patron, t_clean, re.I)
         if matches:
             g_candidato = limpiar_monto(matches[0])
-            # Sanidad: Gravado no puede ser mayor que Total
-            if t > 0 and g_candidato > t:
-                debug["P3_gravado"] = f"WARN => candidato {g_candidato} > total {t}, descartado"
-                g_candidato = 0.0
             if g_candidato > 0:
                 g = g_candidato
                 debug["P3_gravado"] = f"OK => {g} (primer match de {len(matches)})"
                 break
 
-    # ─── PASO 4: ALGEBRA ──────────────────────────────────────
-    if t > 0 and i > 0 and g == 0.0:
-        g = max(0.0, round(t - i - e + ret, 2))
-        debug["P4_algebra"] = f"Gravado calculado: {t} - {i} - {e} + {ret} = {g}"
+    # ─── PASO 4: ALGEBRA (CORREGIDO) ──────────────────────────
+    if g == 0.0 and t > 0:
+        # Si NO encontro Gravado pero SI tiene Total
+        if i > 0:
+            # Caso A: Total - IVA = Gravado (sin dividir por nada!)
+            g = max(0.0, round(t - i, 2))
+            debug["P4_algebra"] = f"G = Total - IVA: {t} - {i} = {g}"
+        elif tipo == "03":
+            # Caso B: Solo tiene Total (tipo 03) → dividir por 1.13
+            g = round(t / 1.13, 2)
+            i = round(t - g, 2)
+            iva_calculado = True
+            debug["P4_algebra"] = f"Tipo-03: {t} / 1.13 = {g}, I = {i}"
 
-    elif t > 0 and i == 0.0 and g > 0:
+    # Si tiene Gravado pero NO IVA, calcular IVA
+    if g > 0 and i == 0.0:
         i = round(g * 0.13, 2)
-        debug["P4_algebra"] = f"IVA calculado: {g} x 0.13 = {i}"
-
-    elif t > 0 and i == 0.0 and g == 0.0 and tipo == "03":
-        g = round((t + ret - e) / 1.13, 2)
-        i = round(t + ret - e - g, 2)
-        iva_calculado = True
-        debug["P4_algebra"] = f"Calculo tipo-03: G={g}, I={i}"
+        debug["P4_algebra"] = f"I = G x 0.13: {g} x 0.13 = {i}"
 
     # ─── PASO 5: FALLBACK TRIPLE-LOOP (solo si t == 0) ────────
     if t == 0.0:
@@ -720,7 +731,7 @@ def _extraer_montos_v8(texto_completo, t_clean, tipo, e, ret):
         valores = sorted(list(set(limpiar_monto(x) for x in montos_raw)), reverse=True)
         valores = [v for v in valores if v > 0.01]
         debug["montos_raw"] = valores[:12]
-        debug["P5_fallback"] = f"Triple-loop iniciado con {len(valores)} valores"
+        debug["P5_fallback"] = f"Iniciado con {len(valores)} valores"
 
         encontrado_tl = False
         for val_t in valores:
@@ -740,36 +751,49 @@ def _extraer_montos_v8(texto_completo, t_clean, tipo, e, ret):
                             debug["P5_fallback"] = f"OK => G={g}, I={i}, T={t}"
                             break
         if not encontrado_tl:
-            debug["P5_fallback"] = "Sin combinacion valida en triple-loop"
+            debug["P5_fallback"] = "Sin combinacion valida"
 
     # ─── PASO 6: VALIDACION TRIBUTARIA ────────────────────────
     if g > 0 and i > 0:
         iva_esperado = round(g * 0.13, 2)
         diferencia   = abs(iva_esperado - i)
 
-        # Si Gravado > Total, el Gravado esta mal — recalcular desde Total
-        if t > 0 and g > t:
-            g_viejo = g
-            g = max(0.0, round(t - i - e + ret, 2))
-            i = round(g * 0.13, 2)
-            debug["P6_validacion"] = (
-                f"CORRECCION: Gravado {g_viejo} > Total {t}. "
-                f"Recalculado G={g}, I={i}"
-            )
-        elif diferencia > 1.00:
+        if diferencia > 1.00:
             i_viejo = i
             i = iva_esperado
-            debug["P6_validacion"] = (
-                f"IVA inconsistente: {i_viejo} esperado {iva_esperado}. "
-                f"Corregido a {i}"
-            )
+            debug["P6_validacion"] = f"IVA {i_viejo} -> corregido a {i} (G x 0.13 = {iva_esperado})"
         else:
-            debug["P6_validacion"] = f"Coherencia OK: IVA={i} vs esperado={iva_esperado} (dif={diferencia:.2f})"
+            debug["P6_validacion"] = f"OK: IVA {i} ~ {iva_esperado} (dif={diferencia:.2f})"
 
     if g > 0 and i > 0 and t == 0.0:
         t = round(g + i + e - ret, 2)
-        debug["P6_validacion"] += f" | Total inferido={t}"
+        debug["P6_validacion"] += f" | T inferido = {t}"
 
+    # ─── PASO 7: ASEGURANZA FINAL ─────────────────────────────
+    if g > 0 and i > 0 and t > 0:
+        total_algebraico = round(g + i, 2)
+        
+        # CRITICA: Si Gravado > Total, el Gravado está MAL
+        if g > t:
+            g_viejo = g
+            g = round(t - i, 2)
+            if g < 0:
+                g = 0.0
+            debug["P7_aseguranza"] = (
+                f"CORRECCION: G {g_viejo} > T {t}. "
+                f"Recalculado G = {t} - {i} = {g}"
+            )
+        # Si G + I != T, recalcular
+        elif abs(total_algebraico - t) > 0.50:
+            g_viejo = g
+            g = round(t - i, 2)
+            debug["P7_aseguranza"] = (
+                f"CORRECCION: {g_viejo} + {i} = {total_algebraico} ≠ {t}. "
+                f"Recalculado G = {g}"
+            )
+        else:
+            debug["P7_aseguranza"] = f"OK: {g} + {i} = {total_algebraico} ≈ {t}"
+    
     g = max(0.0, g)
     i = max(0.0, i)
     debug["resultado"] = f"FINAL => G={g:.2f} | I={i:.2f} | T={t:.2f} | IVA_CALC={iva_calculado}"
@@ -777,11 +801,11 @@ def _extraer_montos_v8(texto_completo, t_clean, tipo, e, ret):
     return g, i, t, iva_calculado, debug
 
 # ═══════════════════════════════════════════════════════════════
-# MOTOR DE EXTRACCION DTE COMPRAS — V8
+# MOTOR DE EXTRACCION DTE COMPRAS — V8 FIXED
 # ═══════════════════════════════════════════════════════════════
 
 def extraer_compras_nativo_pro_v8(file_bytes, cliente_activo, proveedores_cache=None):
-    """Motor V8 — Cache flexible + montos por etiquetas + debug completo."""
+    """Motor V8 FIXED con todos los ajustes algebraicos."""
     motor = "Nativo"
 
     try:
@@ -914,8 +938,8 @@ def extraer_compras_nativo_pro_v8(file_bytes, cliente_activo, proveedores_cache=
         if m_ret:
             ret = limpiar_monto(m_ret.group(1))
 
-        # ─── EXTRACCION DE MONTOS V8 ───────────────────────────
-        g, i, t, iva_calculado, debug_montos = _extraer_montos_v8(
+        # ─── EXTRACCION DE MONTOS V8 FIXED ─────────────────────
+        g, i, t, iva_calculado, debug_montos = _extraer_montos_v8_fixed(
             texto_completo, t_clean, tipo, e, ret
         )
 
@@ -963,6 +987,7 @@ def _render_debug_montos(debug: dict):
         ("P4 Algebra",           debug.get("P4_algebra",    "—")),
         ("P5 Fallback",          debug.get("P5_fallback",   "—")),
         ("P6 Validacion",        debug.get("P6_validacion", "—")),
+        ("P7 Aseguranza",        debug.get("P7_aseguranza", "—")),
     ]
 
     html = '<div class="debug-box">'
@@ -980,7 +1005,8 @@ def _render_debug_montos(debug: dict):
 
     montos = debug.get("montos_raw", [])
     if montos:
-        html += f'<div style="margin-top:6px"><strong style="color:#cdd9e5">Montos detectados (top):</strong> <span style="color:#79c0ff">{montos}</span></div>'
+        montos_str = ", ".join([f"${m:.2f}" for m in montos[:6]])
+        html += f'<div style="margin-top:6px"><strong style="color:#cdd9e5">Montos (top):</strong> <span style="color:#79c0ff">{montos_str}</span></div>'
 
     resultado = debug.get("resultado", "")
     if resultado:
@@ -1268,10 +1294,39 @@ if st.session_state.cola_revision:
         elif nit_actual:
             st.success(f"Proveedor Existente: NIT {nit_actual}")
 
+        # ── METRICS: Montos detectados por V8 ──────────────────
+        st.markdown("**Montos detectados por el motor:**")
+        col_m1, col_m2, col_m3 = st.columns(3)
+        with col_m1:
+            st.markdown(f'<div class="metric-box"><strong>Gravado</strong><br/>${datos.get("gra", 0):.2f}</div>', unsafe_allow_html=True)
+        with col_m2:
+            st.markdown(f'<div class="metric-box"><strong>IVA</strong><br/>${datos.get("iva", 0):.2f}</div>', unsafe_allow_html=True)
+        with col_m3:
+            st.markdown(f'<div class="metric-box"><strong>Total</strong><br/>${datos.get("tot", 0):.2f}</div>', unsafe_allow_html=True)
+
+        # Validacion inmediata de coherencia
+        try:
+            gra_v8 = float(datos.get('gra', 0))
+            iva_v8 = float(datos.get('iva', 0))
+            tot_v8 = float(datos.get('tot', 0))
+            total_algebraico = round(gra_v8 + iva_v8, 2)
+            
+            if abs(total_algebraico - tot_v8) > 0.50:
+                st.error(
+                    f"⚠️ INCONSISTENCIA: ${gra_v8:.2f} + ${iva_v8:.2f} = ${total_algebraico:.2f} "
+                    f"≠ Total ${tot_v8:.2f}"
+                )
+            elif gra_v8 > 0 and iva_v8 > 0 and tot_v8 > 0:
+                st.success(f"✅ Coherencia OK: ${gra_v8:.2f} + ${iva_v8:.2f} = ${total_algebraico:.2f}")
+        except:
+            pass
+
         # ── DEBUG DE MONTOS (expander) ─────────────────────────
-        with st.expander("Ver diagnostico de extraccion de montos"):
+        with st.expander("📊 Ver diagnostico detallado de extraccion"):
             debug_info = datos.get("_debug", {})
             _render_debug_montos(debug_info)
+
+        st.divider()
 
         # ── FORMULARIO PRINCIPAL ───────────────────────────────
         with st.form(key=f"form_rev_{item_actual['archivo']}_{total_cola}"):
@@ -1321,7 +1376,7 @@ if st.session_state.cola_revision:
                     gra_default = 0.0
                 f_gra = st.number_input(
                     "Gravado ($)", value=gra_default, format="%.2f", min_value=0.0,
-                    help="Subtotal gravado antes de IVA. Si esta en 0 o incorrecto, corrigelo aqui."
+                    help="Subtotal gravado. Si es incorrecto (ej: $196.98 cuando debe ser $92.48), corrigelo."
                 )
             with c_adv2:
                 try:
@@ -1330,20 +1385,20 @@ if st.session_state.cola_revision:
                     iva_default = 0.0
                 f_iva = st.number_input(
                     "IVA ($)", value=iva_default, format="%.2f", min_value=0.0,
-                    help="Monto de IVA (13%). Debe ser Gravado x 0.13."
+                    help="IVA = Gravado × 13%"
                 )
 
-            # Validacion tributaria en tiempo real (calculada en el form)
+            # Validacion tributaria en tiempo real
             if f_gra > 0:
                 iva_esperado_form = round(f_gra * 0.13, 2)
                 dif_form = abs(iva_esperado_form - f_iva)
                 if dif_form > 0.05 and f_iva > 0:
                     st.warning(
-                        f"IVA inconsistente: ingresaste ${f_iva:.2f} "
-                        f"pero {f_gra:.2f} x 13% = ${iva_esperado_form:.2f}"
+                        f"⚠️ IVA inconsistente: ingresaste ${f_iva:.2f} "
+                        f"pero ${f_gra:.2f} × 13% = ${iva_esperado_form:.2f}"
                     )
                 elif f_gra > 0 and f_iva > 0:
-                    st.success(f"IVA correcto: ${f_iva:.2f} = ${f_gra:.2f} x 13%")
+                    st.success(f"✅ IVA correcto: ${f_iva:.2f} = ${f_gra:.2f} × 13%")
 
             st.write("")
             c_btn1, c_btn2, c_btn3 = st.columns(3)
@@ -1402,7 +1457,7 @@ if st.session_state.cola_revision:
                         datos["iva_calc"] = True
 
                 datos["archivo"] = item_actual["archivo"]
-                # Limpiar campo interno de debug antes de guardar en DB
+                # Limpiar campo interno de debug antes de guardar
                 datos.pop("_debug", None)
 
                 nuevo_df = pd.DataFrame([datos])
