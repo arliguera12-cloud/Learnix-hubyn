@@ -49,7 +49,6 @@ estilo_custom = """
         color: #F7F5EE !important;
     }
     [data-testid="stDataFrame"] span { color: inherit !important; }
-
     div.stButton > button[kind="primary"],
     div.stDownloadButton > button[kind="primary"] {
         background-color: #003057 !important;
@@ -128,36 +127,12 @@ estilo_custom = """
         margin-left: 6px;
         letter-spacing: 0.5px;
     }
-    .confianza-alta {
-        background-color: #1b5e20;
-        color: #81c784;
-        border: 1px solid #2e7d32;
-    }
-    .confianza-media {
-        background-color: #e65100;
-        color: #ffb74d;
-        border: 1px solid #bf360c;
-    }
-    .confianza-baja {
-        background-color: #7f1010;
-        color: #ef9a9a;
-        border: 1px solid #b71c1c;
-    }
-    .confianza-cache {
-        background-color: #1a237e;
-        color: #90caf9;
-        border: 1px solid #283593;
-    }
-    .confianza-tabla {
-        background-color: #4a148c;
-        color: #ce93d8;
-        border: 1px solid #7b1fa2;
-    }
-    .confianza-ocr {
-        background-color: #01579b;
-        color: #81d4fa;
-        border: 1px solid #0277bd;
-    }
+    .confianza-alta  { background-color: #1b5e20; color: #81c784; border: 1px solid #2e7d32; }
+    .confianza-media { background-color: #e65100; color: #ffb74d; border: 1px solid #bf360c; }
+    .confianza-baja  { background-color: #7f1010; color: #ef9a9a; border: 1px solid #b71c1c; }
+    .confianza-cache { background-color: #1a237e; color: #90caf9; border: 1px solid #283593; }
+    .confianza-tabla { background-color: #4a148c; color: #ce93d8; border: 1px solid #7b1fa2; }
+    .confianza-ocr   { background-color: #01579b; color: #81d4fa; border: 1px solid #0277bd; }
     .badge-revision {
         display: inline-block;
         padding: 3px 10px;
@@ -189,7 +164,7 @@ st.markdown(estilo_custom, unsafe_allow_html=True)
 # CONSTANTES
 # ═══════════════════════════════════════════════════════════════
 
-NOMBRE_PLACEHOLDER = "ESCRIBE EL NOMBRE AQUI"
+NOMBRE_PLACEHOLDER  = "ESCRIBE EL NOMBRE AQUI"
 ARCHIVO_PROVEEDORES = "data/proveedores.json"
 
 PALABRAS_BASURA = frozenset([
@@ -203,12 +178,10 @@ PALABRAS_BASURA = frozenset([
     "HORA", "EMISION", "GENERACION", "TELEFONO"
 ])
 
-BASURA_ESTRICTA = frozenset(["@", "EMAIL", "CORREO", ".COM", "WWW."])
-
+BASURA_ESTRICTA  = frozenset(["@", "EMAIL", "CORREO", ".COM", "WWW."])
 NOMBRES_INVALIDOS = frozenset([
     "S.A. DE C.V.", "C.V.", "SA DE CV", "LTDA", "LTDA.", "S.A.", "DE C.V."
 ])
-
 MARCAS_COMERCIALES = [
     "S.A.", "SA ", "C.V.", "CV ", "LTDA.", "LTDA", "SOCIEDAD",
     "DISTRIBUIDORA", "FARMACIA", "GRUPO", "LABORATORIOS", "INDUSTRIAS",
@@ -270,10 +243,9 @@ def to_excel_hacienda_compras(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, header=False, sheet_name='Compras_F07')
-        workbook = writer.book
+        workbook  = writer.book
         worksheet = writer.sheets['Compras_F07']
-
-        fmt_texto  = workbook.add_format({'num_format': '@'})
+        fmt_texto   = workbook.add_format({'num_format': '@'})
         fmt_num_izq = workbook.add_format({'num_format': '0.00', 'align': 'left'})
 
         def get_max_len(col_idx):
@@ -285,15 +257,15 @@ def to_excel_hacienda_compras(df):
             except Exception:
                 return 17
 
-        worksheet.set_column(0,  0,  10,  fmt_texto)
-        worksheet.set_column(1,  1,  1,   fmt_texto)
-        worksheet.set_column(2,  2,  2,   fmt_texto)
+        worksheet.set_column(0,  0,  10,           fmt_texto)
+        worksheet.set_column(1,  1,  1,            fmt_texto)
+        worksheet.set_column(2,  2,  2,            fmt_texto)
         worksheet.set_column(3,  3,  get_max_len(3), fmt_texto)
-        worksheet.set_column(4,  4,  14,  fmt_texto)
+        worksheet.set_column(4,  4,  14,           fmt_texto)
         worksheet.set_column(5,  5,  get_max_len(5), fmt_texto)
-        worksheet.set_column(6,  14, 10.71, fmt_num_izq)
-        worksheet.set_column(15, 15, 9,  fmt_texto)
-        worksheet.set_column(16, 20, 1,  fmt_texto)
+        worksheet.set_column(6,  14, 10.71,        fmt_num_izq)
+        worksheet.set_column(15, 15, 9,            fmt_texto)
+        worksheet.set_column(16, 20, 1,            fmt_texto)
 
     output.seek(0)
     return output.getvalue()
@@ -364,15 +336,12 @@ def extraer_y_formatear_fecha(texto):
 def normalizar_nombre_proveedor(nombre_raw, cliente_nombre):
     if not nombre_raw:
         return NOMBRE_PLACEHOLDER
-
     nombre = re.sub(
         r"^(?:(?:O\s*)?RAZ[OO]N\s*SOCIAL|NOMBRE(?: O RAZ[OO]N SOCIAL)?|"
         r"CLIENTE|NOMBRE COMERCIAL|COMERCIAL)[\s:]*",
         "", nombre_raw, flags=re.I
     ).strip()
-
     nombre = re.sub(r"^[^A-Za-z0-9]+", "", nombre).strip()
-
     if (
         len(nombre) > 65
         or len(nombre) < 4
@@ -380,11 +349,9 @@ def normalizar_nombre_proveedor(nombre_raw, cliente_nombre):
         or any(bad in nombre.upper() for bad in BASURA_ESTRICTA)
     ):
         return NOMBRE_PLACEHOLDER
-
     palabras_cliente = cliente_nombre.upper().split()[:2]
     if any(p in nombre.upper() for p in palabras_cliente if len(p) > 3):
         return NOMBRE_PLACEHOLDER
-
     return nombre.upper()
 
 
@@ -415,7 +382,7 @@ def _normalizar_nit_para_cache(nit_raw):
 def _buscar_en_cache_flexible(nit_prov, prov_db):
     """
     Busca el NIT en el cache de 3 formas:
-    1. Busqueda exacta (como viene)
+    1. Busqueda exacta
     2. Solo digitos vs solo digitos de las claves del JSON
     3. Primeros 8 digitos coinciden (fallback suave)
     """
@@ -424,13 +391,11 @@ def _buscar_en_cache_flexible(nit_prov, prov_db):
 
     nit_solo_digitos = _normalizar_nit_para_cache(nit_prov)
 
-    # Busqueda 1: exacta
     if nit_prov in prov_db:
         nombre = prov_db[nit_prov].get("nombre", "")
         if nombre and nombre != NOMBRE_PLACEHOLDER:
             return nombre, True
 
-    # Busqueda 2: solo digitos vs claves normalizadas
     for clave_json, valor in prov_db.items():
         clave_normalizada = _normalizar_nit_para_cache(clave_json)
         if clave_normalizada == nit_solo_digitos:
@@ -438,7 +403,6 @@ def _buscar_en_cache_flexible(nit_prov, prov_db):
             if nombre and nombre != NOMBRE_PLACEHOLDER:
                 return nombre, True
 
-    # Busqueda 3: primeros 8 digitos (fallback suave, solo si longitud >= 8)
     if len(nit_solo_digitos) >= 8:
         prefijo = nit_solo_digitos[:8]
         for clave_json, valor in prov_db.items():
@@ -451,35 +415,32 @@ def _buscar_en_cache_flexible(nit_prov, prov_db):
     return "", False
 
 # ═══════════════════════════════════════════════════════════════
-# EXTRACCION DE NIT — V5 (MEGA BÚSQUEDA)
+# EXTRACCION DE NIT
 # ═══════════════════════════════════════════════════════════════
 
 def _extraer_nit_completo_pdf(texto_lineal, texto_visual, file_bytes):
     """Busca NIT en texto, visual y tablas del PDF."""
-    textos_busqueda = [texto_lineal, texto_visual]
-    
-    for texto in textos_busqueda:
+    for texto in [texto_lineal, texto_visual]:
         t = re.sub(r'\s+', ' ', texto).upper()
-        
+
         m = re.search(r'NIT\s*[#:]?\s*(\d{4})\s*-\s*(\d{6})\s*-\s*(\d{3})\s*-\s*(\d)', t)
         if m:
-            nit = f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}"
-            return nit, "alta"
-        
+            return f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}", "alta"
+
         m = re.search(r'NIT\s*[#:]?\s*(\d{14})', t)
         if m:
             return m.group(1), "alta"
-        
+
         m = re.search(r'\b([01]\d{13})\b', t)
         if m:
             nit = m.group(1)
             if int(nit) < 100000000000000:
                 return nit, "media"
-        
+
         m = re.search(r'DUI\s*[#:]?\s*(\d{8})\s*-?\s*(\d)', t)
         if m:
             return f"{m.group(1)}{m.group(2)}", "media"
-    
+
     try:
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages[:3]:
@@ -489,11 +450,9 @@ def _extraer_nit_completo_pdf(texto_lineal, texto_visual, file_bytes):
                             if not cell:
                                 continue
                             cell_str = str(cell).upper()
-                            
                             m = re.search(r'\b(0\d{13}|1\d{13})\b', cell_str)
                             if m:
                                 return m.group(1), "media"
-                            
                             m = re.search(r'(\d{4})-?(\d{6})-?(\d{3})-?(\d)', cell_str)
                             if m:
                                 nit = f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}"
@@ -501,26 +460,22 @@ def _extraer_nit_completo_pdf(texto_lineal, texto_visual, file_bytes):
                                     return nit, "media"
     except Exception:
         pass
-    
+
     return "", "baja"
 
 
 def _buscar_nit_en_todas_lineas(texto_emisor):
-    """Fallback: busca NIT en cada línea del bloque emisor."""
-    lineas = texto_emisor.split('\n')
-    for linea in lineas:
+    """Fallback: busca NIT en cada linea del bloque emisor."""
+    for linea in texto_emisor.split('\n'):
         linea_clean = linea.upper().strip()
-        
         if re.search(r'^\d{4}\s*-?\s*\d{6}', linea_clean):
             m = re.search(r'(\d{4})\s*-?(\d{6})\s*-?(\d{3})\s*-?(\d)', linea_clean)
             if m:
                 return f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}", "alta"
-        
         m = re.search(r'\b(\d{14})\b', linea_clean)
         if m:
             if not re.search(r'(19|20)\d{2}', linea_clean):
                 return m.group(1), "media"
-    
     return "", "baja"
 
 # ═══════════════════════════════════════════════════════════════
@@ -535,53 +490,36 @@ def _extraer_razon_social_de_tablas(file_bytes, nit_prov):
                 tables = page.extract_tables()
                 if not tables:
                     continue
-                
                 for table in tables:
                     for row_idx, row in enumerate(table):
                         if not row:
                             continue
-                        
                         for col_idx, cell in enumerate(row):
                             if not cell:
                                 continue
-                            
                             cell_str = str(cell).strip()
-                            
                             if nit_prov and nit_prov in cell_str.replace('-', ''):
                                 if col_idx + 1 < len(row):
-                                    right_cell = str(row[col_idx + 1] or "").strip().upper()
-                                    if (len(right_cell) > 5 and len(right_cell) < 70 
-                                        and not any(b in right_cell for b in BASURA_ESTRICTA)
-                                        and not re.search(r'^\d+', right_cell)):
-                                        return right_cell, "tabla"
-                                
+                                    rc = str(row[col_idx + 1] or "").strip().upper()
+                                    if len(rc) > 5 and len(rc) < 70 and not any(b in rc for b in BASURA_ESTRICTA) and not re.search(r'^\d+', rc):
+                                        return rc, "tabla"
                                 if row_idx + 1 < len(table):
-                                    down_cell = str(table[row_idx + 1][col_idx] or "").strip().upper()
-                                    if (len(down_cell) > 5 and len(down_cell) < 70 
-                                        and not any(b in down_cell for b in BASURA_ESTRICTA)
-                                        and not re.search(r'^\d+', down_cell)):
-                                        return down_cell, "tabla"
-                                
+                                    dc = str(table[row_idx + 1][col_idx] or "").strip().upper()
+                                    if len(dc) > 5 and len(dc) < 70 and not any(b in dc for b in BASURA_ESTRICTA) and not re.search(r'^\d+', dc):
+                                        return dc, "tabla"
                                 if col_idx - 1 >= 0:
-                                    left_cell = str(row[col_idx - 1] or "").strip().upper()
-                                    if (len(left_cell) > 5 and len(left_cell) < 70 
-                                        and not any(b in left_cell for b in BASURA_ESTRICTA)
-                                        and not re.search(r'^\d+', left_cell)):
-                                        return left_cell, "tabla"
-                        
+                                    lc = str(row[col_idx - 1] or "").strip().upper()
+                                    if len(lc) > 5 and len(lc) < 70 and not any(b in lc for b in BASURA_ESTRICTA) and not re.search(r'^\d+', lc):
+                                        return lc, "tabla"
                         for col_idx, cell in enumerate(row):
                             if not cell:
                                 continue
                             cell_str = str(cell).strip().upper()
-                            
                             if any(marca in cell_str for marca in ["GRUPO ", "S.A.", "S.A DE", "LTDA", "S.R.L."]):
-                                if (len(cell_str) > 5 and len(cell_str) < 70 
-                                    and not any(b in cell_str for b in BASURA_ESTRICTA)):
+                                if len(cell_str) > 5 and len(cell_str) < 70 and not any(b in cell_str for b in BASURA_ESTRICTA):
                                     return cell_str, "tabla"
-    
     except Exception:
         pass
-    
     return "", "baja"
 
 
@@ -594,9 +532,8 @@ def _extraer_razon_social_con_ocr(file_bytes, nit_prov):
     try:
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages[:2]:
-                img = page.to_image(resolution=200)
+                img      = page.to_image(resolution=200)
                 ocr_text = pytesseract.image_to_string(img.original, lang='spa')
-                
                 for linea in ocr_text.split('\n'):
                     if nit_prov and nit_prov[:8] in linea.replace('-', ''):
                         lineas_list = ocr_text.split('\n')
@@ -604,17 +541,13 @@ def _extraer_razon_social_con_ocr(file_bytes, nit_prov):
                             idx = lineas_list.index(linea)
                         except ValueError:
                             idx = -1
-                        
                         if idx > -1:
-                            for next_line in lineas_list[idx+1:idx+4]:
-                                next_clean = next_line.strip().upper()
-                                if (len(next_clean) > 5 and len(next_clean) < 70 
-                                    and not re.search(r'^\d+', next_clean)
-                                    and not any(bad in next_clean for bad in BASURA_ESTRICTA)):
-                                    return next_clean, "ocr"
+                            for next_line in lineas_list[idx + 1:idx + 4]:
+                                nc = next_line.strip().upper()
+                                if len(nc) > 5 and len(nc) < 70 and not re.search(r'^\d+', nc) and not any(bad in nc for bad in BASURA_ESTRICTA):
+                                    return nc, "ocr"
     except Exception:
         pass
-    
     return "", "baja"
 
 # ═══════════════════════════════════════════════════════════════
@@ -623,19 +556,16 @@ def _extraer_razon_social_con_ocr(file_bytes, nit_prov):
 
 def _extraer_razon_social_v6(nit_prov, texto_emisor, prov_db, cliente_nombre, file_bytes):
     """
-    PASO 1: Cache flexible (exacto + solo digitos + prefijo)
-    PASO 2: Patrones estrictos en texto
-    PASO 3: Tablas (adyacentes al NIT)
+    PASO 1: Cache flexible
+    PASO 2: Patrones estrictos
+    PASO 3: Tablas
     PASO 4: OCR localizado
     PASO 5: Fallback lineas con marcas
     """
-
-    # PASO 1: CACHE FLEXIBLE
     nombre_cache, encontrado = _buscar_en_cache_flexible(nit_prov, prov_db)
     if encontrado:
         return nombre_cache, "cache"
 
-    # PASO 2: PATRONES ESTRICTOS
     patrones = [
         (
             r"(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE\s+O\s+RAZ[OÓ]N\s*SOCIAL)\s*[:\-]?\s*"
@@ -658,8 +588,7 @@ def _extraer_razon_social_v6(nit_prov, texto_emisor, prov_db, cliente_nombre, fi
         m = re.search(patron, texto_emisor, re.IGNORECASE | re.MULTILINE)
         if not m:
             continue
-        candidato = m.group(1).strip()
-        candidato = re.sub(r'\s+', ' ', candidato).rstrip('.,;:')
+        candidato = re.sub(r'\s+', ' ', m.group(1).strip()).rstrip('.,;:')
         if len(candidato) < 5 or len(candidato) > 65:
             continue
         if any(bad in candidato.upper() for bad in BASURA_ESTRICTA):
@@ -672,19 +601,16 @@ def _extraer_razon_social_v6(nit_prov, texto_emisor, prov_db, cliente_nombre, fi
             continue
         return candidato.upper(), confianza
 
-    # PASO 3: TABLAS
     if nit_prov:
         rs_tabla, conf_tabla = _extraer_razon_social_de_tablas(file_bytes, nit_prov)
         if rs_tabla:
             return rs_tabla, conf_tabla
 
-    # PASO 4: OCR LOCALIZADO
     if nit_prov:
         rs_ocr, conf_ocr = _extraer_razon_social_con_ocr(file_bytes, nit_prov)
         if rs_ocr:
             return rs_ocr, conf_ocr
 
-    # PASO 5: FALLBACK LINEAS CON MARCAS
     for linea in texto_emisor.split('\n')[:30]:
         L = linea.strip().upper()
         if len(L) < 5:
@@ -706,11 +632,128 @@ def _extraer_razon_social_v6(nit_prov, texto_emisor, prov_db, cliente_nombre, fi
     return NOMBRE_PLACEHOLDER, "baja"
 
 # ═══════════════════════════════════════════════════════════════
-# MOTOR DE EXTRACCION DTE COMPRAS — V6
+# EXTRACCION DE MONTOS — V7 (MEJORADA, SIN ADIVINANZA)
 # ═══════════════════════════════════════════════════════════════
 
-def extraer_compras_nativo_pro_v6(file_bytes, cliente_activo, proveedores_cache=None):
-    """Motor V6 — Extracción ultra-robusta con cache flexible."""
+def _extraer_montos_v7(texto_completo, t_clean, tipo, e, ret):
+    """
+    Extrae Gravado, IVA y Total con patrones ESPECIFICOS por etiqueta.
+    Prioridad: etiquetas exactas > calculo algebraico > fallback triple.
+    Incluye validacion de coherencia IVA = Gravado x 0.13.
+    """
+    g, i, t = 0.0, 0.0, 0.0
+    iva_calculado = False
+
+    # ─────────────────────────────────────────────────────────
+    # PASO 1: Buscar TOTAL A PAGAR con etiquetas especificas
+    # ─────────────────────────────────────────────────────────
+    patrones_total = [
+        r"(?:TOTAL\s+A\s+PAGAR|MONTO\s+TOTAL\s+DE\s+LA\s+OPERACI[OO]N|"
+        r"TOTAL\s+DE\s+LA\s+OPERACI[OO]N|TOTAL\s+OPERACI[OO]N|"
+        r"VENTA\s+TOTAL|TOTAL\s+PAGAR|TOTAL\s+\$)"
+        r"[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+    ]
+    for patron in patrones_total:
+        m = re.search(patron, t_clean, re.I)
+        if m:
+            t = limpiar_monto(m.group(1))
+            break
+
+    # ─────────────────────────────────────────────────────────
+    # PASO 2: Buscar IVA con etiquetas especificas
+    # ─────────────────────────────────────────────────────────
+    patrones_iva = [
+        r"(?:Impuesto\s+al\s+Valor\s+Agregado|I\.V\.A\.?|IVA)"
+        r"(?:\s*\(?13\s*%\)?)?\s*[:\-]?\s*"
+        r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+        r"(?:13\s*%\s*(?:de\s*)?IVA|IVA\s*13\s*%)"
+        r"[^\d]{0,20}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+    ]
+    for patron in patrones_iva:
+        m = re.search(patron, t_clean, re.I)
+        if m:
+            i = limpiar_monto(m.group(1))
+            break
+
+    # ─────────────────────────────────────────────────────────
+    # PASO 3: Buscar SUBTOTAL / GRAVADO con etiquetas especificas
+    # ─────────────────────────────────────────────────────────
+    patrones_gravado = [
+        r"(?:Subtotal\s+Gravado|Monto\s+Sujeto\s+a\s+IVA|Venta\s+Gravada|"
+        r"Compras?\s+Gravadas?|Sub\s*[Tt]otal|Subtotal)"
+        r"[^\d]{0,20}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+    ]
+    for patron in patrones_gravado:
+        m = re.search(patron, t_clean, re.I)
+        if m:
+            g = limpiar_monto(m.group(1))
+            break
+
+    # ─────────────────────────────────────────────────────────
+    # PASO 4: Calculo algebraico si faltan campos
+    # ─────────────────────────────────────────────────────────
+    if t > 0 and i > 0 and g == 0.0:
+        g = round(t - i - e + ret, 2)
+        if g < 0:
+            g = 0.0
+
+    if t > 0 and i == 0.0 and g > 0:
+        i = round(g * 0.13, 2)
+
+    if t > 0 and i == 0.0 and g == 0.0 and tipo == "03":
+        g = round((t + ret - e) / 1.13, 2)
+        i = round(t + ret - e - g, 2)
+        iva_calculado = True
+
+    # ─────────────────────────────────────────────────────────
+    # PASO 5: Fallback triple-loop SOLO si total sigue sin encontrarse
+    # ─────────────────────────────────────────────────────────
+    if t == 0.0:
+        montos_raw = re.findall(
+            r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+            t_clean
+        )
+        valores = sorted(
+            list(set(limpiar_monto(x) for x in montos_raw)),
+            reverse=True
+        )
+        valores = [v for v in valores if v > 0.01]
+
+        for val_t in valores:
+            if t > 0.0:
+                break
+            for val_g in valores:
+                if val_g >= val_t:
+                    continue
+                for val_i in valores:
+                    if val_i >= val_g:
+                        continue
+                    if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
+                        total_calc = round(val_g + val_i + e - ret, 2)
+                        if abs(total_calc - round(val_t, 2)) <= 0.10:
+                            g, i, t = val_g, val_i, val_t
+                            break
+
+    # ─────────────────────────────────────────────────────────
+    # PASO 6: Validacion de coherencia tributaria
+    # ─────────────────────────────────────────────────────────
+    if g > 0 and i > 0:
+        iva_esperado = round(g * 0.13, 2)
+        if abs(iva_esperado - i) > 1.00:
+            # IVA inconsistente — recalcular desde gravado
+            i = iva_esperado
+
+    if g > 0 and i > 0 and t == 0.0:
+        t = round(g + i + e - ret, 2)
+
+    return max(0.0, g), max(0.0, i), t, iva_calculado
+
+# ═══════════════════════════════════════════════════════════════
+# MOTOR DE EXTRACCION DTE COMPRAS — V7
+# ═══════════════════════════════════════════════════════════════
+
+def extraer_compras_nativo_pro_v7(file_bytes, cliente_activo, proveedores_cache=None):
+    """Motor V7 — Cache flexible + extraccion de montos por etiquetas."""
     motor = "Nativo"
 
     try:
@@ -783,10 +826,7 @@ def extraer_compras_nativo_pro_v6(file_bytes, cliente_activo, proveedores_cache=
 
         prov_db = proveedores_cache if proveedores_cache is not None else cargar_proveedores_json()
 
-        nit_prov, confianza_nit = _extraer_nit_completo_pdf(
-            texto_lineal, texto_visual, file_bytes
-        )
-
+        nit_prov, confianza_nit = _extraer_nit_completo_pdf(texto_lineal, texto_visual, file_bytes)
         if not nit_prov:
             nit_prov, confianza_nit = _buscar_nit_en_todas_lineas(texto_emisor)
 
@@ -813,8 +853,10 @@ def extraer_compras_nativo_pro_v6(file_bytes, cliente_activo, proveedores_cache=
         if len(nit_prov) == 9:
             dui_prov = nit_prov
 
-        e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-        iva_calculado = False
+        # ─────────────────────────────────────────────────────────
+        # FOVIAL, COTRANS y EXENTOS
+        # ─────────────────────────────────────────────────────────
+        e, ret, perc = 0.0, 0.0, 0.0
 
         m_fovial = re.search(r"FOVIAL.{0,50}", texto_completo, re.I)
         if m_fovial:
@@ -846,59 +888,10 @@ def extraer_compras_nativo_pro_v6(file_bytes, cliente_activo, proveedores_cache=
         if m_ret:
             ret = limpiar_monto(m_ret.group(1))
 
-        montos_raw = re.findall(
-            r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})",
-            t_clean
-        )
-        valores = sorted(
-            list(set(limpiar_monto(m) for m in montos_raw)),
-            reverse=True
-        )
-        valores = [v for v in valores if v > 0.01]
-
-        encontrado = False
-        for val_t in valores:
-            if encontrado:
-                break
-            for val_g in valores:
-                if val_g >= val_t:
-                    continue
-                for val_i in valores:
-                    if val_i >= val_g:
-                        continue
-                    if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
-                        total_calculado = round(val_g + val_i + e - ret, 2)
-                        if abs(total_calculado - round(val_t, 2)) <= 0.10:
-                            g, i, t = val_g, val_i, val_t
-                            encontrado = True
-                            break
-
-        if not encontrado:
-            m_t = re.search(
-                r"(?:TOTAL\s+A\s+PAGAR|TOTAL\s+PAGAR|MONTO\s+TOTAL|"
-                r"TOTAL\s+OPERACI.N|VENTA\s+TOTAL|TOTAL\s+\$)"
-                r"[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})",
-                t_clean, re.I
-            )
-            if m_t:
-                t = limpiar_monto(m_t.group(1))
-
-            m_i = re.search(
-                r"(?:Impuesto.*Agregado|IVA|13%\s+IVA|I\.V\.A)"
-                r"[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})",
-                t_clean, re.I
-            )
-            if m_i:
-                i = limpiar_monto(m_i.group(1))
-
-            if t > 0 and i == 0.0 and tipo == "03":
-                g = round((t + ret - e) / 1.13, 2)
-                i = round(t + ret - e - g, 2)
-                iva_calculado = True
-            elif t > 0 and i > 0:
-                g = round(t - i - e + ret, 2)
-                if g < 0:
-                    g = 0.0
+        # ─────────────────────────────────────────────────────────
+        # EXTRACCION DE MONTOS V7
+        # ─────────────────────────────────────────────────────────
+        g, i, t, iva_calculado = _extraer_montos_v7(texto_completo, t_clean, tipo, e, ret)
 
         return {
             "fecha":         fecha,
@@ -909,11 +902,11 @@ def extraer_compras_nativo_pro_v6(file_bytes, cliente_activo, proveedores_cache=
             "ctrl":          ctrl,
             "gen":           gen,
             "exe":           round(e,   2),
-            "gra":           max(0.0, g),
-            "iva":           max(0.0, i),
-            "ret":           ret,
+            "gra":           round(g,   2),
+            "iva":           round(i,   2),
+            "ret":           round(ret, 2),
             "perc":          perc,
-            "tot":           t,
+            "tot":           round(t,   2),
             "estado":        "OK",
             "iva_calc":      iva_calculado,
             "es_nuevo":      es_nuevo,
@@ -955,7 +948,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 st.title("Extractor DTE - Compras")
-
 st.markdown(f"""
 <div class="alerta-activo">
     <strong>RECEPTOR ACTUAL (Cliente Activo):</strong>
@@ -967,11 +959,11 @@ st.markdown(f"""
 # INICIALIZACION DE ESTADO
 # ═══════════════════════════════════════════════════════════════
 
-if 'cola_revision'      not in st.session_state: st.session_state.cola_revision      = []
-if 'comp_uploader_key'  not in st.session_state: st.session_state.comp_uploader_key  = str(time.time())
-if 'db_compras'         not in st.session_state: st.session_state.db_compras         = pd.DataFrame()
-if 'archivos_comp'      not in st.session_state: st.session_state.archivos_comp      = set()
-if 'reporte_compras'    not in st.session_state: st.session_state.reporte_compras    = None
+if 'cola_revision'     not in st.session_state: st.session_state.cola_revision     = []
+if 'comp_uploader_key' not in st.session_state: st.session_state.comp_uploader_key = str(time.time())
+if 'db_compras'        not in st.session_state: st.session_state.db_compras        = pd.DataFrame()
+if 'archivos_comp'     not in st.session_state: st.session_state.archivos_comp     = set()
+if 'reporte_compras'   not in st.session_state: st.session_state.reporte_compras   = None
 
 # ═══════════════════════════════════════════════════════════════
 # SIDEBAR — CARGA Y PROCESAMIENTO
@@ -991,22 +983,22 @@ with st.sidebar:
 
     if archivos and st.button("Procesar Compras", type="primary", use_container_width=True):
 
-        extracted          = []
-        duplicados         = []
+        extracted           = []
+        duplicados          = []
         iva_calculado_files = []
-        intrusos           = []
-        invalidos          = []
-        corruptos          = []
-        nuevos_proveedores = {}
+        intrusos            = []
+        invalidos           = []
+        corruptos           = []
+        nuevos_proveedores  = {}
 
         nuevos = [f for f in archivos if f.name not in st.session_state.archivos_comp]
 
         if nuevos:
-            bar           = st.progress(0)
-            txt_progreso  = st.empty()
-            t_inicio      = time.time()
-            total         = len(nuevos)
-            prov_cache    = cargar_proveedores_json()
+            bar          = st.progress(0)
+            txt_progreso = st.empty()
+            t_inicio     = time.time()
+            total        = len(nuevos)
+            prov_cache   = cargar_proveedores_json()
 
             for idx, f in enumerate(nuevos):
 
@@ -1032,9 +1024,9 @@ with st.sidebar:
                     bar.progress((idx + 1) / total)
                     continue
 
-                res = extraer_compras_nativo_pro_v6(file_bytes, cliente, prov_cache)
+                res = extraer_compras_nativo_pro_v7(file_bytes, cliente, prov_cache)
 
-                codigo_gen = res.get('gen', '')
+                codigo_gen  = res.get('gen', '')
                 dup_memoria = (
                     not st.session_state.db_compras.empty
                     and codigo_gen != ""
@@ -1049,21 +1041,15 @@ with st.sidebar:
 
                 if "error_intruso" in res:
                     intrusos.append(f.name)
-
                 elif "error_tipo" in res:
                     invalidos.append(f.name)
-
                 elif dup_memoria or dup_lote:
                     duplicados.append(f.name)
-
                 elif "error" not in res:
                     fecha_str    = str(res.get('fecha', '')).strip()
                     nom_prov_str = str(res.get('nom_prov', '')).strip()
                     nit_prov_str = str(res.get('nit_prov', '')).strip()
-
-                    nom_es_placeholder = (
-                        nom_prov_str in (NOMBRE_PLACEHOLDER, "ESCRIBE EL NOMBRE AQUI", "")
-                    )
+                    nom_es_placeholder = nom_prov_str in (NOMBRE_PLACEHOLDER, "ESCRIBE EL NOMBRE AQUI", "")
 
                     try:
                         tot_float = float(res.get('tot', 0.0))
@@ -1103,12 +1089,12 @@ with st.sidebar:
                 guardar_lote_proveedores(nuevos_proveedores)
 
             st.session_state.reporte_compras = {
-                "intrusos":          intrusos,
-                "invalidos":         invalidos,
-                "duplicados":        duplicados,
-                "iva_calc":          iva_calculado_files,
+                "intrusos":           intrusos,
+                "invalidos":          invalidos,
+                "duplicados":         duplicados,
+                "iva_calc":           iva_calculado_files,
                 "nuevos_proveedores": nuevos_proveedores,
-                "corruptos":         corruptos
+                "corruptos":          corruptos
             }
 
             if extracted:
@@ -1175,7 +1161,7 @@ if st.session_state.cola_revision:
         </div>
         <div class="confianza-item">
             <span class="badge-revision">REVISION REQUERIDA</span>
-            &nbsp;<span style="color:#888;font-size:12px;">Doc {1} de {total_cola}</span>
+            &nbsp;<span style="color:#888;font-size:12px;">Doc 1 de {total_cola}</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1187,20 +1173,11 @@ if st.session_state.cola_revision:
             with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
                 img = pdf.pages[0].to_image(resolution=250).original
                 st.image(img, caption=item_actual['archivo'], use_container_width=True)
-
                 texto_crudo = ""
                 for page in pdf.pages:
-                    texto_crudo += (
-                        page.extract_text(layout=True) or page.extract_text() or ""
-                    ) + "\n"
-
+                    texto_crudo += (page.extract_text(layout=True) or page.extract_text() or "") + "\n"
                 st.markdown("**Texto extraido del PDF:**")
-                st.text_area(
-                    "Texto",
-                    value=texto_crudo.strip(),
-                    height=180,
-                    label_visibility="collapsed"
-                )
+                st.text_area("Texto", value=texto_crudo.strip(), height=180, label_visibility="collapsed")
         except Exception:
             st.error("No se pudo cargar la vista previa del PDF.")
 
@@ -1211,16 +1188,13 @@ if st.session_state.cola_revision:
         if nom_sugerido in [NOMBRE_PLACEHOLDER, "ESCRIBE EL NOMBRE AQUI"]:
             nom_sugerido = ""
 
-        # ─────────────────────────────────────────────────────────
-        # NUEVO: Mostrar si es proveedor nuevo
-        # ─────────────────────────────────────────────────────────
-        nit_actual = datos.get("nit_prov", "")
+        nit_actual         = datos.get("nit_prov", "")
         es_nuevo_proveedor = datos.get("es_nuevo", True)
-        
+
         if nit_actual and es_nuevo_proveedor:
-            st.info(f"🆕 **Proveedor Nuevo:** NIT {nit_actual} no está en directorio")
+            st.info(f"Proveedor Nuevo: NIT {nit_actual} no esta en el directorio.")
         elif nit_actual:
-            st.success(f"✅ **Proveedor Existente:** NIT {nit_actual}")
+            st.success(f"Proveedor Existente: NIT {nit_actual}")
 
         with st.form(key=f"form_rev_{item_actual['archivo']}_{total_cola}"):
             f_fecha = st.text_input(
@@ -1246,8 +1220,7 @@ if st.session_state.cola_revision:
                 except (TypeError, ValueError):
                     tot_default = 0.0
                 f_tot = st.number_input(
-                    "Total a Pagar ($) *", value=tot_default,
-                    format="%.2f", min_value=0.0
+                    "Total a Pagar ($) *", value=tot_default, format="%.2f", min_value=0.0
                 )
             with c_mon2:
                 try:
@@ -1255,47 +1228,41 @@ if st.session_state.cola_revision:
                 except (TypeError, ValueError):
                     exe_default = 0.0
                 f_exe = st.number_input(
-                    "Exento/Fovial ($)", value=exe_default,
-                    format="%.2f", min_value=0.0
+                    "Exento/Fovial ($)", value=exe_default, format="%.2f", min_value=0.0
                 )
 
             st.write("")
             c_btn1, c_btn2, c_btn3 = st.columns(3)
             with c_btn1:
-                submit_aprobar   = st.form_submit_button("Aprobar y Guardar",  type="primary", use_container_width=True)
+                submit_aprobar      = st.form_submit_button("Aprobar y Guardar", type="primary", use_container_width=True)
             with c_btn2:
-                submit_guardar_prov = st.form_submit_button("💾 Guardar Proveedor", use_container_width=True)
+                submit_guardar_prov = st.form_submit_button("Guardar Proveedor", use_container_width=True)
             with c_btn3:
-                submit_descartar = st.form_submit_button("❌ Descartar", use_container_width=True)
+                submit_descartar    = st.form_submit_button("Descartar", use_container_width=True)
 
         # ─────────────────────────────────────────────────────────
-        # LÓGICA: Guardar solo proveedor (sin aprobar factura)
+        # LOGICA: Guardar solo proveedor sin aprobar factura
         # ─────────────────────────────────────────────────────────
         if submit_guardar_prov:
             if not f_nom or not nit_actual:
-                st.error("⚠️ Debes llenar la Razón Social y tener un NIT válido.")
+                st.error("Debes llenar la Razon Social y tener un NIT valido.")
             else:
                 guardar_proveedor_rapido(nit_actual, f_nom.upper())
-                
-                # Actualizar cache en memory para procesamiento posterior
-                prov_cache = cargar_proveedores_json()
-                
-                # Actualizar el nombre en todos los items de la cola con el mismo NIT
                 for item in st.session_state.cola_revision:
                     if item["datos"].get("nit_prov") == nit_actual:
                         item["datos"]["nom_prov"] = f_nom.upper()
                         item["datos"]["es_nuevo"] = False
-                
-                st.success(f"✅ **Proveedor guardado:** {f_nom.upper()} (NIT: {nit_actual})")
-                st.info("💡 Puedes continuar revisando este documento o pasar al siguiente.")
+                st.success(f"Proveedor guardado: {f_nom.upper()} (NIT: {nit_actual})")
+                st.info("Puedes continuar revisando este documento o pasar al siguiente.")
                 time.sleep(1)
+                st.rerun()
 
         # ─────────────────────────────────────────────────────────
-        # LÓGICA: Aprobar factura (requiere todos los datos)
+        # LOGICA: Aprobar factura
         # ─────────────────────────────────────────────────────────
         if submit_aprobar:
             if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
-                st.error("⚠️ Rellena todos los campos marcados con (*) para continuar.")
+                st.error("Rellena todos los campos marcados con (*) para continuar.")
             else:
                 if nit_actual:
                     guardar_proveedor_rapido(nit_actual, f_nom.upper())
@@ -1308,11 +1275,11 @@ if st.session_state.cola_revision:
                 except (TypeError, ValueError):
                     iva_actual = 0.0
 
-                datos["fecha"]   = f_fecha.strip()
-                datos["gen"]     = f_gen.strip().upper()
+                datos["fecha"]    = f_fecha.strip()
+                datos["gen"]      = f_gen.strip().upper()
                 datos["nom_prov"] = f_nom.strip().upper()
-                datos["tot"]     = round(f_tot, 2)
-                datos["exe"]     = round(f_exe, 2)
+                datos["tot"]      = round(f_tot, 2)
+                datos["exe"]      = round(f_exe, 2)
 
                 if f_tot > 0 and iva_actual == 0.0:
                     datos["gra"]      = round((f_tot - f_exe) / 1.13, 2)
@@ -1330,16 +1297,16 @@ if st.session_state.cola_revision:
                     )
 
                 st.session_state.cola_revision.pop(0)
-                st.success("✅ Factura aprobada y guardada.")
+                st.success("Factura aprobada y guardada.")
                 time.sleep(1)
                 st.rerun()
 
         # ─────────────────────────────────────────────────────────
-        # LÓGICA: Descartar
+        # LOGICA: Descartar
         # ─────────────────────────────────────────────────────────
         if submit_descartar:
             st.session_state.cola_revision.pop(0)
-            st.warning("❌ Documento descartado.")
+            st.warning("Documento descartado.")
             time.sleep(1)
             st.rerun()
 
@@ -1434,27 +1401,27 @@ if not st.session_state.db_compras.empty:
             st.info("No hay registros que coincidan con los filtros aplicados.")
         else:
             df_h = pd.DataFrame({
-                "A. Fecha Emision":        df_filtrado["fecha"],
-                "B. Clase":                "4",
-                "C. Tipo Doc":             df_filtrado["tipo"],
-                "D. Num Documento":        df_filtrado["gen"],
-                "E. NIT/NRC Prov":         df_filtrado["nit_prov"],
-                "F. Nombre Prov":          df_filtrado["nom_prov"],
-                "G. Compra Ext/NS":        df_filtrado["exe"],
-                "H. Internacion Ext/NS":   0.00,
-                "I. Importacion Ext/NS":   0.00,
-                "J. Compra Gravada":       df_filtrado["gra"],
+                "A. Fecha Emision":         df_filtrado["fecha"],
+                "B. Clase":                 "4",
+                "C. Tipo Doc":              df_filtrado["tipo"],
+                "D. Num Documento":         df_filtrado["gen"],
+                "E. NIT/NRC Prov":          df_filtrado["nit_prov"],
+                "F. Nombre Prov":           df_filtrado["nom_prov"],
+                "G. Compra Ext/NS":         df_filtrado["exe"],
+                "H. Internacion Ext/NS":    0.00,
+                "I. Importacion Ext/NS":    0.00,
+                "J. Compra Gravada":        df_filtrado["gra"],
                 "K. Inter. Gravada Bienes": 0.00,
                 "L. Impor. Gravada Bienes": 0.00,
-                "M. Impor. Gravada Serv":  0.00,
-                "N. Credito Fiscal (IVA)": df_filtrado["iva"],
-                "O. Total Compras":        df_filtrado["tot"],
-                "P. DUI Prov":             df_filtrado["dui_prov"],
-                "Q. Tipo Operacion":       "1",
-                "R. Clasificacion":        "1",
-                "S. Sector":               "1",
-                "T. Tipo Costo/Gasto":     "1",
-                "U. Num Anexo":            "3"
+                "M. Impor. Gravada Serv":   0.00,
+                "N. Credito Fiscal (IVA)":  df_filtrado["iva"],
+                "O. Total Compras":         df_filtrado["tot"],
+                "P. DUI Prov":              df_filtrado["dui_prov"],
+                "Q. Tipo Operacion":        "1",
+                "R. Clasificacion":         "1",
+                "S. Sector":                "1",
+                "T. Tipo Costo/Gasto":      "1",
+                "U. Num Anexo":             "3"
             })
 
             cols_num = [
