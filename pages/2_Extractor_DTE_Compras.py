@@ -632,24 +632,31 @@ def _extraer_razon_social_v6(nit_prov, texto_emisor, prov_db, cliente_nombre, fi
     return NOMBRE_PLACEHOLDER, "baja"
 
 # ═══════════════════════════════════════════════════════════════
-# EXTRACCION DE MONTOS — V8 CON TODOS LOS FIXES INTEGRADOS
+# EXTRACCION DE MONTOS — V9 CON MANEJO DE EXENTAS
 # ═══════════════════════════════════════════════════════════════
 
-def _extraer_montos_v8_fixed(texto_completo, t_clean, tipo, e, ret):
+def _extraer_montos_v9_fixed(texto_completo, t_clean, tipo, e, ret):
     """
-    Motor V8 FIXED: 7 pasos con correcciones algebraicas y validaciones.
+    Motor V9: Prioriza EXTRACCION de Exento sobre calculo.
     
-    FIXES INTEGRADOS:
-    - P4: Algebra corregida (no divide por 2.13)
-    - P7: Aseguranza final de coherencia
-    - Previene Gravado > Total
+    ORDEN DE PRIORIDAD:
+    1. Extraer Total (etiqueta)
+    2. Extraer IVA (etiqueta)  
+    3. Extraer Gravado (etiqueta)
+    4. Extraer Exento (etiqueta primero, luego calculo como ULTIMO RECURSO)
+    5. Algebra: si falta algo, recalcular
+    
+    FORMULA CORRECTA:
+    Total = Gravado + IVA + Exento + Fovial + Cotrans - Retenciones
     """
-    g, i, t = 0.0, 0.0, 0.0
+    g, i, t, exe = 0.0, 0.0, 0.0, 0.0
     iva_calculado = False
+    exe_calculado = False
     debug = {
         "P1_total":      "no encontrado",
         "P2_iva":        "no encontrado",
         "P3_gravado":    "no encontrado",
+        "P3b_exento":    "no encontrado",
         "P4_algebra":    "no aplicado",
         "P5_fallback":   "no aplicado",
         "P6_validacion": "no aplicada",
@@ -703,26 +710,47 @@ def _extraer_montos_v8_fixed(texto_completo, t_clean, tipo, e, ret):
                 debug["P3_gravado"] = f"OK => {g} (primer match de {len(matches)})"
                 break
 
-    # ─── PASO 4: ALGEBRA (CORREGIDO) ──────────────────────────
+    # ─── PASO 3B: EXENTO POR ETIQUETA (NUEVO - PRIORIDAD SOBRE CALCULO) ──────
+    # IMPORTANTE: Buscar ANTES de calcular, extracción es prioridad
+    patrones_exento = [
+        r"(?:Ventas?\s+Exentas?|Monto\s+Exento|Total\s+Exento|Compras?\s+Exentas?)"
+        r"[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+        r"(?:Exento|No\s+Gravado)[^\d]{0,25}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+        r"Subtotal\s+Exento[^\d]{0,10}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+        r"(?:Venta\s+No\s+Sujeta|No\s+Sujeta)[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
+    ]
+    for patron in patrones_exento:
+        m = re.search(patron, t_clean, re.I)
+        if m:
+            exe_candidato = limpiar_monto(m.group(1))
+            if exe_candidato > 0:
+                exe = exe_candidato
+                debug["P3b_exento"] = f"EXTRAIDO (etiqueta) => {exe}"
+                break
+
+    # ─── PASO 4: ALGEBRA (CORREGIDO CON EXENTO) ───────────────
     if g == 0.0 and t > 0:
         # Si NO encontro Gravado pero SI tiene Total
         if i > 0:
-            # Caso A: Total - IVA = Gravado (sin dividir por nada!)
-            g = max(0.0, round(t - i, 2))
-            debug["P4_algebra"] = f"G = Total - IVA: {t} - {i} = {g}"
+            # Caso A: Total - IVA - Exento = Gravado
+            g = max(0.0, round(t - i - exe, 2))
+            debug["P4_algebra"] = f"G = T - I - EXE: {t} - {i} - {exe} = {g}"
         elif tipo == "03":
-            # Caso B: Solo tiene Total (tipo 03) → dividir por 1.13
-            g = round(t / 1.13, 2)
-            i = round(t - g, 2)
+            # Caso B: Solo tiene Total (tipo 03)
+            # Total = G + (G×0.13) + Exento
+            # Total - Exento = G + (G×0.13) = G × 1.13
+            # G = (Total - Exento) / 1.13
+            g = round((t - exe) / 1.13, 2)
+            i = round((t - exe) - g, 2)
             iva_calculado = True
-            debug["P4_algebra"] = f"Tipo-03: {t} / 1.13 = {g}, I = {i}"
+            debug["P4_algebra"] = f"Tipo-03: ({t} - {exe}) / 1.13 = {g}, I = {i}"
 
     # Si tiene Gravado pero NO IVA, calcular IVA
     if g > 0 and i == 0.0:
         i = round(g * 0.13, 2)
         debug["P4_algebra"] = f"I = G x 0.13: {g} x 0.13 = {i}"
 
-    # ─── PASO 5: FALLBACK TRIPLE-LOOP (solo si t == 0) ────────
+    # ─── PASO 5: FALLBACK CUÁDRUPLE-LOOP (solo si t == 0) ────────
     if t == 0.0:
         montos_raw = re.findall(
             r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})",
@@ -743,13 +771,17 @@ def _extraer_montos_v8_fixed(texto_completo, t_clean, tipo, e, ret):
                 for val_i in valores:
                     if val_i >= val_g:
                         continue
-                    if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
-                        total_calc = round(val_g + val_i + e - ret, 2)
-                        if abs(total_calc - round(val_t, 2)) <= 0.10:
-                            g, i, t = val_g, val_i, val_t
-                            encontrado_tl = True
-                            debug["P5_fallback"] = f"OK => G={g}, I={i}, T={t}"
-                            break
+                    # Cuádruple loop: incluir Exento
+                    for val_exe in valores:
+                        if val_exe >= val_g:
+                            continue
+                        if abs(round(val_g * 0.13, 2) - round(val_i, 2)) <= 0.05:
+                            total_calc = round(val_g + val_i + val_exe + e - ret, 2)
+                            if abs(total_calc - round(val_t, 2)) <= 0.10:
+                                g, i, exe, t = val_g, val_i, val_exe, val_t
+                                encontrado_tl = True
+                                debug["P5_fallback"] = f"OK => G={g}, I={i}, EXE={exe}, T={t}"
+                                break
         if not encontrado_tl:
             debug["P5_fallback"] = "Sin combinacion valida"
 
@@ -765,47 +797,95 @@ def _extraer_montos_v8_fixed(texto_completo, t_clean, tipo, e, ret):
         else:
             debug["P6_validacion"] = f"OK: IVA {i} ~ {iva_esperado} (dif={diferencia:.2f})"
 
+    # Si falta el Total, calcularlo
     if g > 0 and i > 0 and t == 0.0:
-        t = round(g + i + e - ret, 2)
+        t = round(g + i + exe + e - ret, 2)
         debug["P6_validacion"] += f" | T inferido = {t}"
 
     # ─── PASO 7: ASEGURANZA FINAL ─────────────────────────────
     if g > 0 and i > 0 and t > 0:
-        total_algebraico = round(g + i, 2)
+        total_algebraico = round(g + i + exe, 2)
         
         # CRITICA: Si Gravado > Total, el Gravado está MAL
         if g > t:
             g_viejo = g
-            g = round(t - i, 2)
+            g = round(t - i - exe, 2)
             if g < 0:
                 g = 0.0
             debug["P7_aseguranza"] = (
                 f"CORRECCION: G {g_viejo} > T {t}. "
-                f"Recalculado G = {t} - {i} = {g}"
+                f"Recalculado G = {t} - {i} - {exe} = {g}"
             )
-        # Si G + I != T, recalcular
+        # Si G + I + EXE != T, recalcular
         elif abs(total_algebraico - t) > 0.50:
             g_viejo = g
-            g = round(t - i, 2)
+            g = round(t - i - exe, 2)
             debug["P7_aseguranza"] = (
-                f"CORRECCION: {g_viejo} + {i} = {total_algebraico} ≠ {t}. "
+                f"CORRECCION: {g_viejo} + {i} + {exe} = {total_algebraico} ≠ {t}. "
                 f"Recalculado G = {g}"
             )
         else:
-            debug["P7_aseguranza"] = f"OK: {g} + {i} = {total_algebraico} ≈ {t}"
+            debug["P7_aseguranza"] = f"OK: {g} + {i} + {exe} = {total_algebraico} ≈ {t}"
     
     g = max(0.0, g)
     i = max(0.0, i)
-    debug["resultado"] = f"FINAL => G={g:.2f} | I={i:.2f} | T={t:.2f} | IVA_CALC={iva_calculado}"
+    exe = max(0.0, exe)
+    debug["resultado"] = f"FINAL => G={g:.2f} | I={i:.2f} | EXE={exe:.2f} | T={t:.2f} | IVA_CALC={iva_calculado}"
 
-    return g, i, t, iva_calculado, debug
+    return g, i, exe, t, iva_calculado, debug
 
 # ═══════════════════════════════════════════════════════════════
-# MOTOR DE EXTRACCION DTE COMPRAS — V8 FIXED
+# HELPER: RENDERIZAR DEBUG EN EXPANDER
 # ═══════════════════════════════════════════════════════════════
 
-def extraer_compras_nativo_pro_v8(file_bytes, cliente_activo, proveedores_cache=None):
-    """Motor V8 FIXED con todos los ajustes algebraicos."""
+def _render_debug_montos(debug: dict):
+    """Muestra el log de debug del motor de montos en formato legible."""
+    if not debug:
+        st.info("Sin datos de debug disponibles.")
+        return
+
+    filas = [
+        ("P1 Total (etiqueta)",  debug.get("P1_total",      "—")),
+        ("P2 IVA (etiqueta)",    debug.get("P2_iva",        "—")),
+        ("P3 Gravado (etiqueta)",debug.get("P3_gravado",    "—")),
+        ("P3b Exento (etiqueta)", debug.get("P3b_exento",   "—")),
+        ("P4 Algebra",           debug.get("P4_algebra",    "—")),
+        ("P5 Fallback",          debug.get("P5_fallback",   "—")),
+        ("P6 Validacion",        debug.get("P6_validacion", "—")),
+        ("P7 Aseguranza",        debug.get("P7_aseguranza", "—")),
+    ]
+
+    html = '<div class="debug-box">'
+    for label, valor in filas:
+        valor_str = str(valor)
+        if valor_str.startswith("OK"):
+            cls = "debug-ok"
+        elif any(w in valor_str.upper() for w in ["WARN", "CORRECCION", "INCONSISTENTE"]):
+            cls = "debug-warn"
+        elif "no " in valor_str.lower():
+            cls = "debug-err"
+        else:
+            cls = ""
+        html += f'<div><strong style="color:#cdd9e5">{label}:</strong> <span class="{cls}">{valor_str}</span></div>'
+
+    montos = debug.get("montos_raw", [])
+    if montos:
+        montos_str = ", ".join([f"${m:.2f}" for m in montos[:6]])
+        html += f'<div style="margin-top:6px"><strong style="color:#cdd9e5">Montos (top):</strong> <span style="color:#79c0ff">{montos_str}</span></div>'
+
+    resultado = debug.get("resultado", "")
+    if resultado:
+        html += f'<div style="margin-top:8px;border-top:1px solid #30363d;padding-top:6px"><strong style="color:#e3b341">{resultado}</strong></div>'
+
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════
+# MOTOR DE EXTRACCION DTE COMPRAS — V9
+# ═══════════════════════════════════════════════════════════════
+
+def extraer_compras_nativo_pro_v9(file_bytes, cliente_activo, proveedores_cache=None):
+    """Motor V9 con manejo correcto de ventas exentas."""
     motor = "Nativo"
 
     try:
@@ -938,8 +1018,8 @@ def extraer_compras_nativo_pro_v8(file_bytes, cliente_activo, proveedores_cache=
         if m_ret:
             ret = limpiar_monto(m_ret.group(1))
 
-        # ─── EXTRACCION DE MONTOS V8 FIXED ─────────────────────
-        g, i, t, iva_calculado, debug_montos = _extraer_montos_v8_fixed(
+        # ─── EXTRACCION DE MONTOS V9 FIXED ─────────────────────
+        g, i, exe, t, iva_calculado, debug_montos = _extraer_montos_v9_fixed(
             texto_completo, t_clean, tipo, e, ret
         )
 
@@ -951,7 +1031,7 @@ def extraer_compras_nativo_pro_v8(file_bytes, cliente_activo, proveedores_cache=
             "tipo":          tipo,
             "ctrl":          ctrl,
             "gen":           gen,
-            "exe":           round(e,   2),
+            "exe":           round(exe, 2),
             "gra":           round(g,   2),
             "iva":           round(i,   2),
             "ret":           round(ret, 2),
@@ -969,51 +1049,6 @@ def extraer_compras_nativo_pro_v8(file_bytes, cliente_activo, proveedores_cache=
 
     except Exception as err:
         return {"error": str(err)}
-
-# ═══════════════════════════════════════════════════════════════
-# HELPER: RENDERIZAR DEBUG EN EXPANDER
-# ═══════════════════════════════════════════════════════════════
-
-def _render_debug_montos(debug: dict):
-    """Muestra el log de debug del motor de montos en formato legible."""
-    if not debug:
-        st.info("Sin datos de debug disponibles.")
-        return
-
-    filas = [
-        ("P1 Total (etiqueta)",  debug.get("P1_total",      "—")),
-        ("P2 IVA (etiqueta)",    debug.get("P2_iva",        "—")),
-        ("P3 Gravado (etiqueta)",debug.get("P3_gravado",    "—")),
-        ("P4 Algebra",           debug.get("P4_algebra",    "—")),
-        ("P5 Fallback",          debug.get("P5_fallback",   "—")),
-        ("P6 Validacion",        debug.get("P6_validacion", "—")),
-        ("P7 Aseguranza",        debug.get("P7_aseguranza", "—")),
-    ]
-
-    html = '<div class="debug-box">'
-    for label, valor in filas:
-        valor_str = str(valor)
-        if valor_str.startswith("OK"):
-            cls = "debug-ok"
-        elif any(w in valor_str.upper() for w in ["WARN", "CORRECCION", "INCONSISTENTE"]):
-            cls = "debug-warn"
-        elif "no " in valor_str.lower():
-            cls = "debug-err"
-        else:
-            cls = ""
-        html += f'<div><strong style="color:#cdd9e5">{label}:</strong> <span class="{cls}">{valor_str}</span></div>'
-
-    montos = debug.get("montos_raw", [])
-    if montos:
-        montos_str = ", ".join([f"${m:.2f}" for m in montos[:6]])
-        html += f'<div style="margin-top:6px"><strong style="color:#cdd9e5">Montos (top):</strong> <span style="color:#79c0ff">{montos_str}</span></div>'
-
-    resultado = debug.get("resultado", "")
-    if resultado:
-        html += f'<div style="margin-top:8px;border-top:1px solid #30363d;padding-top:6px"><strong style="color:#e3b341">{resultado}</strong></div>'
-
-    html += '</div>'
-    st.markdown(html, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
 # MODAL DE DESCARGA
@@ -1120,7 +1155,7 @@ with st.sidebar:
                     bar.progress((idx + 1) / total)
                     continue
 
-                res = extraer_compras_nativo_pro_v8(file_bytes, cliente, prov_cache)
+                res = extraer_compras_nativo_pro_v9(file_bytes, cliente, prov_cache)
 
                 codigo_gen  = res.get('gen', '')
                 dup_memoria = (
@@ -1294,30 +1329,33 @@ if st.session_state.cola_revision:
         elif nit_actual:
             st.success(f"Proveedor Existente: NIT {nit_actual}")
 
-        # ── METRICS: Montos detectados por V8 ──────────────────
+        # ── METRICS: Montos detectados por V9 ──────────────────
         st.markdown("**Montos detectados por el motor:**")
-        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         with col_m1:
             st.markdown(f'<div class="metric-box"><strong>Gravado</strong><br/>${datos.get("gra", 0):.2f}</div>', unsafe_allow_html=True)
         with col_m2:
-            st.markdown(f'<div class="metric-box"><strong>IVA</strong><br/>${datos.get("iva", 0):.2f}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-box"><strong>Exento</strong><br/>${datos.get("exe", 0):.2f}</div>', unsafe_allow_html=True)
         with col_m3:
+            st.markdown(f'<div class="metric-box"><strong>IVA</strong><br/>${datos.get("iva", 0):.2f}</div>', unsafe_allow_html=True)
+        with col_m4:
             st.markdown(f'<div class="metric-box"><strong>Total</strong><br/>${datos.get("tot", 0):.2f}</div>', unsafe_allow_html=True)
 
         # Validacion inmediata de coherencia
         try:
-            gra_v8 = float(datos.get('gra', 0))
-            iva_v8 = float(datos.get('iva', 0))
-            tot_v8 = float(datos.get('tot', 0))
-            total_algebraico = round(gra_v8 + iva_v8, 2)
+            gra_v9 = float(datos.get('gra', 0))
+            exe_v9 = float(datos.get('exe', 0))
+            iva_v9 = float(datos.get('iva', 0))
+            tot_v9 = float(datos.get('tot', 0))
+            total_algebraico = round(gra_v9 + exe_v9 + iva_v9, 2)
             
-            if abs(total_algebraico - tot_v8) > 0.50:
+            if abs(total_algebraico - tot_v9) > 0.50:
                 st.error(
-                    f"⚠️ INCONSISTENCIA: ${gra_v8:.2f} + ${iva_v8:.2f} = ${total_algebraico:.2f} "
-                    f"≠ Total ${tot_v8:.2f}"
+                    f"⚠️ INCONSISTENCIA: ${gra_v9:.2f} + ${exe_v9:.2f} + ${iva_v9:.2f} = ${total_algebraico:.2f} "
+                    f"≠ Total ${tot_v9:.2f}"
                 )
-            elif gra_v8 > 0 and iva_v8 > 0 and tot_v8 > 0:
-                st.success(f"✅ Coherencia OK: ${gra_v8:.2f} + ${iva_v8:.2f} = ${total_algebraico:.2f}")
+            elif gra_v9 > 0 and iva_v9 > 0 and tot_v9 > 0:
+                st.success(f"✅ Coherencia OK: ${gra_v9:.2f} + ${exe_v9:.2f} + ${iva_v9:.2f} = ${total_algebraico:.2f}")
         except:
             pass
 
@@ -1357,19 +1395,30 @@ if st.session_state.cola_revision:
                 )
             with c_mon2:
                 try:
-                    exe_default = float(datos.get("exe", 0.0))
+                    ret_default = float(datos.get("ret", 0.0))
                 except (TypeError, ValueError):
-                    exe_default = 0.0
-                f_exe = st.number_input(
-                    "Exento/Fovial ($)", value=exe_default, format="%.2f", min_value=0.0
+                    ret_default = 0.0
+                f_ret = st.number_input(
+                    "Retenciones ($)", value=ret_default, format="%.2f", min_value=0.0
                 )
 
             # ── CORRECCION AVANZADA DE MONTOS ──────────────────
             st.markdown("---")
             st.markdown("**Correccion avanzada de montos** *(opcional)*")
 
-            c_adv1, c_adv2 = st.columns(2)
-            with c_adv1:
+            c_adv_exe, c_adv_gra, c_adv_iva = st.columns(3)
+
+            with c_adv_exe:
+                try:
+                    exe_default = float(datos.get("exe", 0.0))
+                except (TypeError, ValueError):
+                    exe_default = 0.0
+                f_exe_manual = st.number_input(
+                    "Exento ($)", value=exe_default, format="%.2f", min_value=0.0,
+                    help="Ventas exentas (sin IVA, pero suma al Total)"
+                )
+
+            with c_adv_gra:
                 try:
                     gra_default = float(datos.get("gra", 0.0))
                 except (TypeError, ValueError):
@@ -1378,7 +1427,8 @@ if st.session_state.cola_revision:
                     "Gravado ($)", value=gra_default, format="%.2f", min_value=0.0,
                     help="Subtotal gravado. Si es incorrecto (ej: $196.98 cuando debe ser $92.48), corrigelo."
                 )
-            with c_adv2:
+
+            with c_adv_iva:
                 try:
                     iva_default = float(datos.get("iva", 0.0))
                 except (TypeError, ValueError):
@@ -1391,14 +1441,20 @@ if st.session_state.cola_revision:
             # Validacion tributaria en tiempo real
             if f_gra > 0:
                 iva_esperado_form = round(f_gra * 0.13, 2)
+                total_esperado_form = round(f_gra + iva_esperado_form + f_exe_manual, 2)
                 dif_form = abs(iva_esperado_form - f_iva)
+                
                 if dif_form > 0.05 and f_iva > 0:
                     st.warning(
                         f"⚠️ IVA inconsistente: ingresaste ${f_iva:.2f} "
                         f"pero ${f_gra:.2f} × 13% = ${iva_esperado_form:.2f}"
                     )
                 elif f_gra > 0 and f_iva > 0:
-                    st.success(f"✅ IVA correcto: ${f_iva:.2f} = ${f_gra:.2f} × 13%")
+                    st.success(
+                        f"✅ Montos correctos:\n"
+                        f"${f_gra:.2f} + ${f_exe_manual:.2f} + ${iva_esperado_form:.2f} = "
+                        f"${total_esperado_form:.2f}"
+                    )
 
             st.write("")
             c_btn1, c_btn2, c_btn3 = st.columns(3)
@@ -1439,12 +1495,13 @@ if st.session_state.cola_revision:
                 datos["gen"]      = f_gen.strip().upper()
                 datos["nom_prov"] = f_nom.strip().upper()
                 datos["tot"]      = round(f_tot, 2)
-                datos["exe"]      = round(f_exe, 2)
+                datos["ret"]      = round(f_ret, 2)
 
                 # Usar montos manuales si el usuario los corrigio
                 if f_gra > 0:
                     datos["gra"] = round(f_gra, 2)
                     datos["iva"] = round(f_iva, 2) if f_iva > 0 else round(f_gra * 0.13, 2)
+                    datos["exe"] = round(f_exe_manual, 2)
                 elif f_tot > 0:
                     # Calculo automatico si no se corrigio manualmente
                     try:
@@ -1452,8 +1509,9 @@ if st.session_state.cola_revision:
                     except (TypeError, ValueError):
                         iva_actual = 0.0
                     if iva_actual == 0.0:
-                        datos["gra"]      = round((f_tot - f_exe) / 1.13, 2)
-                        datos["iva"]      = round(f_tot - f_exe - datos["gra"], 2)
+                        datos["gra"]      = round((f_tot - f_ret - f_exe_manual) / 1.13, 2)
+                        datos["iva"]      = round(f_tot - f_ret - f_exe_manual - datos["gra"], 2)
+                        datos["exe"]      = round(f_exe_manual, 2)
                         datos["iva_calc"] = True
 
                 datos["archivo"] = item_actual["archivo"]
@@ -1606,11 +1664,12 @@ if not st.session_state.db_compras.empty:
                 use_container_width=True
             )
 
-            col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+            col_kpi1, col_kpi2, col_kpi3, col_kpi4, col_kpi5 = st.columns(5)
             with col_kpi1: st.metric("Registros",     len(df_h))
-            with col_kpi2: st.metric("Total Gravado", f"${df_h['J. Compra Gravada'].sum():,.2f}")
-            with col_kpi3: st.metric("Total IVA CF",  f"${df_h['N. Credito Fiscal (IVA)'].sum():,.2f}")
-            with col_kpi4: st.metric("Total General", f"${df_h['O. Total Compras'].sum():,.2f}")
+            with col_kpi2: st.metric("Total Exento",  f"${df_h['G. Compra Ext/NS'].sum():,.2f}")
+            with col_kpi3: st.metric("Total Gravado", f"${df_h['J. Compra Gravada'].sum():,.2f}")
+            with col_kpi4: st.metric("Total IVA CF",  f"${df_h['N. Credito Fiscal (IVA)'].sum():,.2f}")
+            with col_kpi5: st.metric("Total General", f"${df_h['O. Total Compras'].sum():,.2f}")
 
             st.write("")
             if st.button("Generar Excel para Hacienda", type="primary", use_container_width=True):
