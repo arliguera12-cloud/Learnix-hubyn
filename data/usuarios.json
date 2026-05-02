@@ -1,1 +1,24 @@
-
+{
+  "usuarios": [
+    {
+      "id": 1,
+      "usuario": "admin",
+      "password": "admin123",
+      "nombre": "Administrador",
+      "email": "admin@learnixhub.com",
+      "rol": "admin",
+      "activo": true,
+      "fecha_registro": "2026-01-01"
+    },
+    {
+      "id": 2,
+      "usuario": "contador",
+      "password": "contador123",
+      "nombre": "Contador Principal",
+      "email": "contador@learnixhub.com",
+      "rol": "contador",
+      "activo": true,
+      "fecha_registro": "2026-01-05"
+    }
+  ]
+}
