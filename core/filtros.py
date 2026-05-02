@@ -91,21 +91,6 @@ def render_panel_filtros(df: pd.DataFrame, key_prefix: str = "filtro") -> pd.Dat
                 if motor_sel != "Todos":
                     df_filtrado = df_filtrado[df_filtrado["motor"] == motor_sel]
 
-        # ── FILTRO: FUENTE ──
-        if "fuente" in df.columns:
-            col4, col5 = st.columns(2)
-            with col4:
-                fuentes_disponibles = ["Todos"] + sorted(
-                    df_filtrado["fuente"].dropna().unique().tolist()
-                )
-                fuente_sel = st.selectbox(
-                    "Fuente",
-                    fuentes_disponibles,
-                    key=f"{key_prefix}_fuente"
-                )
-                if fuente_sel != "Todos":
-                    df_filtrado = df_filtrado[df_filtrado["fuente"] == fuente_sel]
-
         # ── BÚSQUEDA POR TEXTO ──
         with st.container():
             busqueda = st.text_input(
