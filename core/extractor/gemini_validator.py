@@ -1,359 +1,246 @@
+# core/extractores/gemini_validator.py
 """
-Validador con Google Gemini 1.5 Flash.
-Se activa automaticamente cuando la confianza del motor nativo es baja.
-
-Reglas de activacion:
-- confianza_nit < UMBRAL  → NIT dudoso
-- confianza_rs  < UMBRAL  → Razon social dudosa
-- gra == 0 pero tot > 0   → Montos incompletos
-- Configurado via GEMINI_API_KEY en st.secrets o variable de entorno
+Validador de datos con Gemini 1.5 Flash.
+Se activa cuando la confianza de extracción es baja (<85%).
 """
 
+import google.generativeai as genai
 import json
 import re
+import streamlit as st
 import os
 
-import streamlit as st
+# ═══════════════════════════════════════════════════════════════
+# CONFIGURACIÓN
+# ═══════════════════════════════════════════════════════════════
 
+UMBRAL_CONFIANZA = 0.85
+
+# Configurar API key desde Streamlit Secrets
 try:
-    import google.generativeai as genai
-    GENAI_DISPONIBLE = True
-except ImportError:
-    GENAI_DISPONIBLE = False
+    api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    if api_key:
+        genai.configure(api_key=api_key)
+except Exception:
+    pass
 
 
 # ═══════════════════════════════════════════════════════════════
-# CONFIGURACION
+# FUNCIONES DE UTILIDAD
 # ═══════════════════════════════════════════════════════════════
 
-UMBRAL_CONFIANZA = 0.80
+def _confianza_numerica(confianza_str: str) -> float:
+    """
+    Convierte etiqueta de confianza a número.
+    
+    Args:
+        confianza_str: "alta", "media", "baja", "ocr", "tabla", "cache"
+    
+    Returns:
+        float entre 0.0 y 1.0
+    """
+    mapa = {
+        "alta":  1.00,
+        "cache": 0.95,
+        "tabla": 0.88,
+        "media": 0.70,
+        "ocr":   0.65,
+        "baja":  0.40,
+    }
+    return mapa.get(str(confianza_str).lower().strip(), 0.50)
 
-_MAPA_CONFIANZA = {
-    "alta":  1.00,
-    "cache": 0.95,
-    "tabla": 0.88,
-    "media": 0.70,
-    "ocr":   0.65,
-    "baja":  0.40,
-}
 
-_PROMPT_CCF = """
-Eres un experto en documentos tributarios electronicos de El Salvador (DTE).
-Analiza el siguiente texto de un Comprobante de Credito Fiscal (CCF / DTE-03)
-o documento similar y extrae con precision los datos solicitados.
+def necesita_gemini(confianza_nit: str, confianza_rs: str,
+                    gra: float, tot: float) -> bool:
+    """
+    Decide si enviar a Gemini basado en:
+    - Confianza baja en NIT o razón social
+    - Monto gravado = 0 pero total > 0 (inconsistencia)
+    
+    Args:
+        confianza_nit: nivel de confianza del NIT extraído
+        confianza_rs: nivel de confianza de razón social
+        gra: monto gravado
+        tot: total
+    
+    Returns:
+        True si debe validar con Gemini
+    """
+    c_nit = _confianza_numerica(confianza_nit)
+    c_rs  = _confianza_numerica(confianza_rs)
 
-Reglas criticas:
-- NIT del EMISOR: 14 digitos continuos (puede venir como XXXX-XXXXXX-XXX-X)
-- Razon Social EMISOR: nombre legal de quien EMITE el documento
-- Monto Gravado: subtotal ANTES del IVA
-- IVA: debe ser exactamente el 13% del monto gravado
-- Total: Gravado + IVA + Exento
-- UUID / Codigo de Generacion: formato XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+    # Activar si confianza baja
+    if c_nit < UMBRAL_CONFIANZA:
+        return True
+    if c_rs < UMBRAL_CONFIANZA:
+        return True
+    
+    # Activar si hay inconsistencia lógica
+    if tot > 0 and gra == 0.0:
+        return True
+    
+    return False
 
-Datos ya extraidos por el motor nativo (pueden tener errores):
-{datos_previos}
 
-Texto completo del documento (primeros 3000 caracteres):
+# ═══════════════════════════════════════════════════════════════
+# VALIDACIÓN CON GEMINI
+# ═══════════════════════════════════════════════════════════════
+
+def validar_con_gemini(texto_pdf: str, datos_extraidos: dict,
+                       tipo_documento: str = "CCF") -> dict:
+    """
+    Envía texto del PDF a Gemini 1.5 Flash para validar/corregir datos.
+    
+    Args:
+        texto_pdf: texto extraído del PDF
+        datos_extraidos: dict con datos ya extraídos por el motor
+        tipo_documento: "CCF", "Factura", "Compra", etc.
+    
+    Returns:
+        dict con campos corregidos y confianza Gemini
+    """
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+
+        # Preparar prompt específico
+        prompt = f"""
+TAREA: Validar y extraer datos de un documento tributario de El Salvador (DTE).
+
+DOCUMENTO: {tipo_documento}
+TIPO: Dependiendo del contexto
+
+INSTRUCCIONES:
+1. Analiza el siguiente texto extraído de un {tipo_documento}.
+2. Valida la información ya extraída por el sistema.
+3. Corrige cualquier error evidente.
+4. Responde ÚNICAMENTE en JSON válido.
+5. NO uses markdown, NO uses bloques de código, devuelve JSON puro.
+
+DATOS YA EXTRAÍDOS (pueden estar incorrectos):
+{json.dumps(datos_extraidos, ensure_ascii=False, indent=2)}
+
+TEXTO DEL DOCUMENTO A ANALIZAR:
 ---
-{texto_pdf}
+{texto_pdf[:3000]}
 ---
 
-Responde UNICAMENTE en JSON valido, sin texto adicional, sin markdown:
+CAMPOS A VALIDAR:
+- nit_prov: NIT del emisor (14 dígitos: XXXX-XXXXXX-XXX-X o 14 números)
+- nom_prov: Razón social del emisor
+- fecha: Fecha de emisión (formato DD/MM/YYYY)
+- gra: Monto gravado (sin IVA)
+- iva: IVA (13% del gravado)
+- exe: Monto exento
+- tot: Total a pagar
+- gen: Código de generación (UUID formato)
+- ctrl: Número de control (DTE-XX-...)
+
+IMPORTANTE:
+- Si un campo es CLARAMENTE INCORRECTO, corrígelo
+- Si NO ESTÁS SEGURO, MANTÉN el valor original del sistema
+- IVA debe ser ~13% del monto gravado
+- Total = Gravado + IVA + Exento
+
+RESPUESTA (SOLO JSON, SIN MARKDOWN):
 {{
-  "nit_prov": "14 digitos sin guiones o vacio",
-  "nom_prov": "RAZON SOCIAL EN MAYUSCULAS",
+  "nit_prov": "...",
+  "nom_prov": "...",
   "fecha": "DD/MM/YYYY",
   "gra": 0.00,
   "iva": 0.00,
   "exe": 0.00,
   "tot": 0.00,
-  "gen": "UUID con guiones",
-  "ctrl": "DTE-XX-XXXXXX-XXXXXXXXXX",
-  "confianza_gemini": "alta o media o baja",
-  "observaciones": "breve descripcion de correcciones realizadas"
-}}
-"""
-
-_PROMPT_FACTURA = """
-Eres un experto en documentos tributarios electronicos de El Salvador.
-Analiza el texto de una Factura (DTE-01) o Factura de Exportacion (DTE-11).
-
-Datos previos del sistema:
-{datos_previos}
-
-Texto del documento:
----
-{texto_pdf}
----
-
-Responde SOLO en JSON valido:
-{{
-  "nit": "NIT receptor (14 digitos) o vacio si es consumidor final",
-  "nom": "NOMBRE RECEPTOR EN MAYUSCULAS",
-  "fecha": "DD/MM/YYYY",
-  "gra": 0.00,
-  "exe": 0.00,
-  "nos": 0.00,
-  "tot": 0.00,
   "gen": "UUID",
-  "ctrl": "DTE-01-...",
-  "exp_serv": 0.00,
-  "confianza_gemini": "alta o media o baja",
-  "observaciones": "breve descripcion"
+  "ctrl": "DTE-XX-...",
+  "confianza_gemini": "alta",
+  "observaciones": "..."
 }}
 """
 
-_PROMPT_RETENCION = """
-Eres experto en Comprobantes de Retencion (DTE-07) de El Salvador.
-La retencion es del 1% (uno por ciento) del monto sujeto.
+        response = model.generate_content(prompt)
+        texto_resp = response.text.strip()
 
-Datos previos:
-{datos_previos}
+        # Limpiar respuesta (eliminar markdown si viene)
+        texto_resp = re.sub(r'^```(?:json)?\s*', '', texto_resp)
+        texto_resp = re.sub(r'\s*```$', '', texto_resp)
 
-Texto:
+        # Parsear JSON
+        resultado = json.loads(texto_resp)
+        resultado["_fuente"] = "gemini-1.5-flash"
+        resultado["_exito"] = True
+        
+        return resultado
+
+    except json.JSONDecodeError as e:
+        return {
+            "error": f"JSON inválido de Gemini: {str(e)}",
+            "_fuente": "gemini-error",
+            "_exito": False
+        }
+    except Exception as e:
+        return {
+            "error": f"Error Gemini: {str(e)}",
+            "_fuente": "gemini-error",
+            "_exito": False
+        }
+
+
+def validar_retenciones_con_gemini(texto_pdf: str, datos: dict) -> dict:
+    """
+    Validación especializada para DTE-07 (retenciones 1%).
+    
+    Args:
+        texto_pdf: texto del PDF
+        datos: datos extraídos previamente
+    
+    Returns:
+        dict validado
+    """
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        
+        prompt = f"""
+TAREA: Validar datos de retención de IVA (DTE-07) de El Salvador.
+
+INSTRUCCIONES:
+1. Extrae del texto: NIT, monto sujeto, monto retenido, fecha, UUID
+2. IMPORTANTE: Retención debe ser 1% del monto sujeto
+3. Responde SOLO en JSON válido, SIN MARKDOWN
+
+DATOS ACTUALES:
+{json.dumps(datos, ensure_ascii=False, indent=2)}
+
+TEXTO:
 ---
-{texto_pdf}
+{texto_pdf[:2000]}
 ---
 
-Responde solo en JSON:
+RESPUESTA (JSON PURO):
 {{
-  "nit_contraparte": "NIT de quien recibe la retencion",
-  "nom_contraparte": "NOMBRE EN MAYUSCULAS",
+  "nit_contraparte": "...",
   "monto_sujeto": 0.00,
   "monto_retenido": 0.00,
   "fecha": "DD/MM/YYYY",
   "gen": "UUID",
-  "sello": "codigo sello recepcion",
-  "confianza_gemini": "alta o media o baja",
-  "observaciones": "descripcion"
+  "confianza_gemini": "alta",
+  "observaciones": "..."
 }}
 """
-
-_PROMPT_DTE14 = """
-Eres experto en Comprobantes de Sujeto Excluido (DTE-14) de El Salvador.
-La retencion de renta es del 10% del monto total.
-
-Datos previos:
-{datos_previos}
-
-Texto:
----
-{texto_pdf}
----
-
-Responde solo en JSON:
-{{
-  "nombre": "NOMBRE O RAZON SOCIAL EN MAYUSCULAS",
-  "documento": "NIT 14 digitos o DUI 9 digitos",
-  "fecha": "DD/MM/YYYY",
-  "codigo": "UUID del documento",
-  "sello": "sello de recepcion",
-  "monto": 0.00,
-  "retencion": 0.00,
-  "confianza_gemini": "alta o media o baja",
-  "observaciones": "descripcion"
-}}
-"""
-
-
-# ═══════════════════════════════════════════════════════════════
-# HELPERS INTERNOS
-# ═══════════════════════════════════════════════════════════════
-
-def _obtener_api_key() -> str:
-    """Obtiene la API key de Streamlit Secrets o variable de entorno."""
-    try:
-        return st.secrets.get("GEMINI_API_KEY", "")
-    except Exception:
-        return os.environ.get("GEMINI_API_KEY", "")
-
-
-def _confianza_numerica(confianza_str: str) -> float:
-    return _MAPA_CONFIANZA.get(str(confianza_str).lower().strip(), 0.50)
-
-
-def _limpiar_json_response(texto: str) -> str:
-    """Elimina bloques markdown y espacios del response de Gemini."""
-    texto = texto.strip()
-    texto = re.sub(r'^```(?:json)?\s*', '', texto)
-    texto = re.sub(r'\s*```$', '', texto)
-    return texto.strip()
-
-
-def _llamar_gemini(prompt: str) -> dict:
-    """Llamada centralizada a Gemini 1.5 Flash con manejo de errores."""
-    if not GENAI_DISPONIBLE:
-        return {"error": "google-generativeai no esta instalado."}
-
-    api_key = _obtener_api_key()
-    if not api_key:
-        return {"error": "GEMINI_API_KEY no configurado en secrets."}
-
-    try:
-        genai.configure(api_key=api_key)
-        model   = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content(prompt)
-        texto    = _limpiar_json_response(response.text)
-        resultado = json.loads(texto)
+        texto_resp = response.text.strip()
+        
+        # Limpiar markdown
+        texto_resp = re.sub(r'^```(?:json)?\s*', '', texto_resp)
+        texto_resp = re.sub(r'\s*```$', '', texto_resp)
+        
+        resultado = json.loads(texto_resp)
         resultado["_fuente"] = "gemini-1.5-flash"
+        resultado["_exito"] = True
         return resultado
-    except json.JSONDecodeError:
-        return {"error": "Gemini retorno JSON invalido.", "_fuente": "gemini-error"}
+
     except Exception as e:
-        return {"error": str(e), "_fuente": "gemini-error"}
-
-
-# ═══════════════════════════════════════════════════════════════
-# LOGICA DE ACTIVACION
-# ═══════════════════════════════════════════════════════════════
-
-def necesita_gemini(
-    confianza_nit: str = "media",
-    confianza_rs:  str = "media",
-    gra:   float = 0.0,
-    tot:   float = 0.0,
-    iva:   float = 0.0,
-) -> bool:
-    """
-    Decide si el documento necesita validacion adicional con Gemini.
-    Retorna True si alguna condicion de baja confianza se cumple.
-    """
-    c_nit = _confianza_numerica(confianza_nit)
-    c_rs  = _confianza_numerica(confianza_rs)
-
-    if c_nit < UMBRAL_CONFIANZA:
-        return True
-    if c_rs < UMBRAL_CONFIANZA:
-        return True
-    # Montos inconsistentes: hay total pero no gravado
-    if tot > 0 and gra == 0.0:
-        return True
-    # IVA no cuadra con el gravado
-    if gra > 0 and iva > 0:
-        diferencia = abs(round(gra * 0.13, 2) - round(iva, 2))
-        if diferencia > 2.00:
-            return True
-    return False
-
-
-def gemini_disponible() -> bool:
-    """Verifica si Gemini esta configurado y disponible."""
-    return GENAI_DISPONIBLE and bool(_obtener_api_key())
-
-
-# ═══════════════════════════════════════════════════════════════
-# VALIDADORES POR TIPO DE DOCUMENTO
-# ═══════════════════════════════════════════════════════════════
-
-def validar_con_gemini(
-    texto_pdf:      str,
-    datos_extraidos: dict,
-    tipo_documento: str = "CCF"
-) -> dict:
-    """
-    Valida y corrige datos de CCF (DTE-03) o Factura (DTE-01/11).
-
-    Args:
-        texto_pdf:       texto extraido del PDF
-        datos_extraidos: dict con datos del motor nativo
-        tipo_documento:  'CCF' | 'Factura' | 'Exportacion'
-
-    Returns:
-        dict con campos corregidos o {'error': ...}
-    """
-    datos_str = json.dumps(datos_extraidos, ensure_ascii=False, indent=2)
-    texto_corto = texto_pdf[:3000]
-
-    if tipo_documento in ("CCF", "03", "05", "06"):
-        prompt = _PROMPT_CCF.format(
-            datos_previos=datos_str,
-            texto_pdf=texto_corto
-        )
-    else:
-        prompt = _PROMPT_FACTURA.format(
-            datos_previos=datos_str,
-            texto_pdf=texto_corto
-        )
-
-    return _llamar_gemini(prompt)
-
-
-def validar_retenciones_con_gemini(
-    texto_pdf: str,
-    datos:     dict
-) -> dict:
-    """Validacion especializada para DTE-07 (retenciones 1%)."""
-    prompt = _PROMPT_RETENCION.format(
-        datos_previos=json.dumps(datos, ensure_ascii=False, indent=2),
-        texto_pdf=texto_pdf[:2500]
-    )
-    return _llamar_gemini(prompt)
-
-
-def validar_sujeto_excluido_con_gemini(
-    texto_pdf: str,
-    datos:     dict
-) -> dict:
-    """Validacion especializada para DTE-14 (sujetos excluidos)."""
-    prompt = _PROMPT_DTE14.format(
-        datos_previos=json.dumps(datos, ensure_ascii=False, indent=2),
-        texto_pdf=texto_pdf[:2500]
-    )
-    return _llamar_gemini(prompt)
-
-
-# ═══════════════════════════════════════════════════════════════
-# APLICADOR DE CORRECCIONES
-# ═══════════════════════════════════════════════════════════════
-
-def aplicar_correcciones_gemini(
-    res_original: dict,
-    res_gemini:   dict,
-    campos_numericos: list = None
-) -> dict:
-    """
-    Aplica las correcciones de Gemini al resultado original.
-    Solo sobreescribe campos vacios o con valor 0.
-    Agrega metadatos de Gemini al resultado.
-
-    Args:
-        res_original:     dict del motor nativo
-        res_gemini:       dict de Gemini
-        campos_numericos: lista de campos float a corregir
-
-    Returns:
-        dict combinado
-    """
-    if "error" in res_gemini:
-        return res_original
-
-    if campos_numericos is None:
-        campos_numericos = ["gra", "iva", "exe", "tot", "nos", "exp_serv",
-                            "monto_sujeto", "monto_retenido", "monto"]
-
-    resultado = dict(res_original)
-
-    # Campos texto: sobreescribir solo si el original esta vacio
-    for campo in ["nit_prov", "nom_prov", "nit", "nom", "nit_contraparte",
-                  "nom_contraparte", "nombre", "documento", "fecha",
-                  "gen", "ctrl", "sello", "codigo"]:
-        val_orig = str(resultado.get(campo, "")).strip()
-        val_gem  = str(res_gemini.get(campo, "")).strip()
-        if not val_orig and val_gem:
-            resultado[campo] = val_gem
-
-    # Campos numericos: sobreescribir solo si el original es 0
-    for campo in campos_numericos:
-        try:
-            val_orig = float(resultado.get(campo, 0) or 0)
-            val_gem  = float(res_gemini.get(campo, 0) or 0)
-            if val_orig == 0.0 and val_gem > 0:
-                resultado[campo] = round(val_gem, 2)
-        except (TypeError, ValueError):
-            pass
-
-    # Metadatos Gemini
-    resultado["confianza_gemini"] = res_gemini.get("confianza_gemini", "media")
-    resultado["gemini_obs"]       = res_gemini.get("observaciones", "")
-
-    return resultado
+        return {
+            "error": str(e),
+            "_fuente": "gemini-error",
+            "_exito": False
+        }
