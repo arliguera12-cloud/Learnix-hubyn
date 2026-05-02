@@ -1,7 +1,7 @@
 # app.py
 """
-Learnix Hub - Sistema de Extracción de DTE
-Aplicación principal con autenticación segura y gestor de clientes
+Learnix Hub - Sistema Inteligente de Extracción de DTE
+Versión 2.0 - Diseño oscuro minimalista
 """
 
 import streamlit as st
@@ -13,7 +13,7 @@ import importlib.util
 from datetime import datetime
 
 # ═══════════════════════════════════════════════════════════════
-# 1️⃣ CONFIGURACIÓN GLOBAL (UNA SOLA VEZ)
+# 1️⃣ CONFIGURACIÓN GLOBAL
 # ═══════════════════════════════════════════════════════════════
 
 st.set_page_config(
@@ -24,90 +24,248 @@ st.set_page_config(
 )
 
 # ═══════════════════════════════════════════════════════════════
-# 2️⃣ ESTILOS GLOBALES
+# 2️⃣ ESTILOS GLOBALES - DISEÑO ORIGINAL
 # ═══════════════════════════════════════════════════════════════
 
 estilo_custom = """
 <style>
-    [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-        background-color: #000000 !important;
+    /* ── COLORES GLOBALES ── */
+    :root {
+        --color-primary: #003057;
+        --color-secondary: #00407A;
+        --color-accent: #00E5FF;
+        --color-success: #00FF00;
+        --color-warning: #FFA500;
+        --color-error: #FF4444;
+        --color-bg-main: #000000;
+        --color-bg-secondary: #0A0A0A;
+        --color-bg-tertiary: #161616;
+        --color-text-primary: #F7F5EE;
+        --color-text-secondary: #888888;
+        --color-border: #333333;
     }
+
+    /* ── APLICACIÓN ── */
+    [data-testid="stAppViewContainer"] {
+        background-color: var(--color-bg-main) !important;
+    }
+
+    [data-testid="stHeader"] {
+        background-color: var(--color-bg-main) !important;
+        border-bottom: 1px solid var(--color-border) !important;
+    }
+
+    /* ── SIDEBAR ── */
     [data-testid="stSidebar"] {
-        background-color: #161616 !important;
-        border-right: 1px solid #333333 !important;
+        background-color: var(--color-bg-tertiary) !important;
+        border-right: 1px solid var(--color-border) !important;
     }
-    h1, h2, h3, h4, h5, h6, p, label, span, div {
-        color: #F7F5EE !important;
+
+    [data-testid="stSidebarContent"] {
+        background-color: var(--color-bg-tertiary) !important;
     }
+
+    /* ── TEXTO ── */
+    h1, h2, h3, h4, h5, h6 {
+        color: var(--color-text-primary) !important;
+        font-weight: 600 !important;
+    }
+
+    p, label, span, div {
+        color: var(--color-text-primary) !important;
+    }
+
+    /* ── BOTONES PRIMARIOS ── */
     div.stButton > button[kind="primary"],
-    div.stDownloadButton > button[kind="primary"] {
-        background-color: #003057 !important;
-        border: 1px solid #00407A !important;
-        border-radius: 6px;
-        transition: 0.3s;
-    }
-    div.stButton > button[kind="primary"] *,
-    div.stDownloadButton > button[kind="primary"] * {
-        color: #FFFFFF !important;
+    div.stDownloadButton > button[kind="primary"],
+    button[data-testid="baseButton-primary"] {
+        background-color: var(--color-primary) !important;
+        border: 1px solid var(--color-secondary) !important;
+        border-radius: 6px !important;
+        color: white !important;
         font-weight: bold !important;
+        transition: all 0.3s ease !important;
     }
+
     div.stButton > button[kind="primary"]:hover,
-    div.stDownloadButton > button[kind="primary"]:hover {
-        background-color: #00407A !important;
+    div.stDownloadButton > button[kind="primary"]:hover,
+    button[data-testid="baseButton-primary"]:hover {
+        background-color: var(--color-secondary) !important;
+        box-shadow: 0 0 15px rgba(0, 229, 255, 0.3) !important;
     }
+
+    /* ── BOTONES SECUNDARIOS ── */
     div.stButton > button[kind="secondary"] {
-        background-color: #2A2A2A !important;
-        border: 1px solid #555555 !important;
-        border-radius: 6px;
-    }
-    div.stButton > button[kind="secondary"] * {
-        color: #FFFFFF !important;
+        background-color: var(--color-bg-secondary) !important;
+        border: 1px solid var(--color-border) !important;
+        border-radius: 6px !important;
+        color: white !important;
         font-weight: bold !important;
     }
+
+    div.stButton > button[kind="secondary"]:hover {
+        background-color: var(--color-bg-tertiary) !important;
+        border-color: var(--color-accent) !important;
+    }
+
+    /* ── INPUTS ── */
+    input, textarea, select {
+        background-color: var(--color-bg-secondary) !important;
+        border: 1px solid var(--color-border) !important;
+        border-radius: 6px !important;
+        color: var(--color-text-primary) !important;
+        padding: 8px 12px !important;
+    }
+
+    input:focus, textarea:focus, select:focus {
+        border-color: var(--color-accent) !important;
+        box-shadow: 0 0 10px rgba(0, 229, 255, 0.2) !important;
+    }
+
+    /* ── TABS ── */
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
-        color: #4DA8DA !important;
-        border-bottom-color: #4DA8DA !important;
+        color: var(--color-accent) !important;
+        border-bottom-color: var(--color-accent) !important;
     }
+
     .stTabs [data-baseweb="tab-list"] button {
-        color: #777777 !important;
+        color: var(--color-text-secondary) !important;
     }
+
+    /* ── EXPANDER ── */
+    .streamlit-expanderHeader {
+        background-color: var(--color-bg-secondary) !important;
+        border: 1px solid var(--color-border) !important;
+        color: var(--color-text-primary) !important;
+    }
+
+    /* ── ALERTS ── */
+    .stAlert {
+        border-radius: 6px !important;
+    }
+
+    .stSuccess {
+        background-color: rgba(0, 255, 0, 0.1) !important;
+        border: 1px solid var(--color-success) !important;
+        color: var(--color-success) !important;
+    }
+
+    .stWarning {
+        background-color: rgba(255, 165, 0, 0.1) !important;
+        border: 1px solid var(--color-warning) !important;
+        color: var(--color-warning) !important;
+    }
+
+    .stError {
+        background-color: rgba(255, 68, 68, 0.1) !important;
+        border: 1px solid var(--color-error) !important;
+        color: var(--color-error) !important;
+    }
+
+    .stInfo {
+        background-color: rgba(0, 229, 255, 0.1) !important;
+        border: 1px solid var(--color-accent) !important;
+        color: var(--color-accent) !important;
+    }
+
+    /* ── DATAFRAME ── */
+    .streamlit-table {
+        background-color: var(--color-bg-secondary) !important;
+        border: 1px solid var(--color-border) !important;
+        border-radius: 6px !important;
+    }
+
+    /* ── DIVIDER ── */
+    .stHorizontalDivider {
+        background-color: var(--color-border) !important;
+        height: 1px !important;
+    }
+
+    /* ── CUSTOM CLASSES ── */
     .login-container {
         max-width: 500px;
         margin: 0 auto;
         padding: 40px;
         border-radius: 10px;
-        border: 1px solid #333333;
-        background-color: #0A0A0A;
+        border: 1px solid var(--color-border);
+        background-color: var(--color-bg-secondary);
     }
+
     .client-box {
-        padding: 10px;
+        padding: 12px;
         border-radius: 6px;
-        border-left: 4px solid #00E5FF;
-        background-color: #0a1628;
-        color: white;
+        border-left: 4px solid var(--color-accent);
+        background-color: rgba(0, 229, 255, 0.05);
+        color: var(--color-text-primary);
         margin-top: 10px;
+        border: 1px solid var(--color-border);
     }
+
     .client-box-active {
-        padding: 10px;
+        padding: 12px;
         border-radius: 6px;
-        border-left: 4px solid #00FF00;
-        background-color: #0a2810;
-        color: white;
+        border-left: 4px solid var(--color-success);
+        background-color: rgba(0, 255, 0, 0.05);
+        color: var(--color-text-primary);
         margin-top: 10px;
+        border: 1px solid var(--color-success);
     }
+
     .module-card {
-        padding: 15px;
-        border: 1px solid #333;
+        padding: 20px;
+        border: 1px solid var(--color-border);
         border-radius: 8px;
-        background: #0a0a0a;
+        background-color: var(--color-bg-secondary);
         text-align: center;
+        transition: all 0.3s ease;
+    }
+
+    .module-card:hover {
+        border-color: var(--color-accent);
+        box-shadow: 0 0 15px rgba(0, 229, 255, 0.1);
+    }
+
+    .logo-title {
+        font-family: 'Courier New', monospace;
+        color: var(--color-accent);
+        letter-spacing: 3px;
+        font-size: 2.5rem;
+        font-weight: bold;
+        text-align: center;
+        margin-bottom: 10px;
+    }
+
+    .subtitle {
+        text-align: center;
+        color: var(--color-text-secondary);
+        font-size: 0.95rem;
+        margin-bottom: 30px;
+    }
+
+    /* ── SCROLLBAR ── */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: var(--color-bg-secondary);
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: var(--color-border);
+        border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: var(--color-accent);
     }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 3️⃣ GESTOR DE BASE DE DATOS Y SEGURIDAD
+# 3️⃣ CONFIGURACIÓN DE CARPETAS Y ARCHIVOS
 # ═══════════════════════════════════════════════════════════════
 
 DATA_FOLDER = "data"
@@ -115,16 +273,20 @@ if not os.path.exists(DATA_FOLDER):
     os.makedirs(DATA_FOLDER)
 
 
+# ═══════════════════════════════════════════════════════════════
+# 4️⃣ FUNCIONES DE SEGURIDAD Y BASE DE DATOS
+# ═══════════════════════════════════════════════════════════════
+
 def hash_password(password):
-    """Encripta la contraseña por seguridad."""
+    """Encripta contraseña con SHA256."""
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 
 def gestionar_usuarios(accion, username=None, password=None):
-    """Maneja la base de datos JSON de usuarios."""
+    """Gestiona base de datos JSON de usuarios."""
     archivo = f"{DATA_FOLDER}/usuarios.json"
 
-    # Si el archivo no existe, lo crea vacío
+    # Crear archivo si no existe
     if not os.path.exists(archivo):
         with open(archivo, "w", encoding="utf-8") as f:
             json.dump({}, f)
@@ -137,7 +299,7 @@ def gestionar_usuarios(accion, username=None, password=None):
 
     if accion == "registro":
         if username in usuarios:
-            return False  # El usuario ya existe
+            return False
 
         usuarios[username] = {
             "password": hash_password(password),
@@ -156,7 +318,7 @@ def gestionar_usuarios(accion, username=None, password=None):
 
 
 def cargar_clientes_db() -> list:
-    """Carga la lista de clientes desde el archivo del usuario."""
+    """Carga clientes del usuario actual."""
     archivo = f"{DATA_FOLDER}/usuarios.json"
     try:
         if not os.path.exists(archivo):
@@ -170,7 +332,7 @@ def cargar_clientes_db() -> list:
 
 
 def guardar_clientes_db(lista_clientes: list) -> bool:
-    """Guarda la lista de clientes del usuario activo."""
+    """Guarda clientes del usuario actual."""
     archivo = f"{DATA_FOLDER}/usuarios.json"
     try:
         with open(archivo, "r", encoding="utf-8") as f:
@@ -187,7 +349,7 @@ def guardar_clientes_db(lista_clientes: list) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 4️⃣ CONTROL DE SESIÓN
+# 5️⃣ INICIALIZACIÓN DE SESIÓN
 # ═══════════════════════════════════════════════════════════════
 
 if "autenticado" not in st.session_state:
@@ -201,146 +363,130 @@ if "cliente_activo" not in st.session_state:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 5️⃣ UI DE LOGIN Y REGISTRO
+# 6️⃣ PANTALLA DE LOGIN Y REGISTRO
 # ═══════════════════════════════════════════════════════════════
 
-def mostrar_registro_login():
-    """Renderiza la pantalla de login/registro."""
+def mostrar_login_registro():
+    """Renderiza pantalla de autenticación."""
     col_empty1, col_form, col_empty2 = st.columns([1, 2, 1])
 
     with col_form:
+        st.markdown('<div class="logo-title">YN</div>', unsafe_allow_html=True)
+        st.markdown('<div class="subtitle">Learnix Hub</div>', unsafe_allow_html=True)
         st.markdown(
-            "<h1 style='text-align: center; color: #00E5FF; font-family:Courier New,monospace;'>YN</h1>",
-            unsafe_allow_html=True
-        )
-        st.markdown(
-            "<h2 style='text-align: center;'>Learnix Hub</h2>",
-            unsafe_allow_html=True
-        )
-        st.markdown(
-            "<p style='text-align: center; color: #888888;'>Plataforma Inteligente de Auditoría Tributaria</p>",
+            '<p style="text-align:center; color:#888888;">Plataforma de Auditoría Tributaria</p>',
             unsafe_allow_html=True
         )
         st.write("")
 
-        # Sistema de Pestañas
-        tab_login, tab_reg = st.tabs(["🔑 Iniciar Sesión", "📝 Crear Cuenta"])
+        # Pestañas de Login/Registro
+        tab_login, tab_registro = st.tabs(["🔐 Iniciar Sesión", "📝 Crear Cuenta"])
 
-        # ── TAB LOGIN ──
+        # ── PESTAÑA: LOGIN ──
         with tab_login:
-            with st.form("login_form"):
-                user = st.text_input(
-                    "👤 Usuario / Email",
-                    placeholder="ingresa tu usuario",
+            with st.form("form_login"):
+                usuario = st.text_input(
+                    "👤 Usuario",
+                    placeholder="Ingresa tu usuario",
                     key="login_user"
                 )
-                pw = st.text_input(
-                    "🔐 Contraseña",
+                contraseña = st.text_input(
+                    "🔑 Contraseña",
                     type="password",
-                    placeholder="ingresa tu contraseña",
+                    placeholder="Ingresa tu contraseña",
                     key="login_pw"
                 )
-                submit_login = st.form_submit_button(
-                    "🔓 Entrar al Hub",
-                    type="primary",
-                    use_container_width=True
-                )
 
-                if submit_login:
-                    if not user or not pw:
-                        st.error("⚠️ Por favor completa todos los campos.")
-                    elif gestionar_usuarios("login", user, pw):
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    btn_login = st.form_submit_button(
+                        "🔓 Entrar",
+                        type="primary",
+                        use_container_width=True
+                    )
+
+                if btn_login:
+                    if not usuario or not contraseña:
+                        st.error("⚠️ Completa todos los campos")
+                    elif gestionar_usuarios("login", usuario, contraseña):
                         st.session_state["autenticado"] = True
-                        st.session_state["usuario_actual"] = user
-                        st.success("✅ Acceso concedido. Iniciando módulos...")
+                        st.session_state["usuario_actual"] = usuario
+                        st.success("✅ Acceso concedido")
                         time.sleep(1)
                         st.rerun()
                     else:
-                        st.error("❌ Usuario o contraseña incorrectos.")
+                        st.error("❌ Usuario o contraseña incorrectos")
 
-        # ── TAB REGISTRO ──
-        with tab_reg:
-            with st.form("reg_form"):
-                new_user = st.text_input(
-                    "👤 Elige un nombre de usuario",
-                    placeholder="mi_usuario",
-                    key="reg_user"
-                )
-                new_pw = st.text_input(
-                    "🔐 Crea una contraseña segura",
-                    type="password",
-                    placeholder="min. 6 caracteres",
-                    key="reg_pw"
-                )
-                confirm_pw = st.text_input(
-                    "🔐 Confirma tu contraseña",
-                    type="password",
-                    placeholder="repite la contraseña",
-                    key="reg_pw_confirm"
-                )
-                submit_reg = st.form_submit_button(
-                    "✅ Registrarme",
-                    type="primary",
-                    use_container_width=True
-                )
-
-                if submit_reg:
-                    if not new_user or not new_pw:
-                        st.warning("⚠️ Por favor, completa todos los campos.")
-                    elif len(new_pw) < 6:
-                        st.warning("⚠️ La contraseña debe tener al menos 6 caracteres.")
-                    elif new_pw != confirm_pw:
-                        st.warning("⚠️ Las contraseñas no coinciden.")
-                    elif gestionar_usuarios("registro", new_user, new_pw):
-                        st.success("✅ ¡Cuenta creada con éxito! Ve a 'Iniciar Sesión' para entrar.")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("❌ Este usuario ya existe. Por favor elige otro.")
-
-        st.divider()
-
-        # ── INFO DE PRUEBA ──
-        col_info1, col_info2 = st.columns(2)
-        with col_info1:
+            # Usuarios de prueba
+            st.divider()
             st.info(
                 "**👤 Usuarios de Prueba:**\n\n"
-                "usuario: `admin`\n"
-                "contraseña: `admin123`\n\n"
-                "usuario: `contador`\n"
-                "contraseña: `contador123`"
+                "usuario: `admin` | contraseña: `admin123`\n\n"
+                "usuario: `contador` | contraseña: `contador123`"
             )
-        with col_info2:
-            st.info(
-                "**✨ Características:**\n\n"
-                "✅ Extracción PDF + OCR\n"
-                "✅ Importación JSON\n"
-                "✅ Validación Gemini 1.5\n"
-                "✅ Gestor de Clientes"
-            )
+
+        # ── PESTAÑA: REGISTRO ──
+        with tab_registro:
+            with st.form("form_registro"):
+                nuevo_usuario = st.text_input(
+                    "👤 Nuevo usuario",
+                    placeholder="Elige un nombre de usuario",
+                    key="reg_user"
+                )
+                nueva_pw = st.text_input(
+                    "🔑 Contraseña",
+                    type="password",
+                    placeholder="Mínimo 6 caracteres",
+                    key="reg_pw"
+                )
+                confirmar_pw = st.text_input(
+                    "🔑 Confirmar contraseña",
+                    type="password",
+                    placeholder="Repite tu contraseña",
+                    key="reg_pw_confirm"
+                )
+
+                btn_registro = st.form_submit_button(
+                    "✅ Registrarse",
+                    type="primary",
+                    use_container_width=True
+                )
+
+                if btn_registro:
+                    if not nuevo_usuario or not nueva_pw:
+                        st.warning("⚠️ Completa todos los campos")
+                    elif len(nueva_pw) < 6:
+                        st.warning("⚠️ Contraseña mínimo 6 caracteres")
+                    elif nueva_pw != confirmar_pw:
+                        st.warning("⚠️ Las contraseñas no coinciden")
+                    elif gestionar_usuarios("registro", nuevo_usuario, nueva_pw):
+                        st.success("✅ Cuenta creada. Inicia sesión ahora.")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Este usuario ya existe")
+
+            st.divider()
+            st.info("✨ **Características:**\n✅ Extracción PDF\n✅ Importación JSON\n✅ Validación IA\n✅ Gestor de Clientes")
 
 
 # ═══════════════════════════════════════════════════════════════
-# 6️⃣ DASHBOARD PRINCIPAL
+# 7️⃣ DASHBOARD PRINCIPAL
 # ═══════════════════════════════════════════════════════════════
 
 def mostrar_dashboard():
-    """Renderiza el dashboard con selector de clientes."""
-    st.markdown(
-        "<h2 style='font-family:Courier New,monospace; color:#00E5FF; "
-        "letter-spacing:2px; margin-bottom:0;'>YN</h2>",
-        unsafe_allow_html=True
-    )
-    st.title("📊 Dashboard Principal")
+    """Renderiza dashboard principal."""
+    st.markdown('<div class="logo-title">YN</div>', unsafe_allow_html=True)
+    st.title("📊 Dashboard")
 
     # ── HEADER ──
-    col_user1, col_user2, col_user3 = st.columns([2, 1, 1])
-    with col_user1:
-        st.markdown(f"### 👤 **{st.session_state['usuario_actual']}**")
-    with col_user2:
+    col_h1, col_h2, col_h3 = st.columns([2, 1, 1])
+    with col_h1:
+        st.markdown(f"**👤 {st.session_state['usuario_actual']}**")
+    with col_h2:
         st.caption(f"📅 {datetime.now().strftime('%d/%m/%Y')}")
-    with col_user3:
-        if st.button("🚪 Cerrar Sesión", use_container_width=True, key="btn_logout"):
+    with col_h3:
+        if st.button("🚪 Salir", use_container_width=True, key="btn_logout"):
             st.session_state["autenticado"] = False
             st.session_state["usuario_actual"] = None
             st.session_state["cliente_activo"] = None
@@ -348,14 +494,11 @@ def mostrar_dashboard():
 
     st.divider()
 
-    # ══════════════════════════════════════════
-    # SECCIÓN: CLIENTE ACTIVO
-    # ══════════════════════════════════════════
-    col_izq, col_der = st.columns([1, 1])
+    # ── SECCIÓN: GESTIÓN DE CLIENTES ──
+    col_left, col_right = st.columns([1, 1])
 
-    # ── COLUMNA IZQUIERDA: SELECCIONAR CLIENTE ──
-    with col_izq:
-        st.markdown("### 🏢 Seleccionar Cliente Activo")
+    with col_left:
+        st.markdown("### 🏢 Clientes Registrados")
 
         clientes = cargar_clientes_db()
 
@@ -364,10 +507,11 @@ def mostrar_dashboard():
                 f"{c.get('nombre', 'N/A')} — {c.get('nit', 'N/A')}": c
                 for c in clientes
             }
+
             seleccion = st.selectbox(
-                "Cliente registrado",
+                "Selecciona un cliente",
                 list(opciones.keys()),
-                key="sel_cliente_activo"
+                key="sel_cliente"
             )
 
             cliente_obj = opciones[seleccion]
@@ -380,132 +524,111 @@ def mostrar_dashboard():
                 st.caption(f"**Email:** {cliente_obj.get('email', 'N/A')}")
                 st.caption(f"**Tel:** {cliente_obj.get('telefono', 'N/A')}")
 
-            if st.button(
-                "✅ Activar este Cliente",
-                type="primary",
-                use_container_width=True,
-                key="btn_activar"
-            ):
+            if st.button("✅ Activar Cliente", type="primary", use_container_width=True):
                 st.session_state["cliente_activo"] = cliente_obj
-                st.success(f"✅ Cliente activo: **{cliente_obj.get('nombre')}**")
-                st.info("Ahora puedes acceder a los extractores desde el menú lateral.")
-                time.sleep(1)
+                st.success(f"✅ Activado: {cliente_obj.get('nombre')}")
+                time.sleep(0.5)
                 st.rerun()
 
-            # ── CLIENTE ACTIVO ACTUAL ──
+            # Mostrar cliente activo
             if st.session_state.get("cliente_activo"):
                 ca = st.session_state["cliente_activo"]
                 st.markdown(
                     f"""
-                    <div class='client-box-active'>
-                        <strong style='color:#00FF00;'>✅ ACTIVO:</strong><br>
-                        <span>{ca.get('nombre', 'N/A')}</span><br>
-                        <small>NIT: {ca.get('nit', 'N/A')}</small>
+                    <div class="client-box-active">
+                        <strong>✅ CLIENTE ACTIVO</strong><br>
+                        {ca.get('nombre')}<br>
+                        <small>NIT: {ca.get('nit')}</small>
                     </div>
                     """,
                     unsafe_allow_html=True
                 )
         else:
-            st.warning("⚠️ No tienes clientes registrados aún.")
-            st.info("Agrega tu primer cliente en la sección de la derecha →")
+            st.info("📁 No hay clientes. Crea uno a la derecha →")
 
-    # ── COLUMNA DERECHA: AGREGAR CLIENTE ──
-    with col_der:
-        st.markdown("### ➕ Agregar Nuevo Cliente")
+    with col_right:
+        st.markdown("### ➕ Nuevo Cliente")
 
-        with st.form("form_nuevo_cliente", clear_on_submit=True):
-            nombre_c = st.text_input(
-                "Nombre / Razón Social",
-                placeholder="Empresa ABC S.A."
-            )
-            nit_c = st.text_input(
-                "NIT",
-                placeholder="0614-123456-789-0"
-            )
-            dui_c = st.text_input(
-                "DUI (opcional)",
-                placeholder="12345678-9"
-            )
-            email_c = st.text_input(
-                "Email",
-                placeholder="empresa@correo.com"
-            )
-            telefono_c = st.text_input(
-                "Teléfono",
-                placeholder="+503 2234-5678"
-            )
+        with st.form("form_cliente"):
+            nombre = st.text_input("Nombre/Razón Social", placeholder="Empresa ABC")
+            nit = st.text_input("NIT", placeholder="0614-123456-789-0")
+            dui = st.text_input("DUI (opcional)", placeholder="12345678-9")
+            email = st.text_input("Email", placeholder="empresa@correo.com")
+            telefono = st.text_input("Teléfono", placeholder="+503 2234-5678")
 
-            if st.form_submit_button(
-                "➕ Agregar Cliente",
-                type="primary",
-                use_container_width=True
-            ):
-                if not nombre_c or not nit_c:
-                    st.error("⚠️ Nombre y NIT son obligatorios.")
+            if st.form_submit_button("➕ Agregar", type="primary", use_container_width=True):
+                if not nombre or not nit:
+                    st.error("⚠️ Nombre y NIT son obligatorios")
                 else:
                     nuevo = {
-                        "nombre": nombre_c.strip(),
-                        "nit": nit_c.strip(),
-                        "dui": dui_c.strip(),
-                        "email": email_c.strip(),
-                        "telefono": telefono_c.strip()
+                        "nombre": nombre.strip(),
+                        "nit": nit.strip(),
+                        "dui": dui.strip(),
+                        "email": email.strip(),
+                        "telefono": telefono.strip()
                     }
                     clientes_actualizados = clientes + [nuevo]
                     if guardar_clientes_db(clientes_actualizados):
-                        st.success(f"✅ Cliente **{nombre_c}** agregado.")
-                        time.sleep(1)
+                        st.success(f"✅ {nombre} agregado")
+                        time.sleep(0.5)
                         st.rerun()
                     else:
-                        st.error("❌ Error al guardar el cliente.")
+                        st.error("❌ Error al guardar")
 
     st.divider()
 
-    # ══════════════════════════════════════════
-    # SECCIÓN: MÓDULOS DISPONIBLES
-    # ══════════════════════════════════════════
+    # ── SECCIÓN: MÓDULOS ──
     st.markdown("### 📈 Módulos Disponibles")
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.markdown(
-            """<div class='module-card'>
+            """
+            <div class="module-card">
                 <h4>📈 Ventas</h4>
                 <p style='color:#888; font-size:12px;'>DTE 01, 03, 05, 06, 11</p>
-            </div>""",
+            </div>
+            """,
             unsafe_allow_html=True
         )
 
     with col2:
         st.markdown(
-            """<div class='module-card'>
+            """
+            <div class="module-card">
                 <h4>🛒 Compras</h4>
                 <p style='color:#888; font-size:12px;'>DTE 03, 05, 06, 07</p>
-            </div>""",
+            </div>
+            """,
             unsafe_allow_html=True
         )
 
     with col3:
         st.markdown(
-            """<div class='module-card'>
+            """
+            <div class="module-card">
                 <h4>✂️ Retenciones</h4>
                 <p style='color:#888; font-size:12px;'>DTE-07 (1%)</p>
-            </div>""",
+            </div>
+            """,
             unsafe_allow_html=True
         )
 
     with col4:
         st.markdown(
-            """<div class='module-card'>
+            """
+            <div class="module-card">
                 <h4>⚖️ Suj. Excluidos</h4>
                 <p style='color:#888; font-size:12px;'>DTE-14 (10%)</p>
-            </div>""",
+            </div>
+            """,
             unsafe_allow_html=True
         )
 
     st.divider()
 
-    # ── FOOTER ──
+    # Footer
     col_f1, col_f2, col_f3 = st.columns(3)
     with col_f1:
         st.caption(f"👤 {st.session_state['usuario_actual']}")
@@ -516,105 +639,97 @@ def mostrar_dashboard():
 
 
 # ═══════════════════════════════════════════════════════════════
-# 7️⃣ CARGADOR DE PÁGINAS
+# 8️⃣ CARGADOR DE PÁGINAS DINÁMICAS
 # ═══════════════════════════════════════════════════════════════
 
-def cargar_pagina(ruta_archivo: str, nombre_modulo: str):
+def cargar_pagina(ruta: str, nombre: str):
     """Carga una página dinámicamente."""
     try:
-        if not os.path.exists(ruta_archivo):
-            st.error(f"❌ Archivo no encontrado: {ruta_archivo}")
-            st.info("✅ Asegúrate de que el archivo existe en la carpeta `pages/`")
+        if not os.path.exists(ruta):
+            st.error(f"❌ Archivo no encontrado: {ruta}")
             return
 
-        spec = importlib.util.spec_from_file_location(nombre_modulo, ruta_archivo)
+        spec = importlib.util.spec_from_file_location(nombre, ruta)
         modulo = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(modulo)
 
     except Exception as e:
-        st.error(f"❌ Error al cargar {nombre_modulo}: {str(e)}")
-        st.info(f"📝 Detalles técnicos: {type(e).__name__}")
+        st.error(f"❌ Error: {str(e)}")
 
 
 # ═══════════════════════════════════════════════════════════════
-# 8️⃣ NAVEGACIÓN LATERAL
+# 9️⃣ NAVEGACIÓN LATERAL
 # ═══════════════════════════════════════════════════════════════
 
 def renderizar_sidebar():
-    """Renderiza el menú lateral."""
+    """Renderiza menú lateral."""
     with st.sidebar:
         st.title("📍 NAVEGACIÓN")
         st.divider()
 
-        # ── SECCIÓN: INICIO ──
+        # Dashboard
         st.markdown("**🚀 Inicio**")
-        if st.button("🏠 Dashboard Hub", use_container_width=True, key="btn_dashboard"):
+        if st.button("🏠 Dashboard", use_container_width=True, key="btn_dash"):
             st.session_state["pagina_actual"] = "dashboard"
             st.rerun()
 
         st.divider()
 
-        # ── SECCIÓN: MÓDULOS ──
-        st.markdown("**⚙️ Módulos de Procesamiento**")
+        # Módulos
+        st.markdown("**⚙️ Módulos**")
 
         if st.session_state.get("cliente_activo"):
-            if st.button("📈 Extractor DTE Ventas", use_container_width=True, key="btn_ventas"):
+            if st.button("📈 Extractor Ventas", use_container_width=True, key="btn_v"):
                 st.session_state["pagina_actual"] = "ventas"
                 st.rerun()
 
-            if st.button("🛒 Extractor DTE Compras", use_container_width=True, key="btn_compras"):
+            if st.button("🛒 Extractor Compras", use_container_width=True, key="btn_c"):
                 st.session_state["pagina_actual"] = "compras"
                 st.rerun()
 
-            if st.button("✂️ Extractor DTE Retenciones", use_container_width=True, key="btn_retenciones"):
+            if st.button("✂️ Extractor Retenciones", use_container_width=True, key="btn_r"):
                 st.session_state["pagina_actual"] = "retenciones"
                 st.rerun()
 
-            if st.button("⚖️ Extractor DTE Sujetos Excluidos", use_container_width=True, key="btn_sujetos"):
+            if st.button("⚖️ Sujetos Excluidos", use_container_width=True, key="btn_s"):
                 st.session_state["pagina_actual"] = "sujetos"
                 st.rerun()
         else:
-            st.warning("⚠️ Selecciona un cliente primero.")
+            st.info("⚠️ Selecciona un cliente primero")
 
         st.divider()
 
-        # ── SECCIÓN: ADMINISTRACIÓN ──
+        # Admin
         st.markdown("**🗄️ Administración**")
 
-        if st.button("👥 Directorio Clientes", use_container_width=True, key="btn_clientes"):
+        if st.button("👥 Clientes", use_container_width=True, key="btn_clientes"):
             st.session_state["pagina_actual"] = "clientes"
             st.rerun()
 
-        if st.button("🏢 Directorio Proveedores", use_container_width=True, key="btn_proveedores"):
+        if st.button("🏢 Proveedores", use_container_width=True, key="btn_prov"):
             st.session_state["pagina_actual"] = "proveedores"
             st.rerun()
 
         st.divider()
 
-        # ── INFO DEL USUARIO ──
-        st.markdown(f"**👤 Usuario:** `{st.session_state['usuario_actual']}`")
-
+        # Info
+        st.markdown(f"**👤** {st.session_state['usuario_actual']}")
         if st.session_state.get("cliente_activo"):
             ca = st.session_state["cliente_activo"]
-            st.markdown(
-                f"**🏢 Cliente:**\n`{ca.get('nombre', 'N/A')}`"
-            )
+            st.markdown(f"**🏢** {ca.get('nombre', 'N/A')}")
 
         st.caption(f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
 
 # ═══════════════════════════════════════════════════════════════
-# 9️⃣ ENRUTADOR PRINCIPAL
+# 🔟 ENRUTADOR PRINCIPAL
 # ═══════════════════════════════════════════════════════════════
 
 if not st.session_state["autenticado"]:
-    # MOSTRAR LOGIN
-    mostrar_registro_login()
+    mostrar_login_registro()
 else:
-    # MOSTRAR SIDEBAR
     renderizar_sidebar()
 
-    # ── ENRUTAR PÁGINAS ──
     pagina = st.session_state.get("pagina_actual", "dashboard")
 
     if pagina == "dashboard":
@@ -639,4 +754,4 @@ else:
         cargar_pagina("pages/6_Directorio_Proveedores.py", "proveedores")
 
     else:
-        st.warning("⚠️ Página no encontrada.")
+        st.warning("⚠️ Página no encontrada")
