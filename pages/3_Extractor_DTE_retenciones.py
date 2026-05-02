@@ -1,24 +1,49 @@
+# pages/3_Extractor_DTE_Retenciones.py
+"""
+EXTRACTOR DTE RETENCIONES v2.0 (DTE-07)
+Soporta: PDF (Nativo + OCR) y JSON (Ministerio Hacienda)
+Especializado en retenciones de IVA (1%)
+"""
+
 import streamlit as st
-import pdfplumber
 import pandas as pd
-import re
-import time
+import pdfplumber
 import pytesseract
 import json
-import os
+import re
+import time
 import gc
 import platform
 from io import BytesIO
+from datetime import datetime
 
 # ═══════════════════════════════════════════════════════════════
-# 🔐 VERIFICACIÓN DE SEGURIDAD
+# IMPORTS DE CORE
 # ═══════════════════════════════════════════════════════════════
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.extractores import (
+    necesita_gemini,
+    validar_retenciones_con_gemini,
+    render_panel_filtros,
+    parsear_json_dte,
+    limpiar_monto,
+    extraer_y_formatear_fecha,
+    formatear_uuid,
+)
+
+# ═══════════════════════════════════════════════════════════════
+# VERIFICACIÓN DE SEGURIDAD
+# ═══════════════════════════════════════════════════════════════
+
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
     st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
     st.stop()
 
 if "cliente_activo" not in st.session_state or not st.session_state.cliente_activo:
-    st.warning("⚠️ Debes seleccionar un Cliente Activo antes de extraer Retenciones.")
+    st.warning("⚠️ Debes seleccionar un Cliente Activo en el Dashboard antes de extraer Retenciones.")
     st.stop()
 
 if not isinstance(st.session_state.cliente_activo, dict):
@@ -28,16 +53,22 @@ if not isinstance(st.session_state.cliente_activo, dict):
 cliente = st.session_state.cliente_activo
 
 # ═══════════════════════════════════════════════════════════════
-# ⚙️ CONFIGURACIÓN TÉCNICA
+# CONFIGURACIÓN TÉCNICA
 # ═══════════════════════════════════════════════════════════════
+
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-# st.set_page_config() ya ejecutado en app.py
+st.set_page_config(
+    page_title="Extractor DTE Retenciones",
+    layout="wide",
+    page_icon="✂️"
+)
 
 # ═══════════════════════════════════════════════════════════════
-# 🎨 ESTILOS GLOBALES
+# ESTILOS GLOBALES
 # ═══════════════════════════════════════════════════════════════
+
 estilo_custom = """
 <style>
     [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
@@ -45,17 +76,18 @@ estilo_custom = """
     }
     [data-testid="stSidebar"] {
         background-color: #161616 !important;
-        border-right: 1px solid #333333;
+        border-right: 1px solid #333333 !important;
     }
-    h1, h2, h3, h4, h5, h6, p, label, span {
+    h1, h2, h3, h4, h5, h6, p, label, span, div {
         color: #F7F5EE !important;
     }
-    [data-testid="stDataFrame"] span { color: inherit !important; }
-
+    [data-testid="stDataFrame"] span {
+        color: inherit !important;
+    }
     div.stButton > button[kind="primary"],
     div.stDownloadButton > button[kind="primary"] {
-        background-color: #8C52FF !important;
-        border: 1px solid #5E17EB !important;
+        background-color: #8B6D47 !important;
+        border: 1px solid #B39A7A !important;
         border-radius: 6px;
         transition: 0.3s;
     }
@@ -66,7 +98,7 @@ estilo_custom = """
     }
     div.stButton > button[kind="primary"]:hover,
     div.stDownloadButton > button[kind="primary"]:hover {
-        background-color: #5E17EB !important;
+        background-color: #9A7C56 !important;
     }
     div.stButton > button[kind="secondary"] {
         background-color: #2A2A2A !important;
@@ -77,12 +109,15 @@ estilo_custom = """
         color: #FFFFFF !important;
         font-weight: bold !important;
     }
-    div[data-testid="stAlert"] {
-        min-height: 80px;
-        display: flex;
-        align-items: center;
+    .alerta-activo {
+        padding: 10px;
+        border-radius: 6px;
+        border-left: 4px solid #8B6D47;
+        background-color: #111111;
+        color: white;
+        margin-bottom: 15px;
+        font-size: 14px;
     }
-    .stAlert * { color: inherit !important; }
     .scroll-list {
         max-height: 150px;
         overflow-y: auto;
@@ -92,793 +127,576 @@ estilo_custom = """
         border: 1px solid #333;
         font-family: monospace;
         font-size: 13px;
-        color: #CB6CE6;
+        color: #66ff66;
     }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
-        color: #8C52FF !important;
-        border-bottom-color: #8C52FF !important;
+        color: #8B6D47 !important;
+        border-bottom-color: #8B6D47 !important;
     }
-    .stTabs [data-baseweb="tab-list"] button { color: #777777 !important; }
-    [data-testid="stExpander"] {
-        background-color: #161616 !important;
-        border: 1px solid #444444 !important;
-        border-radius: 6px;
-    }
-    .alerta-activo {
-        padding: 10px;
-        border-radius: 6px;
-        border-left: 4px solid #8C52FF;
-        background-color: #111111;
-        color: white;
-        margin-bottom: 15px;
-        font-size: 14px;
+    .stTabs [data-baseweb="tab-list"] button {
+        color: #777777 !important;
     }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 📋 CONSTANTES
-# ═══════════════════════════════════════════════════════════════
-ARCHIVO_PROVEEDORES = "data/proveedores.json"
-CONTRAPARTE_NUEVA = "CONTRAPARTE NUEVA"
-
-# ═══════════════════════════════════════════════════════════════
-# 💾 BASE DE DATOS DE PROVEEDORES
+# FUNCIONES DE EXTRACCIÓN PDF
 # ═══════════════════════════════════════════════════════════════
 
-def cargar_proveedores_json():
-    """Carga el directorio de proveedores con migración automática."""
-    if not os.path.exists(ARCHIVO_PROVEEDORES):
-        return {}
-    try:
-        with open(ARCHIVO_PROVEEDORES, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        for k, v in data.items():
-            if isinstance(v, str):
-                data[k] = {"nombre": v, "nrc": ""}
-        return data
-    except Exception:
-        return {}
-
-
-def obtener_nombre_proveedor(prov_db, nit):
-    """Extrae el nombre de forma segura del directorio."""
-    entrada = prov_db.get(nit)
-    if entrada is None:
-        return None
-    if isinstance(entrada, dict):
-        return entrada.get("nombre", "")
-    if isinstance(entrada, str):
-        return entrada
-    return None
-
-
-def guardar_proveedor_rapido(nit, nombre):
-    """Guarda en formato dict correcto."""
-    if not os.path.exists("data"):
-        os.makedirs("data")
-    db = cargar_proveedores_json()
-    nrc_existente = db.get(nit, {}).get("nrc", "") if isinstance(db.get(nit), dict) else ""
-    db[nit] = {"nombre": nombre.strip().upper(), "nrc": nrc_existente}
-    try:
-        with open(ARCHIVO_PROVEEDORES, "w", encoding="utf-8") as f:
-            json.dump(db, f, indent=4, ensure_ascii=False)
-    except Exception as err:
-        st.error(f"Error al guardar proveedor: {err}")
-
-# ═══════════════════════════════════════════════════════════════
-# 📊 EXPORTACIÓN EXCEL HACIENDA F-14
-# ═══════════════════════════════════════════════════════════════
-
-def to_excel_hacienda_retenciones(df):
-    """Exporta al formato exacto de Hacienda El Salvador para F-14 Retenciones."""
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, header=False, sheet_name='Retenciones_F14')
-        workbook = writer.book
-        worksheet = writer.sheets['Retenciones_F14']
-
-        fmt_texto = workbook.add_format({'num_format': '@'})
-        fmt_num_hacienda = workbook.add_format({'num_format': '0.00', 'align': 'left'})
-
-        worksheet.set_column(0, 0, 15, fmt_texto)
-        worksheet.set_column(1, 1, 12, fmt_texto)
-        worksheet.set_column(2, 2, 5, fmt_texto)
-        worksheet.set_column(3, 3, 42, fmt_texto)
-        worksheet.set_column(4, 4, 38, fmt_texto)
-        worksheet.set_column(5, 6, 12, fmt_num_hacienda)
-        worksheet.set_column(7, 7, 12, fmt_texto)
-        worksheet.set_column(8, 8, 5, fmt_texto)
-
-    output.seek(0)
-    return output.getvalue()
-
-# ═══════════════════════════════════════════════════════════════
-# 🔧 FUNCIONES UTILITARIAS
-# ═══════════════════════════════════════════════════════════════
-
-def limpiar_monto(monto_str):
-    """Convierte string de monto a float de forma segura."""
-    try:
-        s = re.sub(r'[^\d.,]', '', str(monto_str)).strip()
-        if not s:
-            return 0.0
-        if ',' in s and '.' in s:
-            return round(float(s.replace(',', '')), 2)
-        elif ',' in s:
-            return round(float(s.replace(',', '.')), 2)
-        return round(float(s), 2)
-    except (ValueError, AttributeError):
-        return 0.0
-
-
-def extraer_y_formatear_fecha(texto):
-    """Extractor de fechas en cascada."""
-    meses = {
-        'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04',
-        'MAY': '05', 'JUN': '06', 'JUL': '07', 'AGO': '08',
-        'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'
-    }
-
-    for m in re.finditer(
-        r"\b(\d{1,2})\s*(?:de\s*|/|-)?\s*([a-zA-Z]{3,})\s*(?:de\s*|/|-)?\s*(\d{4})\b",
-        texto, re.I
-    ):
-        d, mes_str, y = m.groups()
-        if int(y) < 2023:
-            continue
-        for key, value in meses.items():
-            if mes_str.upper().startswith(key):
-                return f"{int(d):02d}/{value}/{y}"
-
-    for m in re.finditer(
-        r"\b(\d{1,4})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{1,4})\b",
-        texto
-    ):
-        p1, p2, p3 = m.groups()
-        y = d = mo = None
-
-        if len(p1) == 4:
-            y, mo, d = p1, p2, p3
-        elif len(p3) in [2, 4]:
-            d, mo, y = p1, p2, p3
-            if len(y) == 2:
-                y = f"20{y}"
-            if int(mo) > 12 and int(d) <= 12:
-                mo, d = d, mo
-        else:
-            continue
-
-        try:
-            if int(y) < 2023 or int(mo) > 12 or int(d) > 31:
-                continue
-            return f"{int(d):02d}/{int(mo):02d}/{y}"
-        except ValueError:
-            continue
-
-    nums = re.findall(r"\b\d{1,4}\b", texto)
-    for idx, n in enumerate(nums):
-        if len(n) == 4 and 2023 <= int(n) <= 2030:
-            vecinos = nums[max(0, idx-4):idx] + nums[idx+1:idx+5]
-            dm = [v for v in vecinos if len(v) in [1, 2] and 0 < int(v) <= 31]
-            if len(dm) >= 2:
-                n1, n2 = dm[0], dm[1]
-                if int(n1) > 12:
-                    d, mo = n1, n2
-                elif int(n2) > 12:
-                    d, mo = n2, n1
-                else:
-                    d, mo = n1, n2
-                return f"{int(d):02d}/{int(mo):02d}/{n}"
-
-    return ""
-
-
-def formatear_uuid(raw_str):
-    """Convierte un UUID sin guiones al formato estándar con guiones."""
-    limpio = re.sub(r'[^A-F0-9]', '', raw_str.upper())
-    if len(limpio) >= 32:
-        return f"{limpio[:8]}-{limpio[8:12]}-{limpio[12:16]}-{limpio[16:20]}-{limpio[20:32]}"
-    return raw_str.upper()
-
-# ═══════════════════════════════════════════════════════════════
-# 🔧 MOTOR DE EXTRACCIÓN DTE-07
-# ═══════════════════════════════════════════════════════════════
-
-def extraer_retenciones(file_bytes, cliente_activo, prov_cache=None):
-    """Motor de extracción de Comprobantes de Retención DTE-07 (El Salvador)."""
+def extraer_dte_retenciones(archivo, cliente_activo: dict) -> dict:
+    """
+    Motor de extracción de DTE de Retenciones (DTE-07).
+    Especializado en retenciones de IVA (1%).
+    
+    Retorna:
+        dict con datos extraídos o error
+    """
     motor = "Nativo"
 
     try:
-        texto_completo = ""
+        # Leer bytes
+        if hasattr(archivo, 'seek'):
+            archivo.seek(0)
+        file_bytes = archivo.read()
+        archivo.seek(0)
 
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
-            for page in pdf.pages:
-                texto_pagina = page.extract_text()
+            pagina = pdf.pages[0]
+            texto_prueba = pagina.extract_text() or ""
 
-                if not texto_pagina or len(texto_pagina.strip()) < 50:
-                    motor = "OCR"
-                    img = page.to_image(resolution=300)
-                    texto_pagina = pytesseract.image_to_string(img.original, lang='spa')
+            # Decisión: NATIVO vs OCR
+            if len(texto_prueba.strip()) < 100:
+                motor = "OCR"
+                img = pagina.to_image(resolution=300)
+                texto_raw = pytesseract.image_to_string(img.original, lang='spa')
+            else:
+                texto_raw = texto_prueba
 
-                texto_completo += (texto_pagina or "") + "\n"
+            t_clean = re.sub(r'\s+', ' ', texto_raw)
+            t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
 
-        if len(texto_completo.strip()) < 30:
-            return {"error": "PDF sin contenido legible."}
+        # ── VALIDACIÓN BÁSICA DE TIPO DTE ──
+        if "DTE-07" not in t_clean and "Comprobante de Retenci" not in t_clean:
+            return {"error": "Este no parece ser un DTE-07 (Comprobante de Retención)."}
 
-        t_clean = re.sub(r'\s+', ' ', texto_completo)
-        t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
+        # ── EXTRACCIÓN DE IDENTIFICADORES ──
+        tipo = "07"
 
-        m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_spaces)
-        tipo = "01"
-        ctrl = ""
+        ctrl_m = re.search(r"(DTE-07-[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+)", t_clean)
+        ctrl = ctrl_m.group(1) if ctrl_m else ""
 
-        if m_ctrl:
-            ctrl = m_ctrl.group(1).replace("O", "0")
-            m_tipo = re.search(r"DTE-(\d{2})", ctrl)
-            if m_tipo:
-                tipo = m_tipo.group(1)
-
-        if not ctrl:
-            return {"error_tipo": "No se detectó un Número de Control DTE válido."}
-        if tipo != "07":
-            return {"error_tipo": f"El documento es DTE-{tipo}. Solo se admiten DTE-07 (Retención)."}
-
-        nit_cliente = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
-        texto_nums = re.sub(r'[^0-9]', '', t_clean)
-
-        es_valido = (
-            nit_cliente == "00000000000000"
-            or (len(nit_cliente) >= 9 and nit_cliente in texto_nums)
-        )
-        if not es_valido:
-            return {"error_intruso": "Este documento no le pertenece al cliente activo."}
-
-        gen = ""
-        m_gen_etiqueta = re.search(
-            r"(?:C[OO]DIGO\s*DE\s*GENERACI[OO]N|C[OO]D\.\s*GENERACI[OO]N)"
-            r"[^\w]*([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
-            texto_completo, re.I
-        )
-        if m_gen_etiqueta:
-            gen = formatear_uuid(m_gen_etiqueta.group(1))
-        else:
-            uuids_encontrados = re.findall(
+        gen = formatear_uuid(
+            re.search(
                 r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
                 t_no_spaces
-            )
-            for u in uuids_encontrados:
-                if not re.search(r"SELLO.*?RECEPC", t_no_spaces[:t_no_spaces.find(u)] if u in t_no_spaces else ""):
-                    gen = formatear_uuid(u)
-                    break
-            if not gen and uuids_encontrados:
-                gen = formatear_uuid(uuids_encontrados[0])
-
-        sello = ""
-        m_sello = re.search(
-            r"Sello\s*de\s*Recepci[oo]n\s*[:]?\s*([A-Z0-9]{38,45})",
-            t_clean, re.I
+            ).group(1) if re.search(
+                r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
+                t_no_spaces
+            ) else ""
         )
-        if m_sello:
-            sello = m_sello.group(1)[:40].strip()
-        else:
-            sellos_huerfanos = re.findall(r"(202[3-9][A-Z0-9]{36})", t_no_spaces)
-            if sellos_huerfanos:
-                sello = sellos_huerfanos[0][:40]
 
+        sello_m = re.search(r"Sello de Recepci[oó]n\s*[:]?\s*([A-Z0-9]{20,})", t_clean, re.I)
+        sello = sello_m.group(1) if sello_m else ""
+
+        # Fecha
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        nit_contraparte = ""
-        nom_contraparte = CONTRAPARTE_NUEVA
-        es_nuevo = True
+        # ── EXTRACCIÓN DE DATOS DE RETENCIÓN ──
+        patron_nit = r"\b\d{4}-?\d{6}-?\d{3}-?\d{1}\b|\b\d{8}-?\d{1}\b"
 
-        patron_ids = (
-            r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d{1}\b"
-            r"|\b\d{14}\b"
-            r"|\b\d{8}\s*-\s*\d{1}\b"
-            r"|\b\d{9}\b"
-        )
-        nits_raw = re.findall(patron_ids, texto_completo)
-        nits_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in nits_raw]))
-
-        prov_db = prov_cache if prov_cache is not None else cargar_proveedores_json()
-
-        for n in nits_limpios:
-            if n == nit_cliente:
-                continue
-            nombre_encontrado = obtener_nombre_proveedor(prov_db, n)
-            if nombre_encontrado is not None:
-                nit_contraparte = n
-                nom_contraparte = nombre_encontrado
-                es_nuevo = False
-                break
-
-        if not nit_contraparte:
-            for n in nits_limpios:
-                if n != nit_cliente:
-                    nit_contraparte = n
-                    break
-
-        if es_nuevo and nit_contraparte:
-            nom_contraparte = CONTRAPARTE_NUEVA
-
-        monto_sujeto = 0.0
-        monto_retenido = 0.0
-        ret_calculada = False
-
-        m_sujeto = re.search(
-            r"(?:Total\s+Monto\s+Sujeto|Monto\s+Sujeto\s+a\s+Retenci[oo]n|"
-            r"Monto\s+Sujeto|Sujeto\s+a\s+Retenci[oo]n|Base\s+Imponible)"
-            r"[^\d]*?(\d{1,5}(?:[.,]\d{3})*[.,]\d{2})",
+        # NIT de la contraparte (quien retiene)
+        nit_m = re.search(
+            r"N\s*[I1l|]?\s*T\s*[:]?\s*([\d\-\s]{9,20})",
             t_clean, re.I
         )
-        if m_sujeto:
-            monto_sujeto = limpiar_monto(m_sujeto.group(1))
+        if not nit_m:
+            nit_m = re.search(f"({patron_nit})", t_clean)
 
-        m_retenido = re.search(
-            r"(?:Total\s+IVA(?:\s+1%)?\s+Retenido|IVA\s+Retenido|"
-            r"Retenci[oo]n(?:\s+del)?\s+1%|Impuesto\s+Retenido)"
-            r"[^\d]*?(\d{1,5}(?:[.,]\d{3})*[.,]\d{2})",
+        nit_contraparte = re.sub(r'[^0-9]', '', nit_m.group(1)) if nit_m else ""
+
+        # Nombre
+        bloque_nombre = t_clean
+        if "EMISOR" in t_clean.upper():
+            bloque_nombre = t_clean.split("EMISOR", 1)[-1]
+
+        nom_m = re.search(
+            r"(.*?)(?=\bN\s*[I|1l]\s*T\b|DTE-07|Actividad\b|" + patron_nit + r")",
+            bloque_nombre, re.I
+        )
+
+        if nom_m:
+            nombre_sucio = nom_m.group(1)
+            nombre = re.sub(
+                r"(Nombre|Raz[oó]n\s+social)\s*[:]?\s*",
+                "", nombre_sucio, flags=re.I
+            ).strip()
+            nombre = re.sub(r"\|", "I", nombre).strip()
+            nombre = re.sub(r"^[^A-Za-z0-9]+", "", nombre).strip()
+        else:
+            nombre = ""
+
+        # ── BÚSQUEDA DE MONTOS ──
+        # Monto sujeto a retención
+        monto_sujeto_m = re.search(
+            r"(?:Monto Sujeto|Monto de Operaci[oó]n|Total Operaci[oó]n)\s*[:]?\s*\$?\s*([\d,]+\.\d{2})",
             t_clean, re.I
         )
-        if m_retenido:
-            monto_retenido = limpiar_monto(m_retenido.group(1))
+        monto_sujeto = limpiar_monto(monto_sujeto_m.group(1)) if monto_sujeto_m else 0.0
 
-        es_logico = (
-            monto_sujeto > 0
-            and monto_retenido > 0
-            and abs(round(monto_sujeto * 0.01, 2) - round(monto_retenido, 2)) <= 0.05
+        # Monto retenido (1% del sujeto)
+        monto_retenido_m = re.search(
+            r"(?:Monto Retenido|Retenci[oó]n|Monto a Retener)\s*[:]?\s*\$?\s*([\d,]+\.\d{2})",
+            t_clean, re.I
         )
+        monto_retenido = limpiar_monto(monto_retenido_m.group(1)) if monto_retenido_m else 0.0
 
-        if not es_logico:
-            montos_raw = re.findall(
-                r"(?:US\$?|\$)?\s*(\d{1,5}(?:[.,]\d{3})*[.,]\d{2})",
-                t_clean
-            )
-            valores = sorted(
-                list(set(limpiar_monto(m) for m in montos_raw)),
-                reverse=True
-            )
-            valores = [v for v in valores if v > 0.01]
-
-            for val_s in valores:
-                if es_logico:
-                    break
-                for val_r in valores:
-                    if val_r >= val_s:
-                        continue
-                    if abs(round(val_s * 0.01, 2) - round(val_r, 2)) <= 0.05:
-                        monto_sujeto = val_s
-                        monto_retenido = val_r
-                        es_logico = True
-                        break
-
-        if not es_logico:
-            if monto_retenido > 0 and monto_sujeto == 0.0:
-                monto_sujeto = round(monto_retenido / 0.01, 2)
-                ret_calculada = True
-            elif monto_sujeto > 0 and monto_retenido == 0.0:
-                monto_retenido = round(monto_sujeto * 0.01, 2)
-                ret_calculada = True
+        # Si no encontró monto retenido, calcularlo (1%)
+        ret_calc = False
+        if monto_retenido == 0.0 and monto_sujeto > 0:
+            monto_retenido = round(monto_sujeto * 0.01, 2)
+            ret_calc = True
 
         return {
             "fecha": fecha,
             "nit_contraparte": nit_contraparte,
-            "nom_contraparte": nom_contraparte,
+            "nom_contraparte": nombre,
             "tipo": tipo,
             "ctrl": ctrl,
             "gen": gen,
             "sello": sello,
             "monto_sujeto": monto_sujeto,
             "monto_retenido": monto_retenido,
-            "estado": "OK",
-            "es_nuevo": es_nuevo,
+            "ret_calc": ret_calc,
             "motor": motor,
-            "ret_calc": ret_calculada
+            "es_nuevo": False,
+            "estado": "OK",
+            "confianza_nit": "media",
+            "confianza_rs": "media",
+            "fuente": "PDF",
+            "archivo": archivo.name if hasattr(archivo, 'name') else "documento.pdf"
         }
 
-    except Exception as err:
-        return {"error": str(err)}
+    except Exception as e:
+        return {"error": f"Error de lectura: {str(e)}"}
+
 
 # ═══════════════════════════════════════════════════════════════
-# 📱 MODAL DE DESCARGA
+# ESTADO DE SESIÓN
 # ═══════════════════════════════════════════════════════════════
 
-@st.dialog("Seguro de Calidad de Retenciones")
-def ventana_descarga_retenciones(df_resultados, nombre_archivo):
-    st.write(
-        "Asegúrate de haber revisado los montos extraídos antes de descargar. "
-        "El Excel generado cumple exactamente con las especificaciones de Hacienda "
-        "para carga masiva del F-14 (sin encabezados)."
-    )
-    st.download_button(
-        label="Confirmar y Descargar Anexo F-14",
-        data=to_excel_hacienda_retenciones(df_resultados),
-        file_name=nombre_archivo,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary",
-        use_container_width=True
-    )
-
-# ═══════════════════════════════════════════════════════════════
-# 📱 HEADER
-# ═══════════════════════════════════════════════════════════════
-
-st.markdown(
-    "<h2 style='font-family:Courier New,monospace; color:#5E17EB; "
-    "letter-spacing:2px; margin-bottom:0; padding-bottom:0;'>YN</h2>",
-    unsafe_allow_html=True
-)
-st.title("Extractor DTE - Retenciones (DTE-07)")
-
-st.markdown(f"""
-<div class="alerta-activo">
-    <strong>CLIENTE ACTUAL:</strong>
-    {cliente.get('nombre', 'N/A')} (NIT: {cliente.get('nit', 'N/A')})
-</div>
-""", unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════════
-# 🔄 INICIALIZACIÓN DE ESTADO
-# ═══════════════════════════════════════════════════════════════
-
-if 'ret_uploader_key' not in st.session_state:
-    st.session_state.ret_uploader_key = str(time.time())
+if 'uploader_key_ret' not in st.session_state:
+    st.session_state.uploader_key_ret = str(time.time())
+if 'json_key_ret' not in st.session_state:
+    st.session_state.json_key_ret = str(time.time()) + "_json_ret"
 if 'db_retenciones' not in st.session_state:
     st.session_state.db_retenciones = pd.DataFrame()
-if 'archivos_ret' not in st.session_state:
-    st.session_state.archivos_ret = set()
+if 'archivos_procesados_ret' not in st.session_state:
+    st.session_state.archivos_procesados_ret = set()
 if 'reporte_retenciones' not in st.session_state:
     st.session_state.reporte_retenciones = None
 
 # ═══════════════════════════════════════════════════════════════
-# 📂 SIDEBAR - CARGA Y PROCESAMIENTO
+# HEADER
+# ═══════════════════════════════════════════════════════════════
+
+st.markdown(
+    "<h2 style='font-family:Courier New,monospace; color:#8B6D47; "
+    "letter-spacing:2px; margin-bottom:0; padding-bottom:0;'>YN</h2>",
+    unsafe_allow_html=True
+)
+st.title("✂️ Extractor DTE - Retenciones")
+
+st.markdown(f"""
+<div class="alerta-activo">
+    <strong>AGENTE DE RETENCIÓN (Cliente Activo):</strong><br>
+    {cliente.get('nombre', 'N/A')} (NIT: {cliente.get('nit', 'N/A')})
+</div>
+""", unsafe_allow_html=True)
+
+st.info("📌 Especializado en DTE-07 (Comprobantes de Retención de IVA 1%)")
+
+# ═══════════════════════════════════════════════════════════════
+# SIDEBAR: CARGA PDF Y JSON
 # ═══════════════════════════════════════════════════════════════
 
 with st.sidebar:
-    st.header("Carga de Retenciones")
+    st.header("📂 Carga de Datos")
     st.caption(f"Cliente: {cliente.get('nombre', 'N/A')}")
     st.divider()
 
-    archivos = st.file_uploader(
-        "Arrastra Comprobantes de Retención (DTE-07)",
-        type="pdf",
-        accept_multiple_files=True,
-        key=st.session_state.ret_uploader_key
-    )
+    # TABS: PDF | JSON
+    tab_pdf, tab_json = st.tabs(["📄 PDF", "📋 JSON"])
 
-    if archivos and st.button("Procesar Retenciones", type="primary", use_container_width=True):
+    # ───────────────────────────────────────────────────────────
+    # TAB PDF
+    # ───────────────────────────────────────────────────────────
+    with tab_pdf:
+        st.subheader("Carga de Documentos PDF")
+        
+        archivos_pdf = st.file_uploader(
+            "Arrastra tus PDFs (DTE-07)",
+            type="pdf",
+            accept_multiple_files=True,
+            key=st.session_state.uploader_key_ret,
+            help="Comprobantes de retención de IVA"
+        )
 
-        extracted = []
-        vacios_deteccion = []
-        duplicados = []
-        intrusos = []
-        invalidos = []
-        calculados = []
-        nuevos_proveedores = {}
+        usar_gemini = False
+        if st.secrets.get("GEMINI_API_KEY"):
+            usar_gemini = st.checkbox(
+                "🤖 Activar Validación Gemini",
+                value=False,
+                help="Validar montos con Gemini si hay dudas"
+            )
 
-        nuevos = [f for f in archivos if f.name not in st.session_state.archivos_ret]
+        if archivos_pdf and st.button(
+            "▶️ Procesar PDFs",
+            type="primary",
+            use_container_width=True,
+            key="btn_procesar_pdf_ret"
+        ):
+            extracted = []
+            duplicados_gen = []
+            vacios_deteccion = []
+            archivos_rechazados = []
+            gemini_validados = []
 
-        if nuevos:
-            bar = st.progress(0)
-            txt_progreso = st.empty()
-            t_inicio = time.time()
-            total = len(nuevos)
+            nuevos = [
+                f for f in archivos_pdf
+                if f.name not in st.session_state.archivos_procesados_ret
+            ]
 
-            prov_cache = cargar_proveedores_json()
+            if nuevos:
+                bar = st.progress(0)
+                txt_progreso = st.empty()
+                t_inicio = time.time()
+                total = len(nuevos)
 
-            for idx, f in enumerate(nuevos):
+                for idx, f in enumerate(nuevos):
+                    if idx > 0 and idx % 30 == 0:
+                        gc.collect()
 
-                if idx > 0 and idx % 50 == 0:
-                    gc.collect()
+                    # Progress
+                    if idx > 0:
+                        elapsed = time.time() - t_inicio
+                        eta = int((elapsed / idx) * (total - idx))
+                        m, s = divmod(eta, 60)
+                        txt_progreso.markdown(
+                            f"▶️ **{idx+1}** de **{total}** | ⏳ {m:02d}:{s:02d}",
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        txt_progreso.markdown("▶️ **1** de **{total}** | Analizando...")
 
-                if idx > 0:
-                    elapsed = time.time() - t_inicio
-                    eta = int((elapsed / idx) * (total - idx))
-                    m_t, s = divmod(eta, 60)
-                    txt_progreso.markdown(
-                        f"Procesando: **{idx+1}** de **{total}** "
-                        f"| Restante: {m_t:02d}:{s:02d}"
+                    # Procesar PDF
+                    res = extraer_dte_retenciones(f, cliente)
+                    st.session_state.archivos_procesados_ret.add(f.name)
+
+                    if "error" in res:
+                        archivos_rechazados.append(f"{f.name} — {res['error']}")
+                    else:
+                        # ── GEMINI: validación si confianza baja ──
+                        if usar_gemini and st.secrets.get("GEMINI_API_KEY"):
+                            try:
+                                f.seek(0)
+                                with pdfplumber.open(f) as pdf:
+                                    texto_pdf = "".join(
+                                        (p.extract_text() or "") for p in pdf.pages[:2]
+                                    )
+                                
+                                gemini_res = validar_retenciones_con_gemini(
+                                    texto_pdf,
+                                    res
+                                )
+                                
+                                if gemini_res.get("_exito"):
+                                    for campo in ["nit_contraparte", "nom_contraparte", "monto_sujeto", "monto_retenido"]:
+                                        if gemini_res.get(campo) and not res.get(campo):
+                                            res[campo] = gemini_res[campo]
+                                    res["confianza_gemini"] = gemini_res.get("confianza_gemini")
+                                    res["gemini_obs"] = gemini_res.get("observaciones")
+                                    gemini_validados.append(f.name)
+                            except Exception:
+                                pass
+
+                        # Validar campos
+                        incompleto = (
+                            "" in [
+                                res.get("fecha", ""), res.get("nit_contraparte", ""),
+                                res.get("nom_contraparte", ""), res.get("ctrl", "")
+                            ]
+                            or float(res.get("monto_sujeto", 0)) == 0.0
+                        )
+
+                        if incompleto:
+                            vacios_deteccion.append(f.name)
+
+                        # Deduplicación
+                        codigo_gen = res.get("gen", "")
+                        dup_mem = (
+                            not st.session_state.db_retenciones.empty
+                            and codigo_gen != ""
+                            and (st.session_state.db_retenciones["gen"] == codigo_gen).any()
+                        )
+                        dup_lote = (
+                            codigo_gen != ""
+                            and any(d.get("gen") == codigo_gen for d in extracted)
+                        )
+
+                        if dup_mem or dup_lote:
+                            duplicados_gen.append(f.name)
+                        else:
+                            res["archivo"] = f.name
+                            extracted.append(res)
+
+                    bar.progress((idx + 1) / total)
+
+                txt_progreso.success(f"✅ {total} documentos procesados")
+
+                st.session_state.reporte_retenciones = {
+                    "rechazados": archivos_rechazados,
+                    "vacios": vacios_deteccion,
+                    "duplicados_gen": duplicados_gen,
+                    "gemini": gemini_validados,
+                }
+
+                if extracted:
+                    new_df = pd.DataFrame(extracted)
+                    st.session_state.db_retenciones = (
+                        new_df if st.session_state.db_retenciones.empty
+                        else pd.concat([st.session_state.db_retenciones, new_df], ignore_index=True)
                     )
-                else:
-                    txt_progreso.markdown(f"Procesando: **1** de **{total}** | Calculando...")
 
-                file_bytes = f.read()
+                gc.collect()
+                time.sleep(0.3)
+                st.rerun()
 
-                res = extraer_retenciones(file_bytes, cliente, prov_cache)
+    # ───────────────────────────────────────────────────────────
+    # TAB JSON
+    # ───────────────────────────────────────────────────────────
+    with tab_json:
+        st.subheader("Carga desde JSON (Ministerio)")
+        st.caption("Soporta archivos JSON del formato oficial de Hacienda")
 
-                codigo_gen = res.get('gen', '')
-                dup_memoria = (
-                    not st.session_state.db_retenciones.empty
-                    and codigo_gen != ""
-                    and (st.session_state.db_retenciones['gen'] == codigo_gen).any()
+        archivos_json = st.file_uploader(
+            "Arrastra JSONs (DTE-07)",
+            type=["json"],
+            accept_multiple_files=True,
+            key=st.session_state.json_key_ret
+        )
+
+        if archivos_json and st.button(
+            "▶️ Procesar JSONs",
+            type="primary",
+            use_container_width=True,
+            key="btn_procesar_json_ret"
+        ):
+            extracted_json = []
+            duplicados_json = []
+            errores_json = []
+            rechazados_tipo = []
+
+            for f in archivos_json:
+                if f.name in st.session_state.archivos_procesados_ret:
+                    continue
+
+                try:
+                    datos = json.load(f)
+                    res = parsear_json_dte(datos, "retenciones")
+
+                    if "error" in res:
+                        errores_json.append(f"{f.name} — {res['error']}")
+                        continue
+
+                    # Validar tipo DTE
+                    tipo = res.get("tipo", "07")
+                    if tipo != "07":
+                        rechazados_tipo.append(f"{f.name} (DTE-{tipo}, esperaba DTE-07)")
+                        continue
+
+                    # Deduplicación
+                    codigo_gen = res.get("gen", "")
+                    dup = (
+                        not st.session_state.db_retenciones.empty
+                        and codigo_gen != ""
+                        and (st.session_state.db_retenciones["gen"] == codigo_gen).any()
+                    )
+
+                    if dup:
+                        duplicados_json.append(f.name)
+                    else:
+                        res["archivo"] = f.name
+                        extracted_json.append(res)
+
+                    st.session_state.archivos_procesados_ret.add(f.name)
+
+                except json.JSONDecodeError:
+                    errores_json.append(f"{f.name} — JSON inválido")
+                except Exception as e:
+                    errores_json.append(f"{f.name} — {str(e)}")
+
+            if extracted_json:
+                new_df = pd.DataFrame(extracted_json)
+                st.session_state.db_retenciones = (
+                    new_df if st.session_state.db_retenciones.empty
+                    else pd.concat([st.session_state.db_retenciones, new_df], ignore_index=True)
                 )
-                dup_lote = (
-                    codigo_gen != ""
-                    and any(d.get('gen') == codigo_gen for d in extracted)
-                )
 
-                st.session_state.archivos_ret.add(f.name)
+            # Resumen
+            resumen = []
+            if extracted_json:
+                resumen.append(f"✅ {len(extracted_json)} importados")
+            if duplicados_json:
+                resumen.append(f"🔄 {len(duplicados_json)} duplicados")
+            if rechazados_tipo:
+                resumen.append(f"⚠️ {len(rechazados_tipo)} tipo incorrecto")
+            if errores_json:
+                resumen.append(f"❌ {len(errores_json)} errores")
 
-                if "error_intruso" in res:
-                    intrusos.append(f.name)
+            if resumen:
+                st.success(" | ".join(resumen))
 
-                elif "error_tipo" in res:
-                    invalidos.append(f.name)
-
-                elif dup_memoria or dup_lote:
-                    duplicados.append(f.name)
-
-                elif "error" in res:
-                    invalidos.append(f"{f.name} ({res['error'][:50]})")
-
-                else:
-                    fecha_str = str(res.get('fecha', '')).strip()
-
-                    try:
-                        monto_ret = float(res.get('monto_retenido', 0.0))
-                        monto_suj = float(res.get('monto_sujeto', 0.0))
-                    except (TypeError, ValueError):
-                        monto_ret = monto_suj = 0.0
-
-                    incompleto = (
-                        monto_ret == 0.0
-                        or monto_suj == 0.0
-                        or not res.get('gen')
-                        or not res.get('sello')
-                        or not fecha_str
-                    )
-                    if incompleto:
-                        vacios_deteccion.append(f.name)
-
-                    if res.get("es_nuevo") and res.get("nit_contraparte"):
-                        nit_np = res["nit_contraparte"]
-                        nom_np = res["nom_contraparte"]
-                        nuevos_proveedores[nit_np] = nom_np
-                        prov_cache[nit_np] = {"nombre": nom_np, "nrc": ""}
-
-                    if res.get("ret_calc"):
-                        calculados.append(f.name)
-
-                    res["archivo"] = f.name
-                    extracted.append(res)
-
-                bar.progress((idx + 1) / total)
-
-            txt_progreso.success(f"{total} retenciones procesadas correctamente.")
-
-            st.session_state.reporte_retenciones = {
-                "intrusos": intrusos,
-                "invalidos": invalidos,
-                "duplicados": duplicados,
-                "vacios": vacios_deteccion,
-                "nuevos_proveedores": nuevos_proveedores,
-                "calculados": calculados
-            }
-
-            if extracted:
-                new_df = pd.DataFrame(extracted)
-                if st.session_state.db_retenciones.empty:
-                    st.session_state.db_retenciones = new_df
-                else:
-                    st.session_state.db_retenciones = pd.concat(
-                        [st.session_state.db_retenciones, new_df], ignore_index=True
-                    )
+            if errores_json:
+                with st.expander("Ver errores JSON"):
+                    for e in errores_json:
+                        st.error(e)
 
             gc.collect()
-            time.sleep(0.3)
             st.rerun()
 
+    # ── Botón Limpiar ──
     st.divider()
-
-    if st.button("Limpiar Memoria Retenciones", type="secondary", use_container_width=True):
-        for key in ['db_retenciones', 'archivos_ret', 'reporte_retenciones']:
-            st.session_state.pop(key, None)
-        st.session_state.ret_uploader_key = str(time.time())
+    if st.button("🧹 Limpiar Memoria", type="secondary", use_container_width=True):
+        for var in ["db_retenciones", "archivos_procesados_ret", "reporte_retenciones"]:
+            st.session_state.pop(var, None)
+        st.session_state.uploader_key_ret = str(time.time())
+        st.session_state.json_key_ret = str(time.time()) + "_json_ret"
         gc.collect()
         st.rerun()
 
     if not st.session_state.db_retenciones.empty:
         st.divider()
-        st.caption(f"Registros: {len(st.session_state.db_retenciones)}")
+        total_pdf = len(
+            st.session_state.db_retenciones[
+                st.session_state.db_retenciones.get("fuente", pd.Series()) == "PDF"
+            ]
+        ) if "fuente" in st.session_state.db_retenciones.columns else len(st.session_state.db_retenciones)
+
+        total_json = len(
+            st.session_state.db_retenciones[
+                st.session_state.db_retenciones.get("fuente", pd.Series()) == "JSON"
+            ]
+        ) if "fuente" in st.session_state.db_retenciones.columns else 0
+
+        st.caption(f"📊 Total: {len(st.session_state.db_retenciones)} | PDF: {total_pdf} | JSON: {total_json}")
 
 # ═══════════════════════════════════════════════════════════════
-# 📊 DASHBOARD DE ALERTAS
+# REPORTE DE EXTRACCIÓN
 # ═══════════════════════════════════════════════════════════════
 
 if st.session_state.reporte_retenciones:
     rep = st.session_state.reporte_retenciones
-    st.markdown("### 🚨 Alertas de Procesamiento")
+    st.markdown("### 📋 Reporte de Extracción")
 
-    c1, c2, c3, c4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
 
-    with c1:
-        n = len(rep.get("invalidos", []))
+    with col1:
+        n = len(rep.get("rechazados", []))
         if n:
-            st.error(f"**{n} Ignorados** (No son DTE-07).")
+            st.error(f"🚫 **{n} Rechazados**")
             with st.expander("Ver lista"):
                 st.markdown(
                     '<div class="scroll-list">'
-                    + "".join(f"• {a}<br>" for a in rep["invalidos"])
-                    + '</div>', unsafe_allow_html=True
+                    + "".join([f"• {a}<br>" for a in rep["rechazados"]])
+                    + '</div>',
+                    unsafe_allow_html=True
                 )
         else:
-            st.success("**0 Ignorados.**")
+            st.success("✅ **0 Rechazados**")
 
-    with c2:
+    with col2:
         n = len(rep.get("vacios", []))
         if n:
-            st.error(f"**{n} Incompletos** (Falta Fecha, Sello o Montos).")
+            st.error(f"🚨 **{n} Incompletos**")
             with st.expander("Ver lista"):
                 st.markdown(
                     '<div class="scroll-list">'
-                    + "".join(f"• {a}<br>" for a in rep["vacios"])
-                    + '</div>', unsafe_allow_html=True
+                    + "".join([f"• {a}<br>" for a in rep["vacios"]])
+                    + '</div>',
+                    unsafe_allow_html=True
                 )
         else:
-            st.success("**0 Incompletos.**")
+            st.success("✅ **0 Incompletos**")
 
-    with c3:
-        n = len(rep.get("duplicados", []))
+    with col3:
+        n = len(rep.get("duplicados_gen", []))
         if n:
-            st.error(f"**{n} Omitidos** (Duplicados).")
+            st.error(f"🔄 **{n} Duplicados**")
             with st.expander("Ver lista"):
                 st.markdown(
                     '<div class="scroll-list">'
-                    + "".join(f"• {a}<br>" for a in rep["duplicados"])
-                    + '</div>', unsafe_allow_html=True
+                    + "".join([f"• {a}<br>" for a in rep["duplicados_gen"]])
+                    + '</div>',
+                    unsafe_allow_html=True
                 )
         else:
-            st.success("**0 Omitidos.**")
+            st.success("✅ **0 Duplicados**")
 
-    with c4:
-        n = len(rep.get("calculados", []))
-        if n:
-            st.info(f"**{n} Calc. (1%)** (Forzado matemático).")
-            with st.expander("Ver lista"):
-                st.markdown(
-                    '<div class="scroll-list">'
-                    + "".join(f"• {a}<br>" for a in rep["calculados"])
-                    + '</div>', unsafe_allow_html=True
-                )
-        else:
-            st.success("**0 Calc. (1%)** (Lectura directa).")
+    if rep.get("gemini"):
+        st.info(f"🤖 **{len(rep['gemini'])} Validados con Gemini**")
 
     st.divider()
 
-    if rep.get("nuevos_proveedores"):
-        st.markdown("### Guardado Rápido de Contrapartes")
-        st.info(
-            "Estas empresas o personas aparecen como nuevas en este lote. "
-            "Escribe su nombre oficial para que el sistema lo memorice."
-        )
-
-        for nit, nombre_sug in list(rep["nuevos_proveedores"].items()):
-
-            valor_inicial = "" if nombre_sug == CONTRAPARTE_NUEVA else nombre_sug
-
-            col1, col2, col3 = st.columns([2, 5, 2])
-
-            with col1:
-                st.text_input(
-                    "NIT",
-                    value=nit,
-                    disabled=True,
-                    key=f"lbl_ret_{nit}"
-                )
-            with col2:
-                nuevo_nom = st.text_input(
-                    "Nombre Oficial",
-                    value=valor_inicial,
-                    placeholder="Empresa Proveedora S.A. de C.V.",
-                    key=f"nom_ret_{nit}"
-                )
-            with col3:
-                st.write("")
-                if st.button(
-                    "Guardar",
-                    key=f"btn_ret_{nit}",
-                    type="primary",
-                    use_container_width=True
-                ):
-                    if nuevo_nom.strip():
-                        guardar_proveedor_rapido(nit, nuevo_nom)
-
-                        df_actual = st.session_state.db_retenciones
-                        mask = df_actual['nit_contraparte'] == nit
-                        df_actual.loc[mask, 'nom_contraparte'] = nuevo_nom.strip().upper()
-                        st.session_state.db_retenciones = df_actual
-
-                        del st.session_state.reporte_retenciones["nuevos_proveedores"][nit]
-                        st.success(f"Guardado: {nuevo_nom.upper()}")
-                        time.sleep(0.8)
-                        st.rerun()
-                    else:
-                        st.warning("Escribe un nombre antes de guardar.")
-
-        st.divider()
-
 # ═══════════════════════════════════════════════════════════════
-# 📊 TABLAS DE RESULTADOS
+# TABLA DE RESULTADOS CON FILTROS
 # ═══════════════════════════════════════════════════════════════
 
 if not st.session_state.db_retenciones.empty:
-    df = st.session_state.db_retenciones.copy()
+    st.markdown("### 📊 Datos Extraídos")
 
-    tab1, tab2 = st.tabs([
-        "Retenciones F-14 (Vista Previa)",
-        "Auditoría Total"
-    ])
+    # Aplicar filtros
+    df_filtrado = render_panel_filtros(st.session_state.db_retenciones, "retenciones_ret")
 
-    with tab1:
-        st.info(
-            "La columna Nombre es solo visual para tu auditoría. "
-            "Al descargar el Excel para Hacienda, se eliminará y no llevará "
-            "encabezados, tal como exige el manual F-14."
-        )
-
-        def asignar_nit(x):
-            x = str(x)
-            return x if len(x) == 14 else ""
-
-        def asignar_dui(x):
-            x = str(x)
-            return x if len(x) == 9 else ""
-
-        df_hacienda = pd.DataFrame({
-            "A. NIT Agente": df["nit_contraparte"].apply(asignar_nit),
-            "B. Fecha Emisión": df["fecha"],
-            "C. Tipo Documento": df["tipo"],
-            "D. Serie (Sello)": df["sello"],
-            "E. Num Doc (UUID)": df["gen"],
-            "F. Monto Sujeto": pd.to_numeric(df["monto_sujeto"], errors='coerce').fillna(0.0),
-            "G. Monto Retención": pd.to_numeric(df["monto_retenido"], errors='coerce').fillna(0.0),
-            "H. DUI Agente": df["nit_contraparte"].apply(asignar_dui),
-            "I. Número Anexo": "7"
-        })
-
-        df_vista = df_hacienda.copy()
-        df_vista["(Visual) Nombre"] = df["nom_contraparte"]
-
-        cols_num = ["F. Monto Sujeto", "G. Monto Retención"]
-
+    if not df_filtrado.empty:
+        # Mostrar tabla
         st.dataframe(
-            df_vista.style.format({c: "{:.2f}" for c in cols_num}),
-            hide_index=True,
-            use_container_width=True
+            df_filtrado[
+                ["fecha", "nit_contraparte", "nom_contraparte", "monto_sujeto", "monto_retenido", "motor", "fuente"]
+            ],
+            use_container_width=True,
+            hide_index=True
         )
 
-        col_k1, col_k2, col_k3 = st.columns(3)
-        with col_k1:
-            st.metric("Total Registros", len(df_hacienda))
-        with col_k2:
-            st.metric(
-                "Total Monto Sujeto",
-                f"${df_hacienda['F. Monto Sujeto'].sum():,.2f}"
-            )
-        with col_k3:
-            st.metric(
-                "Total Retenido (1%)",
-                f"${df_hacienda['G. Monto Retención'].sum():,.2f}"
-            )
+        # Estadísticas
+        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        with col_stat1:
+            st.metric("📊 Registros", len(df_filtrado))
+        with col_stat2:
+            total_sujeto = df_filtrado["monto_sujeto"].apply(lambda x: float(x) if x else 0.0).sum()
+            st.metric("💵 Monto Sujeto", f"${total_sujeto:,.2f}")
+        with col_stat3:
+            total_ret = df_filtrado["monto_retenido"].apply(lambda x: float(x) if x else 0.0).sum()
+            st.metric("✂️ Total Retenido", f"${total_ret:,.2f}")
+    else:
+        st.info("No hay registros que coincidan con los filtros aplicados.")
 
-        st.write("")
-        if st.button("Generar Excel para F-14", type="primary", use_container_width=True):
-            ventana_descarga_retenciones(df_hacienda, "F14_Retenciones.xlsx")
+else:
+    st.info("📤 Carga archivos PDF o JSON en el panel lateral para comenzar.")
 
-    with tab2:
-        col_a1, col_a2, col_a3 = st.columns(3)
-        with col_a1:
-            st.write(f"Total registros: **{len(df)}**")
-        with col_a2:
-            motores = df['motor'].value_counts().to_dict() if 'motor' in df.columns else {}
-            for motor_name, count in motores.items():
-                st.write(f"Motor {motor_name}: **{count}**")
-        with col_a3:
-            calculados_n = df['ret_calc'].sum() if 'ret_calc' in df.columns else 0
-            st.write(f"Calculados matemáticamente: **{calculados_n}**")
+st.divider()
 
-        st.divider()
+# ═══════════════════════════════════════════════════════════════
+# FOOTER
+# ═══════════════════════════════════════════════════════════════
 
-        st.dataframe(df, use_container_width=True)
+col_f1, col_f2, col_f3 = st.columns(3)
+
+with col_f1:
+    st.caption(f"👤 Usuario: {st.session_state.get('usuario_actual', 'N/A')}")
+
+with col_f2:
+    st.caption("🏢 Learnix Hub v2.0")
+
+with col_f3:
+    st.caption(f"📅 {datetime.now().strftime('%d/%m/%Y')}")
