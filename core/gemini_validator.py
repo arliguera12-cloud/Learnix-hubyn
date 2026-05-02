@@ -12,15 +12,6 @@ from .constantes import GEMINI_MODEL
 def necesita_gemini(confianza_nit: str, confianza_rs: str, gra: float, tot: float) -> bool:
     """
     Determina si un documento necesita validación con Gemini.
-    
-    Args:
-        confianza_nit: "alta" | "media" | "baja" | "nula"
-        confianza_rs: "alta" | "media" | "baja" | "nula"
-        gra: Monto gravado
-        tot: Total
-    
-    Returns:
-        bool: True si necesita validación
     """
     if confianza_nit in ["baja", "nula"]:
         return True
@@ -34,14 +25,6 @@ def necesita_gemini(confianza_nit: str, confianza_rs: str, gra: float, tot: floa
 def validar_con_gemini(texto_pdf: str, datos_extraidos: dict, tipo_doc: str = "CCF") -> dict:
     """
     Valida y complementa datos usando Gemini 1.5 Flash.
-    
-    Args:
-        texto_pdf: Texto crudo del PDF
-        datos_extraidos: dict con datos ya extraídos
-        tipo_doc: "CCF" | "Factura" | "Compra" | etc.
-    
-    Returns:
-        dict con datos validados
     """
     try:
         import google.generativeai as genai
@@ -84,7 +67,6 @@ RESPONDE SOLO en JSON (sin markdown):
         respuesta = model.generate_content(prompt)
         texto_resp = respuesta.text.strip()
 
-        # Extraer JSON de la respuesta
         json_match = re.search(r'\{.*\}', texto_resp, re.DOTALL)
         if json_match:
             resultado = json.loads(json_match.group())
