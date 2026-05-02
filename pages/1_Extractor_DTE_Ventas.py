@@ -1,53 +1,41 @@
 # pages/1_Extractor_DTE_Ventas.py
 """
-Extractor de DTE Ventas (Tipos 01, 03, 05, 06, 11)
-Soporta PDF y JSON del Ministerio de Hacienda.
-Con validación Gemini y filtros avanzados.
+EXTRACTOR DTE VENTAS v2.0
+Soporta: PDF (Nativo + OCR) y JSON (Ministerio Hacienda)
+Incluye validación con Gemini 1.5 Flash
 """
 
 import streamlit as st
 import pandas as pd
-import json
-import time
-import gc
-import re
-from io import BytesIO
 import pdfplumber
 import pytesseract
+import json
+import re
+import time
+import gc
 import platform
-import os
+from io import BytesIO
+from datetime import datetime
+
+# ═══════════════════════════════════════════════════════════════
+# IMPORTS DE CORE
+# ═══════════════════════════════════════════════════════════════
 import sys
-
-# ═══════════════════════════════════════════════════════════════
-# IMPORTACIONES LOCALES
-# ═══════════════════════════════════════════════════════════════
-
+import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-try:
-    from core.extractores import (
-        necesita_gemini,
-        validar_con_gemini,
-        render_panel_filtros,
-        parsear_json_dte,
-        limpiar_monto,
-        extraer_y_formatear_fecha,
-        formatear_uuid
-    )
-    GEMINI_DISPONIBLE = True
-except ImportError as e:
-    GEMINI_DISPONIBLE = False
-    st.warning(f"⚠️ Módulos avanzados no disponibles: {str(e)}")
+from core.extractores import (
+    necesita_gemini,
+    validar_con_gemini,
+    render_panel_filtros,
+    parsear_json_dte,
+    limpiar_monto,
+    extraer_y_formatear_fecha,
+    formatear_uuid,
+)
 
 # ═══════════════════════════════════════════════════════════════
-# CONFIGURACIÓN TÉCNICA
-# ═══════════════════════════════════════════════════════════════
-
-if platform.system() == "Windows":
-    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-
-# ═══════════════════════════════════════════════════════════════
-# SEGURIDAD Y VALIDACIÓN
+# VERIFICACIÓN DE SEGURIDAD
 # ═══════════════════════════════════════════════════════════════
 
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
@@ -65,23 +53,36 @@ if not isinstance(st.session_state.cliente_activo, dict):
 cliente = st.session_state.cliente_activo
 
 # ═══════════════════════════════════════════════════════════════
-# ESTILOS PERSONALIZADOS
+# CONFIGURACIÓN TÉCNICA
+# ═══════════════════════════════════════════════════════════════
+
+if platform.system() == "Windows":
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+st.set_page_config(
+    page_title="Extractor DTE Ventas",
+    layout="wide",
+    page_icon="📈"
+)
+
+# ═══════════════════════════════════════════════════════════════
+# ESTILOS GLOBALES
 # ═══════════════════════════════════════════════════════════════
 
 estilo_custom = """
 <style>
-    [data-testid="stAppViewContainer"], [data-testid="stHeader"] { 
-        background-color: #000000 !important; 
+    [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+        background-color: #000000 !important;
     }
-    [data-testid="stSidebar"] { 
-        background-color: #161616 !important; 
-        border-right: 1px solid #333333; 
+    [data-testid="stSidebar"] {
+        background-color: #161616 !important;
+        border-right: 1px solid #333333 !important;
     }
-    h1, h2, h3, h4, h5, h6, p, label, span { 
-        color: #F7F5EE !important; 
+    h1, h2, h3, h4, h5, h6, p, label, span, div {
+        color: #F7F5EE !important;
     }
-    [data-testid="stDataFrame"] span { 
-        color: inherit !important; 
+    [data-testid="stDataFrame"] span {
+        color: inherit !important;
     }
     div.stButton > button[kind="primary"],
     div.stDownloadButton > button[kind="primary"] {
@@ -108,13 +109,14 @@ estilo_custom = """
         color: #FFFFFF !important;
         font-weight: bold !important;
     }
-    div[data-testid="stAlert"] {
-        min-height: 80px;
-        display: flex;
-        align-items: center;
-    }
-    .stAlert * { 
-        color: inherit !important; 
+    .alerta-activo {
+        padding: 10px;
+        border-radius: 6px;
+        border-left: 4px solid #666D57;
+        background-color: #111111;
+        color: white;
+        margin-bottom: 15px;
+        font-size: 14px;
     }
     .scroll-list {
         max-height: 150px;
@@ -131,206 +133,274 @@ estilo_custom = """
         color: #666D57 !important;
         border-bottom-color: #666D57 !important;
     }
-    .stTabs [data-baseweb="tab-list"] button { 
-        color: #777777 !important; 
-    }
-    [data-testid="stExpander"] {
-        background-color: #161616 !important;
-        border: 1px solid #444444 !important;
-        border-radius: 6px;
-    }
-    .alerta-activo {
-        padding: 10px;
-        border-radius: 6px;
-        border-left: 4px solid #666D57;
-        background-color: #111111;
-        color: white;
-        margin-bottom: 15px;
-        font-size: 14px;
+    .stTabs [data-baseweb="tab-list"] button {
+        color: #777777 !important;
     }
 </style>
 """
 st.markdown(estilo_custom, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# FUNCIONES ESPECIALIZADAS PARA VENTAS
+# FUNCIONES DE EXTRACCIÓN PDF
 # ═══════════════════════════════════════════════════════════════
 
 def clasificar_tipo_ingreso(actividad: str) -> str:
     """Clasifica el tipo de ingreso según la actividad económica."""
     if not actividad:
         return "3"
-    
-    act = actividad.lower()
-    
-    patrones = {
-        "1": ['médico', 'abogado', 'contad', 'ingeniero', 'profesiones', 'auditor'],
-        "2": ['servicio', 'mantenimiento', 'transporte', 'flete', 'taller'],
-        "4": ['industria', 'fabricación', 'manufactura'],
-        "5": ['agro', 'ganadería', 'agricultura'],
-        "7": ['export'],
+
+    act = str(actividad).lower()
+
+    clasificaciones = {
+        "1": ["médico", "abogado", "contador", "ingeniero", "profesiones", "auditor"],
+        "2": ["servicio", "mantenimiento", "transporte", "flete", "taller"],
+        "4": ["industria", "fabricación", "manufactura"],
+        "5": ["agro", "ganadería", "agricultura"],
+        "7": ["export"],
     }
-    
-    for codigo, palabras in patrones.items():
+
+    for tipo_ing, palabras in clasificaciones.items():
         if any(palabra in act for palabra in palabras):
-            return codigo
-    
+            return tipo_ing
+
     return "3"
 
 
-def extraer_dte_pdf_avanzado(f, cliente_activo) -> dict:
+def separar_zonas_pdf(pagina) -> tuple:
     """
-    Motor avanzado de extracción de DTE desde PDF.
-    Soporta DTE 01, 03, 05, 06, 11.
+    Separa la página en zona EMISOR (izquierda) y RECEPTOR (derecha).
+    Evita que pdfplumber mezcle datos de ambas partes.
+    """
+    ancho = pagina.width
+    alto = pagina.height
+    alto_header = alto * 0.60
+
+    zona_emisor = pagina.crop((0, 0, ancho * 0.47, alto_header))
+    zona_receptor = pagina.crop((ancho * 0.47, 0, ancho, alto_header))
+
+    texto_emisor = zona_emisor.extract_text(x_tolerance=4) or ""
+    texto_receptor = zona_receptor.extract_text(x_tolerance=4) or ""
+
+    return texto_emisor, texto_receptor
+
+
+def extraer_dte_avanzado(archivo, cliente_activo: dict) -> dict:
+    """
+    Motor de extracción de DTE de Ventas (El Salvador).
+    Soporta DTE: 01 (Factura), 03 (CCF), 05 (NC), 06 (ND), 11 (Exportación).
+    
+    Retorna:
+        dict con datos extraídos o error
     """
     motor = "Nativo"
-    
+
     try:
-        f.seek(0)
-        
-        with pdfplumber.open(f) as pdf:
+        # Leer bytes y resetear cursor
+        if hasattr(archivo, 'seek'):
+            archivo.seek(0)
+        file_bytes = archivo.read()
+        archivo.seek(0)
+
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             pagina = pdf.pages[0]
             texto_prueba = pagina.extract_text() or ""
-            
-            # Decisión: Nativo vs OCR
+
+            # Decisión: NATIVO vs OCR
             if len(texto_prueba.strip()) < 100:
+                # PDF imagen → OCR
                 motor = "OCR"
-                img_completa = pagina.to_image(resolution=300)
-                texto_raw = pytesseract.image_to_string(img_completa.original, lang='spa')
+                img = pagina.to_image(resolution=300)
+                texto_raw = pytesseract.image_to_string(img.original, lang='spa')
+                texto_receptor = ""
+                try:
+                    caja_receptor = (pagina.width * 0.47, 0, pagina.width, pagina.height * 0.60)
+                    img_receptor = pagina.crop(caja_receptor).to_image(resolution=300)
+                    texto_receptor = pytesseract.image_to_string(img_receptor.original, lang='spa')
+                except Exception:
+                    pass
             else:
+                # PDF nativo
+                texto_emisor_coord, texto_receptor = separar_zonas_pdf(pagina)
                 texto_raw = texto_prueba
-            
+
             t_clean = re.sub(r'\s+', ' ', texto_raw)
-            
-            # ── VALIDACIÓN DE CLIENTE (Anti-intrusos) ──
-            nit_emisor = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
-            dui_emisor = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
-            
-            patron_ids = r"\b\d{4}-?\d{6}-?\d{3}-?\d{1}\b|\b\d{14}\b|\b\d{8}-?\d{1}\b|\b\d{9}\b"
-            nits_encontrados = [re.sub(r'[^0-9]', '', n) for n in re.findall(patron_ids, t_clean)]
-            
-            es_valido = (
-                nit_emisor == "00000000000000"
-                or nit_emisor in nits_encontrados
-                or (dui_emisor and dui_emisor in nits_encontrados)
-            )
-            
-            if not es_valido:
-                return {"error": f"Documento ajeno al emisor activo ({cliente_activo['nombre']})."}
-            
-            # ── EXTRACCIÓN DE CAMPOS ──
-            
-            # Tipo y Control
-            tipo_m = re.search(r"DTE-(\d{2})", t_clean)
-            tipo = tipo_m.group(1) if tipo_m else "01"
-            
-            ctrl_m = re.search(r"(DTE-\d{2}-[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+)", t_clean)
-            ctrl = ctrl_m.group(1) if ctrl_m else ""
-            
-            # Generación
-            gen = formatear_uuid(re.sub(r'[^A-F0-9-]', '', 
-                re.search(r"(?:Generación|Código de Generación)\s*[:]?\s*([A-Z0-9-]{30,})", t_clean, re.I).group(1) 
-                if re.search(r"(?:Generación|Código de Generación)\s*[:]?\s*([A-Z0-9-]{30,})", t_clean, re.I) else ""))
-            
-            # Sello
-            sello_m = re.search(r"Sello de Recepción\s*[:]?\s*([A-Z0-9]{20,})", t_clean, re.I)
-            sello = sello_m.group(1)[:40] if sello_m else ""
-            
-            # Fecha
-            fecha = extraer_y_formatear_fecha(t_clean)
-            
-            # Receptor/Cliente
-            texto_lineas = texto_raw.split('\n')
-            idx_receptor = next((i for i, l in enumerate(texto_lineas) if 'RECEPTOR' in l.upper()), -1)
-            
-            if idx_receptor >= 0:
-                bloque_receptor = '\n'.join(texto_lineas[idx_receptor:idx_receptor+10])
-            else:
-                bloque_receptor = texto_raw[-2000:]
-            
-            nit_m = re.search(r"N\s*[I1l|]?\s*T\s*[:]?\s*([\d\-]{9,20})", bloque_receptor, re.I)
-            nit = re.sub(r'[^0-9]', '', nit_m.group(1)) if nit_m else ""
-            
-            nom_m = re.search(
-                r"(?:Nombre|Razón Social)\s*[:]?\s*([A-Za-z0-9\s\.\-]{4,60}?)(?=\n|NIT|NRC|$)",
-                bloque_receptor, re.I
-            )
-            nombre = nom_m.group(1).strip() if nom_m else ""
-            
-            # Actividad económica
-            act_m = re.search(r"Actividad\s+econ[oó]mica\s*[:]?\s*(.*?)(?=\n|Dirección)", t_clean, re.I)
-            t_ing = clasificar_tipo_ingreso(act_m.group(1) if act_m else "")
-            
-            # ── MONTOS ──
-            nos = 0.0
-            exe = 0.0
-            gra = 0.0
-            iva = 0.0
-            tot = 0.0
-            exp_serv = 0.0
-            
-            # Búsqueda de montos en líneas
-            for patron, var_name in [
-                (r"No Sujetas?\s*[:]?\s*([\d,]+\.?\d*)", "nos"),
-                (r"(?:Ventas|Monto)\s+Exent[ao]s?\s*[:]?\s*([\d,]+\.?\d*)", "exe"),
-                (r"(?:Ventas|Monto)\s+Gravad[ao]s?\s*[:]?\s*([\d,]+\.?\d*)", "gra"),
-                (r"(?:IVA|Impuesto.*?13%)\s*[:]?\s*([\d,]+\.?\d*)", "iva"),
-                (r"(?:Total|Monto Total)\s*[:]?\s*([\d,]+\.?\d*)", "tot"),
-                (r"(?:Exportación|Export)\s+Servicios?\s*[:]?\s*([\d,]+\.?\d*)", "exp_serv"),
-            ]:
-                m = re.search(patron, t_clean, re.I)
-                if m:
-                    monto = limpiar_monto(m.group(1))
-                    if var_name == "nos":
-                        nos = monto
-                    elif var_name == "exe":
-                        exe = monto
-                    elif var_name == "gra":
-                        gra = monto
-                    elif var_name == "iva":
-                        iva = monto
-                    elif var_name == "tot":
-                        tot = monto
-                    elif var_name == "exp_serv":
-                        exp_serv = monto
-            
-            # ── VALIDACIONES Y CÁLCULOS ──
+            t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
+
+        # ── VALIDACIÓN DE CLIENTE ACTIVO (ESCUDO ANTI-INTRUSOS) ──
+        nit_emisor = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
+        dui_emisor = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
+
+        patron_ids = (
+            r"\b\d{4}-?\d{6}-?\d{3}-?\d{1}\b"
+            r"|\b\d{14}\b"
+            r"|\b\d{8}-?\d{1}\b"
+            r"|\b\d{9}\b"
+        )
+
+        nits_en_doc = [re.sub(r'[^0-9]', '', n) for n in re.findall(patron_ids, t_clean)]
+
+        es_valido = (
+            nit_emisor == "00000000000000"
+            or nit_emisor in nits_en_doc
+            or (dui_emisor and dui_emisor in nits_en_doc)
+        )
+
+        if not es_valido:
+            return {"error": f"Documento ajeno al emisor activo ({cliente_activo.get('nombre', 'N/A')})."}
+
+        # ── EXTRACCIÓN DE IDENTIFICADORES ──
+        tipo_m = re.search(r"DTE-(\d{2})-", t_clean)
+        tipo = tipo_m.group(1) if tipo_m else "01"
+
+        ctrl_m = re.search(r"(DTE-\d{2}-[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+)", t_clean)
+        ctrl = ctrl_m.group(1) if ctrl_m else ""
+
+        gen = formatear_uuid(
+            re.search(
+                r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
+                t_no_spaces
+            ).group(1) if re.search(
+                r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
+                t_no_spaces
+            ) else ""
+        )
+
+        sello_m = re.search(r"Sello de Recepci[oó]n\s*[:]?\s*([A-Z0-9]{20,})", t_clean, re.I)
+        sello = sello_m.group(1) if sello_m else ""
+
+        # Fecha
+        fecha = extraer_y_formatear_fecha(t_clean)
+
+        # ── EXTRACCIÓN DEL RECEPTOR ──
+        patron_nit = r"\b\d{4}-?\d{6}-?\d{3}-?\d{1}\b|\b\d{8}-?\d{1}\b"
+        nit_m = re.search(
+            r"N\s*[I1l|]?\s*T\s*[:]?\s*([\d\-\s]{9,20})",
+            texto_receptor, re.I
+        )
+
+        if not nit_m:
+            nit_m = re.search(f"({patron_nit})", texto_receptor)
+
+        nit_receptor = re.sub(r'[^0-9]', '', nit_m.group(1)) if nit_m else ""
+
+        # Nombre del receptor
+        bloque_nombre = ""
+        if "RECEPTOR" in texto_receptor.upper():
+            bloque_nombre = texto_receptor.split("RECEPTOR", 1)[-1]
+        elif "Generacion" in texto_receptor or "Generación" in texto_receptor:
+            sep = "Generacion" if "Generacion" in texto_receptor else "Generación"
+            bloque_nombre = texto_receptor.split(sep, 1)[-1]
+        else:
+            bloque_nombre = texto_receptor
+
+        bloque_lineal = bloque_nombre.replace('\n', ' ')
+
+        nom_m = re.search(
+            r"(.*?)(?=\bN\s*[I|1l]\s*T\b|\bN\s*R\s*C\b|\bActividad\b|" + patron_nit + r")",
+            bloque_lineal, re.I
+        )
+
+        if nom_m:
+            nombre_sucio = nom_m.group(1)
+            nombre = re.sub(
+                r"(Nombre\s+o\s+raz[oó]n\s+social|Nombre|Raz[oó]n\s+social)\s*[:]?\s*",
+                "", nombre_sucio, flags=re.I
+            ).strip()
+            nombre = re.sub(r"\|", "I", nombre).strip()
+            nombre = re.sub(r"^[^A-Za-z0-9]+", "", nombre).strip()
+        else:
+            nombre = ""
+
+        # ── EXTRACCIÓN DE ACTIVIDAD ECONÓMICA ──
+        act_m = re.search(
+            r"Actividad\s+econ[oó]mica\s*[:]?\s*(.*?)(?=\s+Direcci[oó]n)",
+            t_clean, re.I
+        )
+        t_ing = clasificar_tipo_ingreso(act_m.group(1) if act_m else "")
+
+        # ── BÚSQUEDA DE MONTOS ──
+        def buscar_montos(texto_buscar: str, tipo_dte: str) -> tuple:
+            """Extrae montos usando patrones."""
+            nos, exe, gra, iva, tot, exp_serv = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
             iva_calculado = False
-            if gra > 0 and iva == 0.0:
-                iva = round(gra * 0.13, 2)
-                iva_calculado = True
-            
-            if tot == 0.0 and (gra > 0 or exe > 0):
-                tot = gra + iva + exe + nos
-            
-            return {
-                "fecha": fecha,
-                "nit": nit,
-                "nom": nombre,
-                "tipo": tipo,
-                "ctrl": ctrl,
-                "gen": gen,
-                "sello": sello,
-                "nos": nos,
-                "exe": exe,
-                "gra": gra,
-                "iva": iva,
-                "exp_serv": exp_serv,
-                "tot": tot,
-                "t_ing": t_ing,
-                "motor": motor,
-                "iva_calculado": iva_calculado,
-                "fuente": "PDF",
-                "confianza_nit": "alta",
-                "confianza_rs": "alta",
-            }
+            encontrado = False
+
+            if tipo_dte == "11":
+                # Exportación
+                exp_m = re.search(
+                    r"(?:Total de Operaciones Afectas|Monto Total de la Operaci[oó]n)"
+                    r"\s*[:]?\s*\$?\s*([\d,]+\.\d{2})",
+                    texto_buscar, re.I
+                )
+                if exp_m:
+                    exp_serv = limpiar_monto(exp_m.group(1))
+                    tot = exp_serv
+                    encontrado = True
+            else:
+                # CCF/Facturas normales
+                sum_m = re.search(
+                    r"(?:Suma de Ventas|Ventas afectas):?\s*\$?\s*([\d,.]*)\s*([\d,.]*)\s*([\d,.]*)",
+                    texto_buscar
+                )
+                if sum_m:
+                    nos = limpiar_monto(sum_m.group(1) or "0")
+                    exe = limpiar_monto(sum_m.group(2) or "0")
+                    gra = limpiar_monto(sum_m.group(3) or "0")
+                    encontrado = True
+
+                # IVA
+                iva_m = re.search(
+                    r"(?:Impuesto al Valor Agregado 13%|IVA 13%|IVA)\s*[:]?\s*\$?\s*([\d,]+\.\d{2})",
+                    texto_buscar, re.I
+                )
+                if iva_m:
+                    iva = limpiar_monto(iva_m.group(1))
+                elif gra > 0:
+                    iva = round(gra * 0.13, 2)
+                    iva_calculado = True
+
+                # Total
+                tot_m = re.search(
+                    r"(?:Total a Pagar|Monto Total)[\s$]*([\d,]+\.\d{2})",
+                    texto_buscar, re.I
+                )
+                tot = limpiar_monto(tot_m.group(1)) if tot_m else (gra + iva + exe + nos)
+
+            return nos, exe, gra, iva, tot, exp_serv, encontrado, iva_calculado
+
+        nos, exe, gra, iva, tot, exp_serv, exito_ventas, flag_iva = buscar_montos(
+            t_clean, tipo
+        )
+
+        return {
+            "fecha": fecha,
+            "nit": nit_receptor,
+            "nom": nombre,
+            "tipo": tipo,
+            "ctrl": ctrl,
+            "gen": gen,
+            "sello": sello,
+            "nos": nos,
+            "exe": exe,
+            "gra": gra,
+            "iva": iva,
+            "exp_serv": exp_serv,
+            "tot": tot,
+            "t_ing": t_ing,
+            "motor": motor,
+            "iva_calculado": flag_iva,
+            "confianza_nit": "media",
+            "confianza_rs": "media",
+            "fuente": "PDF",
+            "archivo": archivo.name if hasattr(archivo, 'name') else "documento.pdf"
+        }
 
     except Exception as e:
-        return {"error": f"Error al procesar PDF: {str(e)}"}
+        return {"error": f"Error de lectura: {str(e)}"}
 
 
 # ═══════════════════════════════════════════════════════════════
-# INICIALIZACIÓN DE ESTADO
+# ESTADO DE SESIÓN
 # ═══════════════════════════════════════════════════════════════
 
 if 'uploader_key_v' not in st.session_state:
@@ -345,7 +415,7 @@ if 'reporte_ventas' not in st.session_state:
     st.session_state.reporte_ventas = None
 
 # ═══════════════════════════════════════════════════════════════
-# HEADER PRINCIPAL
+# HEADER
 # ═══════════════════════════════════════════════════════════════
 
 st.markdown(
@@ -357,43 +427,47 @@ st.title("📈 Extractor DTE - Ventas")
 
 st.markdown(f"""
 <div class="alerta-activo">
-    <strong>EMISOR ACTUAL (Cliente Activo):</strong>
+    <strong>EMISOR ACTUAL (Cliente Activo):</strong><br>
     {cliente.get('nombre', 'N/A')} (NIT: {cliente.get('nit', 'N/A')})
 </div>
 """, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# SIDEBAR: CARGA PDF + JSON
+# SIDEBAR: CARGA PDF Y JSON
 # ═══════════════════════════════════════════════════════════════
 
 with st.sidebar:
-    st.header("📤 Carga de Datos")
+    st.header("📂 Carga de Datos")
     st.caption(f"Cliente: {cliente.get('nombre', 'N/A')}")
     st.divider()
 
+    # TABS: PDF | JSON
     tab_pdf, tab_json = st.tabs(["📄 PDF", "📋 JSON"])
 
-    # ─────────────────────────────────────────────────────────
-    # TAB: PDF
-    # ─────────────────────────────────────────────────────────
+    # ───────────────────────────────────────────────────────────
+    # TAB PDF
+    # ───────────────────────────────────────────────────────────
     with tab_pdf:
+        st.subheader("Carga de Documentos PDF")
+        
         archivos_pdf = st.file_uploader(
             "Arrastra tus PDFs (DTE 01, 03, 05, 06, 11)",
             type="pdf",
             accept_multiple_files=True,
-            key=st.session_state.uploader_key_v
+            key=st.session_state.uploader_key_v,
+            help="Soporta múltiples archivos PDF de DTE"
         )
 
         usar_gemini = False
-        if GEMINI_DISPONIBLE:
+        if st.secrets.get("GEMINI_API_KEY"):
             usar_gemini = st.checkbox(
-                "🤖 Activar Gemini (datos dudosos)",
+                "🤖 Activar Validación Gemini",
                 value=False,
-                help="Valida datos con confianza baja"
+                help="Si la confianza es baja, Gemini intentará corregir los datos"
             )
 
         if archivos_pdf and st.button(
-            "🚀 Procesar PDFs",
+            "▶️ Procesar PDFs",
             type="primary",
             use_container_width=True,
             key="btn_procesar_pdf_v"
@@ -405,8 +479,10 @@ with st.sidebar:
             archivos_rechazados = []
             gemini_validados = []
 
-            nuevos = [f for f in archivos_pdf
-                      if f.name not in st.session_state.archivos_procesados_v]
+            nuevos = [
+                f for f in archivos_pdf
+                if f.name not in st.session_state.archivos_procesados_v
+            ]
 
             if nuevos:
                 bar = st.progress(0)
@@ -418,30 +494,27 @@ with st.sidebar:
                     if idx > 0 and idx % 30 == 0:
                         gc.collect()
 
+                    # Progress
                     if idx > 0:
                         elapsed = time.time() - t_inicio
                         eta = int((elapsed / idx) * (total - idx))
                         m, s = divmod(eta, 60)
                         txt_progreso.markdown(
-                            f"📄 Procesando: **{idx+1}** de **{total}** "
-                            f"| ⏳ Restante: {m:02d}:{s:02d}"
+                            f"▶️ **{idx+1}** de **{total}** | ⏳ {m:02d}:{s:02d}",
+                            unsafe_allow_html=True
                         )
                     else:
-                        txt_progreso.markdown(f"📄 Procesando: **1** de **{total}** | ⏳ Calculando...")
+                        txt_progreso.markdown("▶️ **1** de **{total}** | Analizando...")
 
-                    # Leer bytes para Gemini
-                    f.seek(0)
-                    file_bytes = f.read()
-                    f.seek(0)
-
-                    res = extraer_dte_pdf_avanzado(f, cliente)
+                    # Procesar PDF
+                    res = extraer_dte_avanzado(f, cliente)
                     st.session_state.archivos_procesados_v.add(f.name)
 
                     if "error" in res:
                         archivos_rechazados.append(f"{f.name} — {res['error']}")
                     else:
-                        # ── GEMINI: Si confianza baja ──
-                        if usar_gemini and GEMINI_DISPONIBLE:
+                        # ── GEMINI: validación si confianza baja ──
+                        if usar_gemini and st.secrets.get("GEMINI_API_KEY"):
                             c_nit = res.get("confianza_nit", "media")
                             c_rs = res.get("confianza_rs", "media")
                             gra = float(res.get("gra", 0))
@@ -449,16 +522,21 @@ with st.sidebar:
 
                             if necesita_gemini(c_nit, c_rs, gra, tot):
                                 try:
-                                    with pdfplumber.open(f) as pdf_temp:
-                                        texto_pdf = "\n".join(
-                                            p.extract_text() or "" for p in pdf_temp.pages[:3]
+                                    f.seek(0)
+                                    with pdfplumber.open(f) as pdf:
+                                        texto_pdf = "".join(
+                                            (p.extract_text() or "") for p in pdf.pages[:2]
                                         )
+                                    
                                     gemini_res = validar_con_gemini(
-                                        texto_pdf, res, "Factura" if res.get("tipo") == "01" else "CCF"
+                                        texto_pdf,
+                                        res,
+                                        "CCF" if res.get("tipo") == "03" else "Factura"
                                     )
+                                    
                                     if gemini_res.get("_exito"):
-                                        # Aplicar correcciones solo si existen
-                                        for campo in ["nit", "nom", "gra", "iva", "exe", "tot", "gen", "fecha"]:
+                                        # Aplicar correcciones
+                                        for campo in ["nit", "nom", "gra", "iva", "exe", "tot", "gen"]:
                                             if gemini_res.get(campo) and not res.get(campo):
                                                 res[campo] = gemini_res[campo]
                                         res["confianza_gemini"] = gemini_res.get("confianza_gemini")
@@ -476,13 +554,16 @@ with st.sidebar:
                             )
                         else:
                             incompleto = (
-                                "" in [res.get("fecha", ""), res.get("nit", ""),
-                                       res.get("nom", ""), res.get("ctrl", "")]
+                                "" in [
+                                    res.get("fecha", ""), res.get("nit", ""),
+                                    res.get("nom", ""), res.get("ctrl", "")
+                                ]
                                 or tot_val == 0.0
                             )
 
                         if incompleto:
                             vacios_deteccion.append(f.name)
+
                         if res.get("iva_calculado"):
                             iva_calculado_files.append(f.name)
 
@@ -506,7 +587,7 @@ with st.sidebar:
 
                     bar.progress((idx + 1) / total)
 
-                txt_progreso.success(f"✅ {total} archivos procesados.")
+                txt_progreso.success(f"✅ {total} documentos procesados")
 
                 st.session_state.reporte_ventas = {
                     "rechazados": archivos_rechazados,
@@ -518,32 +599,31 @@ with st.sidebar:
 
                 if extracted:
                     new_df = pd.DataFrame(extracted)
-                    if st.session_state.db_ventas.empty:
-                        st.session_state.db_ventas = new_df
-                    else:
-                        st.session_state.db_ventas = pd.concat(
-                            [st.session_state.db_ventas, new_df], ignore_index=True
-                        )
+                    st.session_state.db_ventas = (
+                        new_df if st.session_state.db_ventas.empty
+                        else pd.concat([st.session_state.db_ventas, new_df], ignore_index=True)
+                    )
 
                 gc.collect()
                 time.sleep(0.3)
                 st.rerun()
 
-    # ─────────────────────────────────────────────────────────
-    # TAB: JSON
-    # ─────────────────────────────────────────────────────────
+    # ───────────────────────────────────────────────────────────
+    # TAB JSON
+    # ───────────────────────────────────────────────────────────
     with tab_json:
-        st.caption("📋 Ministerio de Hacienda (DTE formato oficial)")
+        st.subheader("Carga desde JSON (Ministerio)")
+        st.caption("Soporta archivos JSON del formato oficial de Hacienda")
 
         archivos_json = st.file_uploader(
-            "Arrastra tus JSONs (DTE 01, 03, 05, 06, 11)",
+            "Arrastra JSONs (DTE 01, 03, 05, 06, 11)",
             type=["json"],
             accept_multiple_files=True,
             key=st.session_state.json_key_v
         )
 
         if archivos_json and st.button(
-            "🚀 Procesar JSONs",
+            "▶️ Procesar JSONs",
             type="primary",
             use_container_width=True,
             key="btn_procesar_json_v"
@@ -561,11 +641,11 @@ with st.sidebar:
                     datos = json.load(f)
                     res = parsear_json_dte(datos, "ventas")
 
-                    if "error" in res or not res.get("_exito", True):
-                        errores_json.append(f"{f.name} — {res.get('error', 'Error desconocido')}")
+                    if "error" in res:
+                        errores_json.append(f"{f.name} — {res['error']}")
                         continue
 
-                    # Validar tipo
+                    # Validar tipo DTE
                     tipo = res.get("tipo", "01")
                     if tipo not in ["01", "03", "05", "06", "11"]:
                         rechazados_tipo.append(f"{f.name} (DTE-{tipo} no soportado)")
@@ -594,40 +674,43 @@ with st.sidebar:
 
             if extracted_json:
                 new_df = pd.DataFrame(extracted_json)
-                if st.session_state.db_ventas.empty:
-                    st.session_state.db_ventas = new_df
-                else:
-                    st.session_state.db_ventas = pd.concat(
-                        [st.session_state.db_ventas, new_df], ignore_index=True
-                    )
+                st.session_state.db_ventas = (
+                    new_df if st.session_state.db_ventas.empty
+                    else pd.concat([st.session_state.db_ventas, new_df], ignore_index=True)
+                )
 
             # Resumen
             resumen = []
             if extracted_json:
                 resumen.append(f"✅ {len(extracted_json)} importados")
             if duplicados_json:
-                resumen.append(f"⏭️ {len(duplicados_json)} duplicados")
-            if errores_json:
-                resumen.append(f"❌ {len(errores_json)} errores")
+                resumen.append(f"🔄 {len(duplicados_json)} duplicados")
             if rechazados_tipo:
                 resumen.append(f"⚠️ {len(rechazados_tipo)} tipo incorrecto")
+            if errores_json:
+                resumen.append(f"❌ {len(errores_json)} errores")
 
             if resumen:
                 st.success(" | ".join(resumen))
+
             if errores_json:
-                with st.expander("Ver errores"):
+                with st.expander("Ver errores JSON"):
                     for e in errores_json:
                         st.error(e)
+
+            if rechazados_tipo:
+                with st.expander("Ver rechazados"):
+                    for r in rechazados_tipo:
+                        st.warning(r)
 
             gc.collect()
             st.rerun()
 
-    # Botón Limpiar
+    # ── Botón Limpiar ──
     st.divider()
     if st.button("🧹 Limpiar Memoria", type="secondary", use_container_width=True):
-        st.session_state.db_ventas = pd.DataFrame()
-        st.session_state.archivos_procesados_v = set()
-        st.session_state.reporte_ventas = None
+        for var in ["db_ventas", "archivos_procesados_v", "reporte_ventas"]:
+            st.session_state.pop(var, None)
         st.session_state.uploader_key_v = str(time.time())
         st.session_state.json_key_v = str(time.time()) + "_json"
         gc.collect()
@@ -635,166 +718,140 @@ with st.sidebar:
 
     if not st.session_state.db_ventas.empty:
         st.divider()
-        st.caption(f"📊 {len(st.session_state.db_ventas)} registros en memoria")
+        total_pdf = len(
+            st.session_state.db_ventas[
+                st.session_state.db_ventas.get("fuente", pd.Series()) == "PDF"
+            ]
+        ) if "fuente" in st.session_state.db_ventas.columns else len(st.session_state.db_ventas)
+
+        total_json = len(
+            st.session_state.db_ventas[
+                st.session_state.db_ventas.get("fuente", pd.Series()) == "JSON"
+            ]
+        ) if "fuente" in st.session_state.db_ventas.columns else 0
+
+        st.caption(f"📊 Total: {len(st.session_state.db_ventas)} | PDF: {total_pdf} | JSON: {total_json}")
 
 # ═══════════════════════════════════════════════════════════════
-# DASHBOARD PRINCIPAL
+# REPORTE DE EXTRACCIÓN
 # ═══════════════════════════════════════════════════════════════
 
 if st.session_state.reporte_ventas:
     rep = st.session_state.reporte_ventas
-    st.markdown("### 📊 Reporte de Extracción")
+    st.markdown("### 📋 Reporte de Extracción")
 
-    c1, c2, c3, c4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4)
 
-    with c1:
-        if rep.get("rechazados"):
-            st.error(f"🚫 **{len(rep['rechazados'])} Rechazados**")
+    with col1:
+        n = len(rep.get("rechazados", []))
+        if n:
+            st.error(f"🚫 **{n} Rechazados**")
             with st.expander("Ver lista"):
                 st.markdown(
-                    '<div class="scroll-list">' +
-                    "".join([f"• {a}<br>" for a in rep["rechazados"]]) +
-                    '</div>',
+                    '<div class="scroll-list">'
+                    + "".join([f"• {a}<br>" for a in rep["rechazados"]])
+                    + '</div>',
                     unsafe_allow_html=True
                 )
         else:
             st.success("✅ **0 Rechazados**")
 
-    with c2:
-        if rep.get("vacios"):
-            st.error(f"🚨 **{len(rep['vacios'])} Incompletos**")
+    with col2:
+        n = len(rep.get("vacios", []))
+        if n:
+            st.error(f"🚨 **{n} Incompletos**")
             with st.expander("Ver lista"):
                 st.markdown(
-                    '<div class="scroll-list">' +
-                    "".join([f"• {a}<br>" for a in rep["vacios"]]) +
-                    '</div>',
+                    '<div class="scroll-list">'
+                    + "".join([f"• {a}<br>" for a in rep["vacios"]])
+                    + '</div>',
                     unsafe_allow_html=True
                 )
         else:
             st.success("✅ **0 Incompletos**")
 
-    with c3:
-        if rep.get("duplicados_gen"):
-            st.error(f"🛑 **{len(rep['duplicados_gen'])} Omitidos**")
+    with col3:
+        n = len(rep.get("duplicados_gen", []))
+        if n:
+            st.error(f"🔄 **{n} Duplicados**")
             with st.expander("Ver lista"):
                 st.markdown(
-                    '<div class="scroll-list">' +
-                    "".join([f"• {a}<br>" for a in rep["duplicados_gen"]]) +
-                    '</div>',
+                    '<div class="scroll-list">'
+                    + "".join([f"• {a}<br>" for a in rep["duplicados_gen"]])
+                    + '</div>',
                     unsafe_allow_html=True
                 )
         else:
-            st.success("✅ **0 Omitidos**")
+            st.success("✅ **0 Duplicados**")
 
-    with c4:
-        if rep.get("iva_calc"):
-            st.info(f"🧮 **{len(rep['iva_calc'])} IVA Calc.**")
+    with col4:
+        n = len(rep.get("iva_calc", []))
+        if n:
+            st.info(f"🧮 **{n} IVA Calc**")
             with st.expander("Ver lista"):
                 st.markdown(
-                    '<div class="scroll-list">' +
-                    "".join([f"• {a}<br>" for a in rep["iva_calc"]]) +
-                    '</div>',
+                    '<div class="scroll-list">'
+                    + "".join([f"• {a}<br>" for a in rep["iva_calc"]])
+                    + '</div>',
                     unsafe_allow_html=True
                 )
         else:
-            st.success("✅ **0 IVA Calc.**")
+            st.success("✅ **0 IVA Calc**")
 
     if rep.get("gemini"):
-        st.divider()
-        st.info(f"🤖 **{len(rep['gemini'])} documentos validados con Gemini**")
+        st.info(f"🤖 **{len(rep['gemini'])} Validados con Gemini**")
 
     st.divider()
 
 # ═══════════════════════════════════════════════════════════════
-# TABLAS DE RESULTADOS CON FILTROS
+# TABLA DE RESULTADOS CON FILTROS
 # ═══════════════════════════════════════════════════════════════
 
 if not st.session_state.db_ventas.empty:
-    st.markdown("### 📋 Datos Extraídos")
+    st.markdown("### 📊 Datos Extraídos")
 
     # Aplicar filtros
-    df_filtrado = render_panel_filtros(st.session_state.db_ventas, "ventas")
+    df_filtrado = render_panel_filtros(st.session_state.db_ventas, "ventas_v")
 
     if not df_filtrado.empty:
-        tab1, tab2, tab3 = st.tabs([
-            "📊 Resumen Ejecutivo",
-            "📋 Tabla Detallada",
-            "🔍 Auditoría"
-        ])
+        # Mostrar tabla
+        st.dataframe(
+            df_filtrado[
+                ["fecha", "nit", "nom", "tipo", "gra", "iva", "tot", "motor", "fuente"]
+            ],
+            use_container_width=True,
+            hide_index=True
+        )
 
-        with tab1:
-            col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
-
-            with col_kpi1:
-                total_docs = len(df_filtrado)
-                st.metric("📄 Total Documentos", total_docs)
-
-            with col_kpi2:
-                try:
-                    total_gravado = float(df_filtrado["gra"].sum())
-                    st.metric("💵 Total Gravado", f"${total_gravado:,.2f}")
-                except Exception:
-                    st.metric("💵 Total Gravado", "Error")
-
-            with col_kpi3:
-                try:
-                    total_iva = float(df_filtrado["iva"].sum())
-                    st.metric("📊 Total IVA", f"${total_iva:,.2f}")
-                except Exception:
-                    st.metric("📊 Total IVA", "Error")
-
-            with col_kpi4:
-                try:
-                    total_general = float(df_filtrado["tot"].sum())
-                    st.metric("💰 Total General", f"${total_general:,.2f}")
-                except Exception:
-                    st.metric("💰 Total General", "Error")
-
-            st.divider()
-
-            # Gráficos
-            col_grafico1, col_grafico2 = st.columns(2)
-
-            with col_grafico1:
-                try:
-                    tipo_counts = df_filtrado["tipo"].value_counts()
-                    st.bar_chart(tipo_counts, use_container_width=True)
-                except Exception:
-                    st.info("No hay datos suficientes para gráfico")
-
-            with col_grafico2:
-                try:
-                    motor_counts = df_filtrado["motor"].value_counts()
-                    st.pie_chart(motor_counts, use_container_width=True)
-                except Exception:
-                    st.info("No hay datos suficientes para gráfico")
-
-        with tab2:
-            # Columnas a mostrar
-            cols_mostrar = ["archivo", "fecha", "tipo", "nit", "nom", "gra", "iva", "tot", "motor", "fuente"]
-            cols_existentes = [c for c in cols_mostrar if c in df_filtrado.columns]
-
-            st.dataframe(
-                df_filtrado[cols_existentes],
-                use_container_width=True,
-                hide_index=True
-            )
-
-        with tab3:
-            st.subheader("Estado de Validación")
-
-            col_val1, col_val2 = st.columns(2)
-
-            with col_val1:
-                iva_calc_count = df_filtrado["iva_calculado"].sum() if "iva_calculado" in df_filtrado.columns else 0
-                st.metric("🧮 IVA Calculados", int(iva_calc_count))
-
-            with col_val2:
-                gemini_count = df_filtrado["confianza_gemini"].notna().sum() if "confianza_gemini" in df_filtrado.columns else 0
-                st.metric("🤖 Validados Gemini", int(gemini_count))
-
+        # Estadísticas
+        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        with col_stat1:
+            st.metric("📊 Registros", len(df_filtrado))
+        with col_stat2:
+            total_gra = df_filtrado["gra"].apply(lambda x: float(x) if x else 0.0).sum()
+            st.metric("💵 Total Gravado", f"${total_gra:,.2f}")
+        with col_stat3:
+            total_general = df_filtrado["tot"].apply(lambda x: float(x) if x else 0.0).sum()
+            st.metric("🎯 Total General", f"${total_general:,.2f}")
     else:
         st.info("No hay registros que coincidan con los filtros aplicados.")
 
 else:
-    st.info("📭 Sube archivos PDF o JSON para comenzar la extracción.")
+    st.info("📤 Carga archivos PDF o JSON en el panel lateral para comenzar.")
+
+st.divider()
+
+# ═══════════════════════════════════════════════════════════════
+# FOOTER
+# ═══════════════════════════════════════════════════════════════
+
+col_f1, col_f2, col_f3 = st.columns(3)
+
+with col_f1:
+    st.caption(f"👤 Usuario: {st.session_state.get('usuario_actual', 'N/A')}")
+
+with col_f2:
+    st.caption("🏢 Learnix Hub v2.0")
+
+with col_f3:
+    st.caption(f"📅 {datetime.now().strftime('%d/%m/%Y')}")
