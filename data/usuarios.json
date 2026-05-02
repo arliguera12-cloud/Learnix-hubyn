@@ -1,24 +1,35 @@
 {
-  "usuarios": [
-    {
-      "id": 1,
-      "usuario": "admin",
-      "password": "admin123",
-      "nombre": "Administrador",
-      "email": "admin@learnixhub.com",
-      "rol": "admin",
-      "activo": true,
-      "fecha_registro": "2026-01-01"
-    },
-    {
-      "id": 2,
-      "usuario": "contador",
-      "password": "contador123",
-      "nombre": "Contador Principal",
-      "email": "contador@learnixhub.com",
-      "rol": "contador",
-      "activo": true,
-      "fecha_registro": "2026-01-05"
-    }
-  ]
+  "admin": {
+    "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+    "clientes": [
+      {
+        "nombre": "Empresa Demo 1",
+        "nit": "0614-123456-789-0",
+        "dui": "12345678-9",
+        "email": "admin@empresademo1.com",
+        "telefono": "+503 2234-5678"
+      },
+      {
+        "nombre": "Empresa Demo 2",
+        "nit": "0614-654321-987-6",
+        "dui": "87654321-5",
+        "email": "admin@empresademo2.com",
+        "telefono": "+503 2345-6789"
+      }
+    ],
+    "fecha_registro": "2025-05-02 21:27:44"
+  },
+  "contador": {
+    "password": "68ba50a76a7ff2c8bd6e9df32d3b3a1a5c4cebca9e2e4e9f5f3f5f8f8f3f5c5",
+    "clientes": [
+      {
+        "nombre": "Cliente del Contador",
+        "nit": "0614-111111-111-1",
+        "dui": "11111111-1",
+        "email": "cliente@contador.com",
+        "telefono": "+503 7777-7777"
+      }
+    ],
+    "fecha_registro": "2025-05-02 21:27:44"
+  }
 }
