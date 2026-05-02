@@ -10,7 +10,12 @@ from .constantes import (
     CAMPOS_VENTAS,
     CAMPOS_COMPRAS,
     CAMPOS_RETENCIONES,
-    CAMPOS_SUJETOS_EXCLUIDOS
+    CAMPOS_SUJETOS_EXCLUIDOS,
+    GEMINI_MODEL,
+    CONFIANZA_UMBRALES,
+    MENSAJES,
+    PATRON_NIT,
+    PATRON_DUI,
 )
 
 from .extractores import (
@@ -36,6 +41,11 @@ __all__ = [
     "CAMPOS_COMPRAS",
     "CAMPOS_RETENCIONES",
     "CAMPOS_SUJETOS_EXCLUIDOS",
+    "GEMINI_MODEL",
+    "CONFIANZA_UMBRALES",
+    "MENSAJES",
+    "PATRON_NIT",
+    "PATRON_DUI",
     # Extractores
     "limpiar_monto",
     "formatear_uuid",
