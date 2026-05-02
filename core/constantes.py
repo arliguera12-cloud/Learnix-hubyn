@@ -29,11 +29,11 @@ TIPOS_DTE = {
 # ═══════════════════════════════════════════════════════════════
 
 FORMATOS_FECHA = [
-    "%Y-%m-%d",      # 2025-01-15
-    "%d/%m/%Y",      # 15/01/2025
-    "%d-%m-%Y",      # 15-01-2025
-    "%Y/%m/%d",      # 2025/01/15
-    "%d.%m.%Y",      # 15.01.2025
+    "%Y-%m-%d",
+    "%d/%m/%Y",
+    "%d-%m-%Y",
+    "%Y/%m/%d",
+    "%d.%m.%Y",
 ]
 
 # ═══════════════════════════════════════════════════════════════
@@ -48,14 +48,14 @@ CAMPOS_VENTAS = [
     "ctrl",
     "gen",
     "sello",
-    "nos",      # No sujeto
-    "exe",      # Exento
-    "gra",      # Gravado
-    "iva",      # IVA
-    "exp_serv", # Exportación servicios
-    "tot",      # Total
-    "t_ing",    # Tipo de ingreso
-    "motor",    # Origen (PDF, JSON, OCR)
+    "nos",
+    "exe",
+    "gra",
+    "iva",
+    "exp_serv",
+    "tot",
+    "t_ing",
+    "motor",
     "iva_calculado",
     "confianza_nit",
     "confianza_rs",
@@ -72,12 +72,12 @@ CAMPOS_COMPRAS = [
     "ctrl",
     "gen",
     "sello",
-    "exe",      # Exento
-    "gra",      # Gravado
-    "iva",      # IVA
-    "ret",      # Retención
-    "perc",     # Percepción
-    "tot",      # Total
+    "exe",
+    "gra",
+    "iva",
+    "ret",
+    "perc",
+    "tot",
     "motor",
     "iva_calc",
     "confianza_nit",
@@ -133,8 +133,8 @@ GEMINI_MAX_TOKENS = 1000
 # PATRONES REGEX
 # ═══════════════════════════════════════════════════════════════
 
-PATRON_NIT = r'\b(\d{4})-(\d{6})-(\d{3})-(\d{1})\b'  # 0614-123456-789-0
-PATRON_DUI = r'\b(\d{8})-(\d{1})\b'                  # 12345678-9
+PATRON_NIT = r'\b(\d{4})-(\d{6})-(\d{3})-(\d{1})\b'
+PATRON_DUI = r'\b(\d{8})-(\d{1})\b'
 PATRON_FECHA_ISO = r'\b(20\d{2})[/-](\d{1,2})[/-](\d{1,2})\b'
 PATRON_FECHA_TRADICIONAL = r'\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})\b'
 PATRON_UUID = r'[A-F0-9a-f]{32}'
