@@ -50,10 +50,8 @@ def formatear_uuid(uuid_raw: str) -> str:
     if not uuid_raw:
         return ""
 
-    # Extraer solo caracteres hexadecimales
     limpio = re.sub(r'[^A-F0-9a-f]', '', uuid_raw).upper()
 
-    # Si tiene 32 caracteres, agregar guiones
     if len(limpio) == 32:
         return f"{limpio[0:8]}-{limpio[8:12]}-{limpio[12:16]}-{limpio[16:20]}-{limpio[20:32]}"
 
@@ -73,12 +71,10 @@ def extraer_y_formatear_fecha(texto: str) -> str:
     if not texto:
         return ""
 
-    # Intentar ISO primero (2025-01-15)
     m = re.search(PATRON_FECHA_ISO, texto)
     if m:
         return f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}"
 
-    # Intentar tradicional (15/01/2025)
     m = re.search(PATRON_FECHA_TRADICIONAL, texto)
     if m:
         return f"{m.group(3)}-{m.group(2).zfill(2)}-{m.group(1).zfill(2)}"
@@ -107,7 +103,6 @@ def parsear_json_dte(datos: dict, modo: str = "ventas") -> dict:
         receptor = datos.get("receptor", {})
         resumen = datos.get("resumen", {})
 
-        # Extraer campos comunes
         tipo = str(identificacion.get("tipoDte", "01")).zfill(2)
         ctrl = identificacion.get("numeroControl", "")
         gen = formatear_uuid(identificacion.get("codigoGeneracion", ""))
@@ -115,7 +110,6 @@ def parsear_json_dte(datos: dict, modo: str = "ventas") -> dict:
         fecha_raw = identificacion.get("fecEmi", "")
         fecha = extraer_y_formatear_fecha(fecha_raw) if fecha_raw else ""
 
-        # Extraer montos
         monto_no_sujeto = float(resumen.get("totalNoSuj", 0) or 0)
         monto_exento = float(resumen.get("totalExenta", 0) or 0)
         monto_gravado = float(resumen.get("totalGravada", 0) or 0)
@@ -123,7 +117,6 @@ def parsear_json_dte(datos: dict, modo: str = "ventas") -> dict:
         monto_total = float(resumen.get("montoTotalOperacion", resumen.get("totalPagar", 0)) or 0)
         monto_retencion = float(resumen.get("totalIvaRetenido", resumen.get("reteRenta", 0)) or 0)
 
-        # ── PARSEO POR TIPO ──
         if modo == "ventas":
             return {
                 "fecha": fecha,
