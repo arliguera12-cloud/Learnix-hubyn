@@ -1,293 +1,186 @@
-# pages/4_Extractor_DTE_Sujetos_Excluidos.py
-"""
-Módulo de Extracción de DTE - SUJETOS EXCLUIDOS
-Tipos: 13, 14, 15
-"""
-
 import streamlit as st
+import pdfplumber
 import pandas as pd
+import re
+import time
 import json
 import os
-from datetime import datetime
-import PyPDF2
+import gc
+from io import BytesIO
 
-from core import (
-    limpiar_monto,
-    formatear_uuid,
-    extraer_y_formatear_fecha,
-    parsear_json_dte,
-    validar_con_gemini,
-    render_panel_filtros,
-    CAMPOS_SUJETOS_EXCLUIDOS,
-    MENSAJES,
-)
-
-# ═══════════════════════════════════════════════════════════════
-# CONFIGURACIÓN INICIAL
-# ═══════════════════════════════════════════════════════════════
-
-st.set_page_config(page_title="Extractor Sujetos Excluidos", layout="wide")
-
-if not st.session_state.get("cliente_activo"):
-    st.warning(MENSAJES["sin_cliente"])
+# --- VERIFICACIÓN DE SEGURIDAD ---
+if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
+    st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
     st.stop()
 
-cliente = st.session_state.get("cliente_activo")
-CLIENTE_NOMBRE = cliente.get("nombre", "N/A")
-CLIENTE_NIT = cliente.get("nit", "N/A")
+if "cliente_activo" not in st.session_state or not st.session_state.cliente_activo:
+    st.warning("⚠️ Debes seleccionar un Cliente Activo en el Dashboard antes de extraer Sujetos Excluidos.")
+    st.stop()
 
-# ═══════════════════════════════════════════════════════════════
-# FUNCIONES AUXILIARES
-# ═══════════════════════════════════════════════════════════════
+cliente = st.session_state.cliente_activo
 
-def extraer_texto_pdf(archivo_pdf) -> str:
-    """Extrae texto de un archivo PDF."""
+st.set_page_config(page_title="Extraer DTE Sujetos Excluidos", layout="wide", page_icon="⚖️")
+
+estilo_custom = """
+<style>
+    [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background-color: #000000 !important; }
+    [data-testid="stSidebar"] { background-color: #161616 !important; border-right: 1px solid #333333; }
+    h1, h2, h3, h4, h5, h6, p, label, span { color: #F7F5EE !important; }
+    [data-testid="stDataFrame"] span { color: inherit !important; }
+    div.stButton > button[kind="primary"], div.stDownloadButton > button[kind="primary"] { background-color: #003057 !important; border: 1px solid #00407A !important; border-radius: 6px; transition: 0.3s; }
+    div.stButton > button[kind="primary"] *, div.stDownloadButton > button[kind="primary"] * { color: #FFFFFF !important; font-weight: bold !important; }
+    div.stButton > button[kind="secondary"] { background-color: #2A2A2A !important; border: 1px solid #555555 !important; border-radius: 6px; }
+    div.stButton > button[kind="secondary"] * { color: #FFFFFF !important; font-weight: bold !important; }
+    .alerta-activo { padding: 10px; border-radius: 6px; border-left: 4px solid #00407A; background-color: #111111; color: white; margin-bottom: 15px; font-size: 14px; }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] { min-width: 45% !important; flex: 1 1 45% !important; }
+</style>
+"""
+st.markdown(estilo_custom, unsafe_allow_html=True)
+
+def limpiar_monto(monto_str):
+    monto_str = re.sub(r'[^\d.,]', '', str(monto_str))
+    if not monto_str: return 0.0
+    m_sep = re.search(r'([.,])(\d{1,2})$', monto_str)
+    if m_sep:
+        decimales = m_sep.group(2)
+        enteros = re.sub(r'[^\d]', '', monto_str[:m_sep.start()])
+        if not enteros: enteros = "0"
+        return float(f"{enteros}.{decimales}")
+    return float(re.sub(r'[^\d]', '', monto_str))
+
+def extraer_y_formatear_fecha(texto):
+    m_hacienda = re.search(r"\b(20[2-3]\d)\s*[\-\/]\s*(0[1-9]|1[0-2])\s*[\-\/]\s*([0-2]\d|3[0-1])\b", texto)
+    if m_hacienda: return f"{int(m_hacienda.group(3)):02d}/{int(m_hacienda.group(2)):02d}/{m_hacienda.group(1)}"
+    m_suelto = re.search(r"\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b", texto)
+    if m_suelto: 
+        p1, p2, y = int(m_suelto.group(1)), int(m_suelto.group(2)), m_suelto.group(3)
+        if p1 <= 12 and p2 > 12: return f"{p2:02d}/{p1:02d}/{y}"
+        elif p2 <= 12 and p1 > 12: return f"{p1:02d}/{p2:02d}/{y}"
+        elif p2 <= 12 and p1 <= 31: return f"{p1:02d}/{p2:02d}/{y}"
+    return ""
+
+def extraer_sujetos_nativo(file_bytes, cliente_activo):
     try:
-        reader = PyPDF2.PdfReader(archivo_pdf)
-        texto = ""
-        for pagina in reader.pages:
-            texto += pagina.extract_text()
-        return texto
-    except Exception as e:
-        st.error(f"❌ Error al leer PDF: {str(e)}")
-        return ""
+        texto_completo = ""
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages: texto_completo += (page.extract_text() or "") + "\n"
+                
+        if len(texto_completo.strip()) < 50: return {"error": "El PDF parece ser una imagen."}
 
+        t_clean = re.sub(r'\s+', ' ', texto_completo)
+        t_no_spaces = re.sub(r'\s+', '', t_clean).upper()
 
-def procesar_json_sujetos(json_data: dict) -> dict:
-    """Procesa un JSON de DTE de sujetos excluidos."""
-    return parsear_json_dte(json_data, modo="sujetos_excluidos")
+        m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_spaces)
+        tipo = "14" # Asumimos DTE-14
+        if m_ctrl:
+            ctrl = m_ctrl.group(1).replace("O", "0")
+            m_tipo = re.search(r"DTE-(\d{2})", ctrl)
+            if m_tipo: tipo = m_tipo.group(1)
+            
+        if tipo != "14": return {"error_tipo": f"El documento es DTE-{tipo}. Solo se admiten DTE-14 (Sujetos Excluidos)."}
 
+        nit_cliente_limpio = re.sub(r'[^0-9]', '', cliente_activo['nit'])
+        
+        gen = ""
+        m_gen_raw = re.search(r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})", t_no_spaces)
+        if m_gen_raw:
+            limpio = m_gen_raw.group(1).replace("-", "")
+            gen = f"{limpio[:8]}-{limpio[8:12]}-{limpio[12:16]}-{limpio[16:20]}-{limpio[20:]}"
 
-# ═══════════════════════════════════════════════════════════════
-# HEADER
-# ═══════════════════════════════════════════════════════════════
+        fecha = extraer_y_formatear_fecha(t_clean)
 
-col_h1, col_h2 = st.columns([3, 1])
-with col_h1:
-    st.markdown('<div class="logo-title">YN</div>', unsafe_allow_html=True)
-    st.title("⚖️ Extractor DTE - SUJETOS EXCLUIDOS")
-with col_h2:
-    if st.button("← Volver", use_container_width=True):
-        st.session_state["pagina_actual"] = "dashboard"
+        identificador_sujeto = ""
+        nom_sujeto = "⚠️ SUJETO NO DETECTADO"
+
+        patron_identificadores = r"\b\d{4}\s*[-]?\s*\d{6}\s*[-]?\s*\d{3}\s*[-]?\s*\d{1}\b|\b\d{14}\b|\b\d{8}\s*[-]?\s*\d{1}\b|\b\d{9}\b"
+        ids_encontrados = re.findall(patron_identificadores, texto_completo)
+        ids_limpios = list(dict.fromkeys([re.sub(r'[^0-9]', '', n) for n in ids_encontrados]))
+        ids_candidatos = [n for n in ids_limpios if n != nit_cliente_limpio]
+
+        if ids_candidatos: identificador_sujeto = ids_candidatos[0]
+
+        # Extraer nombre (Guillotina Anti-Basura)
+        regex_nombre = r"(?:Nombre[:\s]+|Nombre del Sujeto[:\s]+|Sujeto Excluido[:\s]+)(.*?)(?:NIT|DUI|Direcci[oó]n|Actividad|$)"
+        m_nombre = re.search(regex_nombre, texto_completo, re.I)
+        if m_nombre:
+            candidato = m_nombre.group(1).strip()
+            if len(candidato) > 5 and not any(bad in candidato.upper() for bad in ["@", "EMAIL", "CORREO", ".COM"]):
+                nom_sujeto = re.sub(r"^[-_.,:]+", "", candidato.upper()).strip()
+                if len(nom_sujeto) > 65: nom_sujeto = "⚠️ REVISAR NOMBRE"
+
+        # Extraer montos: Monto Compra (Base) y Retención Renta (10%)
+        base, ret = 0.0, 0.0
+        montos_brutos = re.findall(r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean)
+        valores = sorted(list(set([limpiar_monto(m) for m in montos_brutos])), reverse=True)
+        valores = [v for v in valores if v > 0] 
+
+        for v in valores:
+            retencion_calc = round(v * 0.10, 2) # Retención Renta 10%
+            if any(abs(r - retencion_calc) <= 0.02 for r in valores if r < v):
+                base = v
+                ret = retencion_calc
+                break
+
+        if base == 0.0:
+            m_base = re.search(r"(?:Monto de la Operaci.n|Monto Sujeto|Compra)[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
+            if m_base: base = limpiar_monto(m_base.group(1))
+            m_ret = re.search(r"(?:Impuesto Retenido|Retenci.n Renta|10%)[^\d]{0,30}?(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,4})", t_clean, re.I)
+            if m_ret: ret = limpiar_monto(m_ret.group(1))
+
+        return {
+            "fecha": fecha, "id_sujeto": identificador_sujeto, "nom_sujeto": nom_sujeto, "tipo": tipo, "gen": gen, 
+            "base": base, "ret": ret, "estado": "✅ OK"
+        }
+    except Exception as err: 
+        return {"error": str(err)}
+
+st.markdown("<h2 style='font-family: Courier New, monospace; color: #003057; letter-spacing: 2px; margin-bottom: 0px; padding-bottom: 0px;'>YN</h2>", unsafe_allow_html=True)
+st.title("⚖️ Extractor DTE (Sujetos Excluidos)")
+
+st.markdown(f"""
+<div class="alerta-activo">
+    <strong>AGENTE DE RETENCIÓN (Cliente Activo):</strong> {cliente['nombre']} (NIT: {cliente['nit']})
+</div>
+""", unsafe_allow_html=True)
+
+if 'db_sujetos' not in st.session_state: st.session_state.db_sujetos = pd.DataFrame()
+if 'archivos_suj' not in st.session_state: st.session_state.archivos_suj = set()
+
+with st.sidebar:
+    st.header("Carga DTE 14")
+    archivos = st.file_uploader("Arrastra DTE Sujetos Excluidos (PDF)", type="pdf", accept_multiple_files=True)
+    
+    if archivos and st.button("🚀 Procesar Documentos", type="primary", use_container_width=True):
+        extracted = []
+        nuevos_archivos = [f for f in archivos if f.name not in st.session_state.archivos_suj]
+
+        if nuevos_archivos:
+            bar, txt_progreso = st.progress(0), st.empty()
+            total = len(nuevos_archivos)
+            for idx, f in enumerate(nuevos_archivos):
+                res = extraer_sujetos_nativo(f.read(), cliente)
+                if "error" not in res and "error_tipo" not in res:
+                    res["archivo"] = f.name
+                    extracted.append(res)
+                st.session_state.archivos_suj.add(f.name)
+                bar.progress((idx + 1) / total)
+            txt_progreso.success(f"✅ ¡{total} documentos procesados!")
+            
+            if extracted:
+                new_df = pd.DataFrame(extracted)
+                if st.session_state.db_sujetos.empty: st.session_state.db_sujetos = new_df
+                else: st.session_state.db_sujetos = pd.concat([st.session_state.db_sujetos, new_df], ignore_index=True)
+
+    if st.button("🧹 Limpiar Memoria", type="secondary", use_container_width=True):
+        if 'db_sujetos' in st.session_state: del st.session_state['db_sujetos']
+        if 'archivos_suj' in st.session_state: del st.session_state['archivos_suj']
         st.rerun()
 
-st.divider()
-
-# ── INFO DEL CLIENTE ──
-col_info1, col_info2, col_info3 = st.columns(3)
-with col_info1:
-    st.metric("Cliente", CLIENTE_NOMBRE)
-with col_info2:
-    st.metric("NIT", CLIENTE_NIT)
-with col_info3:
-    st.metric("Módulo", "Sujetos Excluidos (13, 14, 15)")
-
-st.divider()
-
-# ═══════════════════════════════════════════════════════════════
-# SECCIÓN: INFORMACIÓN
-# ═══════════════════════════════════════════════════════════════
-
-with st.expander("ℹ️ Información sobre Sujetos Excluidos"):
-    st.markdown("""
-    **Documentos para Sujetos Excluidos**
+if not st.session_state.db_sujetos.empty:
+    df = st.session_state.db_sujetos.copy()
+    st.dataframe(df, use_container_width=True)
     
-    **DTE-13: Factura de Sujeto Excluido**
-    - Emitida por un sujeto excluido
-    
-    **DTE-14: Factura para Sujetos Excluidos**
-    - Emitida a un sujeto excluido
-    - Retención del 10%
-    
-    **DTE-15: Nota de Crédito para Sujetos Excluidos**
-    - Devolución o ajuste
-    
-    **Retención: 10%** sobre el monto total
-    """)
-
-st.divider()
-
-# ═══════════════════════════════════════════════════════════════
-# SECCIÓN: CARGA DE ARCHIVOS
-# ═══════════════════════════════════════════════════════════════
-
-st.markdown("### 📁 Carga de Documentos")
-
-col_upload1, col_upload2 = st.columns(2)
-
-with col_upload1:
-    st.markdown("**📄 Cargar PDF**")
-    archivo_pdf = st.file_uploader(
-        "Arrastra o selecciona un PDF",
-        type=["pdf"],
-        key="upload_pdf_suj"
-    )
-
-with col_upload2:
-    st.markdown("**📋 Cargar JSON**")
-    archivo_json = st.file_uploader(
-        "Arrastra o selecciona un JSON",
-        type=["json"],
-        key="upload_json_suj"
-    )
-
-st.divider()
-
-# ═══════════════════════════════════════════════════════════════
-# PROCESAMIENTO
-# ═══════════════════════════════════════════════════════════════
-
-datos_procesados = []
-
-if archivo_pdf:
-    with st.spinner("🔄 Extrayendo texto del PDF..."):
-        texto_pdf = extraer_texto_pdf(archivo_pdf)
-
-        if texto_pdf:
-            st.success("✅ PDF cargado correctamente")
-
-            registro_base = {
-                "fecha": extraer_y_formatear_fecha(texto_pdf),
-                "nombre": "",
-                "documento": "",
-                "nit": "",
-                "dui": "",
-                "tipo": "14",
-                "ctrl": "",
-                "gen": "",
-                "sello": "",
-                "monto": 0.0,
-                "retencion": 0.0,
-                "retencion_calculada": False,
-                "motor": "PDF",
-                "fuente": archivo_pdf.name,
-                "archivo": archivo_pdf.name,
-            }
-
-            if st.checkbox("🤖 Usar Gemini para validación", value=True, key="usar_gemini_suj"):
-                with st.spinner("🔄 Validando con Gemini..."):
-                    resultado_gemini = validar_con_gemini(
-                        texto_pdf,
-                        registro_base,
-                        tipo_doc="Sujeto Excluido"
-                    )
-
-                    if resultado_gemini.get("_exito"):
-                        registro_base.update(resultado_gemini)
-                        
-                        # Calcular retención 10%
-                        monto = float(resultado_gemini.get("tot", resultado_gemini.get("monto", 0)))
-                        registro_base["monto"] = monto
-                        registro_base["retencion"] = round(monto * 0.10, 2)
-                        registro_base["retencion_calculada"] = True
-                        
-                        st.success("✅ Validación completada")
-                    else:
-                        st.warning(f"⚠️ {resultado_gemini.get('error', 'Error desconocido')}")
-
-            datos_procesados.append(registro_base)
-
-if archivo_json:
-    with st.spinner("🔄 Procesando JSON..."):
-        try:
-            json_data = json.load(archivo_json)
-
-            if isinstance(json_data, list):
-                for item in json_data:
-                    registro = procesar_json_sujetos(item)
-                    if "error" not in registro:
-                        registro["fuente"] = archivo_json.name
-                        registro["archivo"] = archivo_json.name
-                        
-                        # Calcular retención 10%
-                        monto = float(registro.get("monto", 0))
-                        registro["retencion"] = round(monto * 0.10, 2)
-                        registro["retencion_calculada"] = True
-                        
-                        datos_procesados.append(registro)
-            else:
-                registro = procesar_json_sujetos(json_data)
-                if "error" not in registro:
-                    registro["fuente"] = archivo_json.name
-                    registro["archivo"] = archivo_json.name
-                    
-                    monto = float(registro.get("monto", 0))
-                    registro["retencion"] = round(monto * 0.10, 2)
-                    registro["retencion_calculada"] = True
-                    
-                    datos_procesados.append(registro)
-
-            st.success(f"✅ {len(datos_procesados)} registro(s) procesado(s)")
-
-        except Exception as e:
-            st.error(f"❌ Error al procesar JSON: {str(e)}")
-
-# ═══════════════════════════════════════════════════════════════
-# TABLA DE RESULTADOS
-# ═══════════════════════════════════════════════════════════════
-
-if datos_procesados:
-    st.divider()
-    st.markdown("### 📊 Resultados de Extracción")
-
-    df = pd.DataFrame(datos_procesados)
-
-    df_filtrado = render_panel_filtros(df, key_prefix="sujetos_excluidos")
-
-    st.dataframe(
-        df_filtrado,
-        use_container_width=True,
-        height=400,
-        column_config={
-            "fecha": st.column_config.TextColumn("📅 Fecha"),
-            "nombre": st.column_config.TextColumn("Nombre"),
-            "documento": st.column_config.TextColumn("Documento"),
-            "tipo": st.column_config.TextColumn("Tipo DTE"),
-            "monto": st.column_config.NumberColumn("Monto", format="$%.2f"),
-            "retencion": st.column_config.NumberColumn("Retención (10%)", format="$%.2f"),
-            "retencion_calculada": st.column_config.CheckboxColumn("Calculada"),
-        }
-    )
-
-    # ── RESUMEN ──
-    col_res1, col_res2, col_res3 = st.columns(3)
-    with col_res1:
-        total_monto = df_filtrado["monto"].sum()
-        st.metric("💰 Total Monto", f"${total_monto:,.2f}")
-    with col_res2:
-        total_retencion = df_filtrado["retencion"].sum()
-        st.metric("⚖️ Total Retención", f"${total_retencion:,.2f}")
-    with col_res3:
-        st.metric("📊 % Retención", "10.00%")
-
-    st.divider()
-
-    # ── DESCARGAR RESULTADOS ──
-    col_d1, col_d2, col_d3 = st.columns(3)
-
-    with col_d1:
-        csv = df_filtrado.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            "📥 Descargar CSV",
-            csv,
-            f"sujetos_excluidos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            "text/csv",
-            use_container_width=True
-        )
-
-    with col_d2:
-        json_str = df_filtrado.to_json(orient='records', indent=2).encode('utf-8')
-        st.download_button(
-            "📥 Descargar JSON",
-            json_str,
-            f"sujetos_excluidos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            "application/json",
-            use_container_width=True
-        )
-
-    with col_d3:
-        if st.button("💾 Guardar en DB", type="primary", use_container_width=True):
-            st.success("✅ Datos guardados en la base de datos")
-
-else:
-    st.info(MENSAJES["sin_archivos"])
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Casilla66_Sujetos')
+    st.download_button("📥 Descargar Base para F-14", data=output.getvalue(), file_name="Sujetos_Excluidos_F14.xlsx", type="primary")
