@@ -8,19 +8,12 @@
         "dui": "12345678-9",
         "email": "admin@empresademo1.com",
         "telefono": "+503 2234-5678"
-      },
-      {
-        "nombre": "Empresa Demo 2",
-        "nit": "0614-654321-987-6",
-        "dui": "87654321-5",
-        "email": "admin@empresademo2.com",
-        "telefono": "+503 2345-6789"
       }
     ],
-    "fecha_registro": "2025-05-02 21:27:44"
+    "fecha_registro": "2025-05-03 00:50:50"
   },
   "contador": {
-    "password": "68ba50a76a7ff2c8bd6e9df32d3b3a1a5c4cebca9e2e4e9f5f3f5f8f8f3f5c5",
+    "password": "1f0dedf02a2f7a18c87eb72f4ce1b4c1f1c7ba8e24f8d0c9f6e5d4c3b2a1f0e",
     "clientes": [
       {
         "nombre": "Cliente del Contador",
@@ -30,6 +23,6 @@
         "telefono": "+503 7777-7777"
       }
     ],
-    "fecha_registro": "2025-05-02 21:27:44"
+    "fecha_registro": "2025-05-03 00:50:50"
   }
 }
