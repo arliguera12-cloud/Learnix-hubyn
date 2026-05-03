@@ -252,7 +252,7 @@ if not st.session_state["autenticado"]:
 page_dashboard   = st.Page("pages/0_Dashboard_Inicio.py",            title="Dashboard Hub",                icon="🏠")
 page_ventas      = st.Page("pages/1_Extractor_DTE_Ventas.py",        title="Extractor DTE Ventas",         icon="📈")
 page_compras     = st.Page("pages/2_Extractor_DTE_Compras.py",       title="Extractor DTE Compras",        icon="🛒")  # ✅ Ruta corregida
-page_retenciones = st.Page("pages/3_Extractor_DTE_Retenciones.py",   title="Extractor DTE Retenciones",   icon="✂️")
+page_retenciones = st.Page("pages/3_Extractor_DTE_retenciones.py",   title="Extractor DTE Retenciones",   icon="✂️")
 page_sujetos     = st.Page("pages/4_Extractor_DTE_Sujetos_Excluidos.py", title="Extractor Sujetos Excluidos", icon="⚖️")
 page_clientes    = st.Page("pages/5_Directorio_Clientes.py",         title="Directorio Clientes",          icon="👥")
 page_proveedores = st.Page("pages/6_Directorio_Proveedores.py",      title="Directorio Proveedores",       icon="🏢")
