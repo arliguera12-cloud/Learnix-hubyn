@@ -1,17 +1,25 @@
 [theme]
-primaryColor = "#666D57"
-backgroundColor = "#000000"
-secondaryBackgroundColor = "#161616"
-textColor = "#F7F5EE"
-font = "sans serif"
+# Forzar el modo oscuro por defecto
+base="dark"
 
-[client]
-showSidebarNavigation = false
-showErrorDetails = true
-toolbarMode = "minimal"
+# Color primario (Azul Learnix) para botones y acentos
+primaryColor="#4DA8DA"
 
-[logger]
-level = "info"
+# Fondo principal (Negro puro)
+backgroundColor="#000000"
+
+# Fondo secundario para barras laterales y tarjetas (Gris muy oscuro)
+secondaryBackgroundColor="#161616"
+
+# Color del texto (Blanco hueso para no cansar la vista)
+textColor="#F7F5EE"
+
+# Fuente profesional
+font="sans serif"
+
+[server]
+# Ocultar el menú de hamburguesa de Streamlit para los usuarios finales
+enableCORS=false
 
 [server]
 maxUploadSize = 500
