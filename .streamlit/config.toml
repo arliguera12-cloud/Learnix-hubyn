@@ -1,26 +1,87 @@
+# ═══════════════════════════════════════════════════════════════
+#  .streamlit/config.toml
+#  Learnix DTE Hub — Configuración Global
+#  Tema: Verde Oliva · Modo Oscuro
+# ═══════════════════════════════════════════════════════════════
+
+# ───────────────────────────────────────────
+# TEMA VISUAL — VERDE OLIVA UNIFICADO
+# ───────────────────────────────────────────
 [theme]
-# Forzar el modo oscuro por defecto
-base="dark"
 
-# Color primario (Azul Learnix) para botones y acentos
-primaryColor="#4DA8DA"
+# Modo base oscuro
+base = "dark"
 
-# Fondo principal (Negro puro)
-backgroundColor="#000000"
+# ✅ Color primario: Verde oliva medio
+# Afecta: botones nativos, sliders, checkboxes,
+#         radio buttons, progress bars, selectbox focus
+primaryColor = "#8A9A35"
 
-# Fondo secundario para barras laterales y tarjetas (Gris muy oscuro)
-secondaryBackgroundColor="#161616"
+# ✅ Fondo principal: Negro verdoso (no negro puro)
+# Consistente con #0D0F07 del CSS inline
+backgroundColor = "#0D0F07"
 
-# Color del texto (Blanco hueso para no cansar la vista)
-textColor="#F7F5EE"
+# ✅ Fondo secundario: Sidebar y tarjetas
+# Consistente con #141A08 del CSS inline
+secondaryBackgroundColor = "#141A08"
 
-# Fuente profesional
-font="sans serif"
+# ✅ Color de texto: Crema cálido
+# Consistente con #F0EDD8 del CSS inline
+textColor = "#F0EDD8"
 
+# ✅ Fuente: valor válido para Streamlit
+font = "sans serif"
+
+
+# ───────────────────────────────────────────
+# SERVIDOR
+# ✅ Sección [server] UNIFICADA (era duplicada)
+# ───────────────────────────────────────────
 [server]
-# Ocultar el menú de hamburguesa de Streamlit para los usuarios finales
-enableCORS=false
 
-[server]
+# Tamaño máximo de carga (PDFs de Hacienda pueden ser grandes)
 maxUploadSize = 500
+
+# Protección CSRF activada
 enableXsrfProtection = true
+
+# CORS: false para uso local/Cloud sin CDN externo
+enableCORS = false
+
+# Tiempo máximo de espera para mensajes websocket (ms)
+# Necesario para procesar lotes grandes de PDFs
+maxMessageSize = 200
+
+
+# ───────────────────────────────────────────
+# RUNNER — Rendimiento
+# ───────────────────────────────────────────
+[runner]
+
+# ✅ Reruns rápidos — mejora respuesta al procesar PDFs
+fastReruns = true
+
+# Manejo de errores sin detener la app completa
+# magicEnabled = false  # Descomentar si se desea deshabilitar st.write() mágico
+
+
+# ───────────────────────────────────────────
+# BROWSER — Privacidad
+# ───────────────────────────────────────────
+[browser]
+
+# ✅ Desactivar telemetría de uso a Streamlit
+gatherUsageStats = false
+
+# Abrir automáticamente el navegador al iniciar en local
+serverAddress = "localhost"
+
+
+# ───────────────────────────────────────────
+# UI — Interfaz
+# ───────────────────────────────────────────
+[ui]
+
+# ✅ Ocultar menú hamburguesa de Streamlit para usuarios finales
+# (El comentario original lo indicaba pero no estaba implementado)
+hideTopBar = true
