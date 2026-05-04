@@ -244,14 +244,12 @@ def limpiar_monto(monto_str) -> float:
 def extraer_y_formatear_fecha(texto: str) -> str:
     try:
         texto = safe_str(texto)
-        # ISO YYYY-MM-DD
         m = re.search(
             r"\b(20[2-3]\d)\s*[-\/]\s*(0[1-9]|1[0-2])\s*[-\/]\s*([0-2]\d|3[01])\b",
             texto
         )
         if m:
             return f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/{m.group(1)}"
-        # Con etiqueta
         m = re.search(
             r"(?:FECHA\s*(?:DE\s*)?(?:EMISI[OÓ]N|GENERACI[OÓ]N)?)"
             r"[^\d]{0,20}(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})",
@@ -263,7 +261,6 @@ def extraer_y_formatear_fecha(texto: str) -> str:
                 d, mo = mo, d
             if mo <= 12:
                 return f"{d:02d}/{mo:02d}/{y}"
-        # DD/MM/YYYY libre
         m = re.search(
             r"\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b",
             texto
@@ -282,21 +279,32 @@ def extraer_y_formatear_fecha(texto: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
-# FIX: EXTRACCIÓN DE NOMBRE DEL RECEPTOR/CLIENTE — v2
+# FIX: EXTRACCIÓN DE NOMBRE DEL RECEPTOR/CLIENTE
+# Se borra activamente el nombre del emisor para evitar fusiones
 # ══════════════════════════════════════════════════════════════
-def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: list) -> str:
+def extraer_nombre_receptor(texto_completo: str, pos_nit: int, cliente_activo: dict) -> str:
     texto_completo = safe_str(texto_completo)
+    nombre_emisor = safe_str(cliente_activo.get('nombre', '')).strip().upper()
+    partes_emisor = [p for p in nombre_emisor.split()[:4] if len(p) > 3]
 
     def limpiar(s: str) -> str:
         try:
             s = safe_str(s)
+            # 1. Neutralizar la fusión borrando el nombre exacto del emisor si se coló
+            if nombre_emisor and len(nombre_emisor) > 3:
+                s = re.compile(re.escape(nombre_emisor), re.I).sub("", s)
+            
+            # 2. Si se pegaron las etiquetas (ej. NOMBRE O RAZON SOCIAL: DANIEL SORTO), tomar la última parte
+            s = re.split(r"(?i)(?:NOMBRE\s+O\s+RAZ[OÓ]N\s+SOCIAL|RAZ[OÓ]N\s+SOCIAL|CLIENTE)\s*[:\-]*\s*", s)[-1]
+            
             s = re.sub(
-                r"^[\s\-:]*(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
+                r"^[\s\-:]*(?:NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
                 r"NOMBRE\s+COMERCIAL|RECEPTOR|ADQUIRIENTE|DATOS\s+DEL\s+RECEPTOR|"
-                r"DATOS\s+DEL\s+ADQUIRIENTE|CLIENTE|NOMBRE\s+DEL\s+CLIENTE|"
+                r"DATOS\s+DEL\s+ADQUIRIENTE|NOMBRE\s+DEL\s+CLIENTE|"
                 r"CONTRIBUYENTE\s+RECEPTOR)[\s:]*",
                 s, flags=re.I
             ).strip()
+            
             s = CORTE_NOMBRE.sub("", s).strip()
             s = re.sub(r"^[-_.,;:\s]+|[-_.,;:\s]+$", "", s)
             s = re.sub(r'\s{2,}', ' ', s)
@@ -309,13 +317,8 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             T = safe_str(s).strip().upper()
             if len(T) < 3 or len(T) > 100:
                 return False
-            
-            # --- NUEVA REGLA ESTRICTA ---
-            nombre_emisor_str = " ".join(partes_emisor).strip()
-            if nombre_emisor_str and (T == nombre_emisor_str or T.startswith(nombre_emisor_str[:15])):
+            if nombre_emisor and (T == nombre_emisor or T.startswith(nombre_emisor[:15])):
                 return False
-            # -----------------------------
-
             if any(b in T for b in BASURA_ESTRICTA):
                 return False
             if es_linea_direccion(T):
@@ -325,9 +328,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
                     return False
             if T in NOMBRES_INVALIDOS:
                 return False
-            for p in partes_emisor:
-                if p and len(p) > 3 and p in T:
-                    return False
             digitos = sum(c.isdigit() for c in T)
             if len(T) > 0 and digitos / len(T) > 0.45:
                 return False
@@ -340,22 +340,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             return False
 
     try:
-        patron_doble_nombre = re.compile(
-            r"(?:Nombre\s+o\s+raz[oó]n\s+social|Raz[oó]n\s+[Ss]ocial)\s*:\s*"
-            r"[^\n]{3,80}"
-            r"(?:Nombre\s+o\s+raz[oó]n\s+social|Raz[oó]n\s+[Ss]ocial)\s*:\s*"
-            r"([^\n]{3,90})",
-            re.I
-        )
-        for m_doble in patron_doble_nombre.finditer(texto_completo):
-            candidato = limpiar(safe_str(m_doble.group(1)))
-            candidato = re.split(
-                r'\s+(?:NIT|NRC|Actividad|Dirección|Correo|Número|Nombre\s+[Cc]omercial)',
-                candidato
-            )[0].strip()
-            if valido(candidato):
-                return candidato
-
         inicio  = max(0, pos_nit - 600)
         fin     = min(len(texto_completo), pos_nit + 1500)
         ventana = texto_completo[inicio:fin]
@@ -373,8 +357,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
         )
         for m_etq in patron_etq.finditer(ventana_receptor):
             raw_cap = safe_str(m_etq.group(1))
-            if re.search(r"Nombre\s+o\s+raz[oó]n\s+social", raw_cap, re.I):
-                raw_cap = re.split(r"(?i)Nombre\s+o\s+raz[oó]n\s+social", raw_cap)[0]
             lineas_cap = raw_cap.split('\n')
             candidato  = limpiar(lineas_cap[0])
             if len(candidato) < 4 and len(lineas_cap) > 1:
@@ -396,15 +378,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             if valido(candidato):
                 return candidato
 
-        for linea in ventana_receptor.split('\n'):
-            L = safe_str(linea).strip().upper()
-            if not any(w in L for w in PALABRAS_COMERCIALES):
-                continue
-            clean     = re.split(r'\s{4,}|(?:NIT|NRC|N\.I\.T|N\.R\.C)\s', L)[0].strip()
-            candidato = limpiar(clean)
-            if valido(candidato):
-                return candidato
-
         m_sec = re.search(
             r"(?i)(?:DATOS\s+DEL\s+(?:RECEPTOR|ADQUIRIENTE|CLIENTE)|"
             r"RECEPTOR\s*[:\-]|ADQUIRIENTE\s*[:\-]|CLIENTE\s*:)"
@@ -414,14 +387,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
         )
         if m_sec:
             seccion = safe_str(m_sec.group(1))
-            m_n = re.search(
-                r"(?:Nombre|Raz[oó]n\s+[Ss]ocial)[:\s]+([^\n]{3,90})",
-                seccion, re.I
-            )
-            if m_n:
-                candidato = limpiar(safe_str(m_n.group(1)))
-                if valido(candidato):
-                    return candidato
             for linea in seccion.split('\n'):
                 candidato = limpiar(linea.strip())
                 if valido(candidato):
@@ -433,7 +398,8 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
 
 
 # ══════════════════════════════════════════════════════════════
-# FIX: EXTRACTOR PRINCIPAL DE VENTAS — v2
+# FIX: EXTRACTOR PRINCIPAL DE VENTAS — v3
+# Agregada extracción del Sello de Recepción (Serie)
 # ══════════════════════════════════════════════════════════════
 def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
@@ -488,6 +454,13 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if tipo not in tipos_validos:
             return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten 01, 03, 05 y 06."}
 
+        # ── Sello de Recepción (40 caracteres alfanuméricos) ────────────────
+        sello = ""
+        m_sello = re.search(r"\b(20[2-3]\d[A-Z0-9]{36})\b", t_no_sp)
+        if m_sello:
+            sello = m_sello.group(1)
+
+        # ── Código de Generación / UUID ──────────────────────────────────────
         gen = ""
         m_gen_etq = re.search(
             r"C[oó]digo\s+de\s+Generaci[oó]n\s*:\s*"
@@ -511,20 +484,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 raw = safe_str(m_uuid.group(1)).replace("-", "")
                 if len(raw) == 32:
                     gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}".upper()
-
-        if not gen:
-            m_uuid2 = re.search(
-                r"([0-9A-Fa-f]{8}[- ]?[0-9A-Fa-f]{4}[- ]?"
-                r"[0-9A-Fa-f]{4}[- ]?[0-9A-Fa-f]{4}[- ]?[0-9A-Fa-f]{12})",
-                texto_completo
-            )
-            if m_uuid2:
-                raw2 = re.sub(r'[^0-9A-Fa-f]', '', safe_str(m_uuid2.group(1)))
-                if len(raw2) == 32:
-                    gen = (
-                        f"{raw2[:8]}-{raw2[8:12]}-{raw2[12:16]}"
-                        f"-{raw2[16:20]}-{raw2[20:]}"
-                    ).upper()
 
         fecha = extraer_y_formatear_fecha(t_clean)
 
@@ -597,21 +556,16 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if len(nit_cli) == 9:
             dui_cli = nit_cli
 
-        # ── BD de clientes conocidos ──────────────────────────────────────────
         if nit_cli and nit_cli in clientes_db:
             nom_cli  = safe_str(clientes_db[nit_cli].get("nombre", "SIN NOMBRE"))
             es_nuevo = False
 
-        # ── Extraer nombre del receptor ───────────────────────────────────────
         if es_nuevo and nit_cli:
-            partes_emisor = [
-                p for p in safe_str(cliente_activo.get('nombre', '')).upper().split()[:4]
-                if len(p) > 3
-            ]
             pos_busqueda = pos_nit_rec if pos_nit_rec >= 0 else len(texto_completo) // 2
 
+            # Le pasamos el cliente_activo para que borre el nombre del emisor
             nombre_encontrado = extraer_nombre_receptor(
-                texto_completo, pos_busqueda, partes_emisor
+                texto_completo, pos_busqueda, cliente_activo
             )
 
             if not nombre_encontrado and texto_visual.strip():
@@ -620,32 +574,11 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                     m_crudo = re.search(re.escape(nit_cli[:8]), texto_visual)
                     pos_vis = m_crudo.start() if m_crudo else len(texto_visual) // 2
                 nombre_encontrado = extraer_nombre_receptor(
-                    texto_visual, pos_vis, partes_emisor
+                    texto_visual, pos_vis, cliente_activo
                 )
-
-            if not nombre_encontrado and texto_receptor.strip():
-                lineas_rec = [ln.strip() for ln in texto_receptor.split('\n') if ln.strip()]
-                for linea in lineas_rec[:20]:
-                    cand = re.sub(
-                        r"^[\s\-:]*(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
-                        r"NOMBRE\s+COMERCIAL|RECEPTOR|ADQUIRIENTE|CLIENTE)[\s:]*",
-                        "", linea, flags=re.I
-                    ).strip().upper()
-                    cand = CORTE_NOMBRE.sub("", cand).strip()
-                    if (
-                        cand
-                        and len(cand) >= 3
-                        and len(cand) <= 100
-                        and not re.fullmatch(r'[\d\s\-\.\/]+', cand)
-                        and not es_linea_direccion(cand)
-                        and cand not in NOMBRES_INVALIDOS
-                    ):
-                        nombre_encontrado = cand
-                        break
 
             nom_cli = nombre_encontrado if nombre_encontrado else "SIN NOMBRE"
 
-        # ── Montos — priorizar etiquetas explícitas ───────────
         exentas     = 0.0
         no_sujetas  = 0.0
         gravadas    = 0.0
@@ -723,7 +656,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             if m_sub:
                 gravadas = limpiar_monto(m_sub.group(1))
 
-        # ── Reconciliación O(n³) ───────────────────────
         encontrado = total > 0 and debito > 0 and gravadas > 0
 
         if not encontrado:
@@ -774,6 +706,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             "fecha"      : fecha,
             "tipo"       : tipo,
             "num_control": num_control,
+            "sello"      : sello,
             "gen"        : gen,
             "nit_cli"    : nit_cli,
             "dui_cli"    : dui_cli,
@@ -804,7 +737,7 @@ def to_excel_hacienda_ventas(df: pd.DataFrame) -> bytes:
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, header=False, sheet_name='Ventas_F07')
         ws = writer.sheets['Ventas_F07']
-        anchos = [12, 3, 3, 40, 6, 12, 12, 16, 45, 12, 12, 12, 12, 12, 12, 14, 14, 3, 3, 4]
+        anchos = [12, 3, 3, 40, 45, 35, 12, 16, 45, 12, 12, 12, 12, 12, 12, 14, 14, 3, 3, 4]
         for idx_col, ancho in enumerate(anchos, start=1):
             col_letter = ws.cell(1, idx_col).column_letter
             ws.column_dimensions[col_letter].width = ancho
@@ -820,9 +753,12 @@ def construir_df_f07_ventas(df_filtrado: pd.DataFrame) -> pd.DataFrame:
     df_out["A. Fecha Emisión"]           = df_filtrado["fecha"]
     df_out["B. Clase Doc"]               = "4"
     df_out["C. Tipo Doc"]                = df_filtrado["tipo"]
-    df_out["D. Num Resolución (Control)"]= df_filtrado["num_control"]
-    df_out["E. Serie"]                   = ""
-    df_out["F. Num Documento"]           = ""
+    # Se eliminan guiones del número de control para cumplir el Anexo
+    df_out["D. Num Resolución (Control)"]= df_filtrado["num_control"].astype(str).str.replace("-", "", regex=False)
+    # Se inserta el sello de recepción en la Serie
+    df_out["E. Serie"]                   = df_filtrado.get("sello", "")
+    # Se eliminan guiones del código de generación para cumplir el Anexo
+    df_out["F. Num Documento"]           = df_filtrado["gen"].astype(str).str.replace("-", "", regex=False)
     df_out["G. Control Interno"]         = ""
     df_out["H. NIT/NRC Cliente"]         = df_filtrado["nit_cli"]
     df_out["I. Nombre Cliente"]          = df_filtrado["nom_cli"]
@@ -877,6 +813,7 @@ def datos_revision_vacio_ventas(causa: str = "") -> dict:
         "fecha"      : "",
         "tipo"       : "03",
         "num_control": "",
+        "sello"      : "",
         "gen"        : "",
         "nit_cli"    : "",
         "dui_cli"    : "",
@@ -1082,7 +1019,7 @@ with st.sidebar:
         st.markdown(f"**💰 Total:** `${st.session_state.db_ventas['total'].sum():,.2f}`")
 
 # ─────────────────────────────────────────────
-# 10. BANDEJA DE REVISIÓN MANUAL — MEJORADA
+# 10. BANDEJA DE REVISIÓN MANUAL
 # ─────────────────────────────────────────────
 if st.session_state.cola_revision_v:
     st.markdown("""
@@ -1128,6 +1065,7 @@ if st.session_state.cola_revision_v:
                     with col_d1:
                         st.caption(f"**Num Control:** `{datos_act.get('num_control','—')}`")
                         st.caption(f"**UUID:** `{datos_act.get('gen','—')}`")
+                        st.caption(f"**Sello:** `{datos_act.get('sello','—')}`")
                         st.caption(f"**Fecha:** `{datos_act.get('fecha','—')}`")
                         st.caption(f"**NIT receptor:** `{datos_act.get('nit_cli','—')}`")
                     with col_d2:
@@ -1187,6 +1125,12 @@ if st.session_state.cola_revision_v:
                     value=safe_str(datos_act.get("gen", "")),
                     placeholder="25AA41EA-0412-40BC-803D-405272AC7891"
                 )
+                
+            f_sello = st.text_input(
+                "🛡️ Sello de Recepción (Serie)",
+                value=safe_str(datos_act.get("sello", "")),
+                placeholder="20261A71A6D9E53A4BE59631B7BED69D231B6PHP"
+            )
 
             st.markdown("**🏢 Receptor / Cliente**")
             col_r1, col_r2 = st.columns(2)
@@ -1327,6 +1271,7 @@ if st.session_state.cola_revision_v:
                         "fecha"      : f_fecha.strip(),
                         "tipo"       : f_tipo,
                         "num_control": f_ctrl.strip().upper(),
+                        "sello"      : f_sello.strip().upper(),
                         "gen"        : f_gen.strip().upper(),
                         "nit_cli"    : nit_act,
                         "dui_cli"    : dui_act,
