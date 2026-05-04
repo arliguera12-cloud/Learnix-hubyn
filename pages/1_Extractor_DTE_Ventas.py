@@ -282,7 +282,9 @@ def extraer_y_formatear_fecha(texto: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
-# EXTRACCIÓN DE NOMBRE DEL RECEPTOR/CLIENTE
+# FIX: EXTRACCIÓN DE NOMBRE DEL RECEPTOR/CLIENTE — v2
+# Resuelve el bug donde emisor y receptor están en la misma línea
+# con etiqueta "Nombre o razón social: EMISOR Nombre o razón social: RECEPTOR"
 # ══════════════════════════════════════════════════════════════
 def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: list) -> str:
     texto_completo = safe_str(texto_completo)
@@ -290,7 +292,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
     def limpiar(s: str) -> str:
         try:
             s = safe_str(s)
-            # Quitar etiquetas conocidas al inicio
             s = re.sub(
                 r"^[\s\-:]*(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
                 r"NOMBRE\s+COMERCIAL|RECEPTOR|ADQUIRIENTE|DATOS\s+DEL\s+RECEPTOR|"
@@ -319,7 +320,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
                     return False
             if T in NOMBRES_INVALIDOS:
                 return False
-            # No debe contener partes del nombre del emisor
             for p in partes_emisor:
                 if p and len(p) > 3 and p in T:
                     return False
@@ -328,7 +328,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
                 return False
             if re.fullmatch(r'[\d\s\-\.\/]+', T):
                 return False
-            # Debe tener al menos una letra
             if not re.search(r'[A-ZÁÉÍÓÚÑÜ]', T):
                 return False
             return True
@@ -336,11 +335,36 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             return False
 
     try:
+        # ── FIX PRINCIPAL: Detectar líneas con DOS "Nombre o razón social" ──────
+        # Ocurre cuando emisor y receptor están lado a lado en la misma línea.
+        # Patrón: "Nombre o razón social: X Nombre o razón social: Y"
+        # Queremos capturar Y (el segundo = receptor)
+        patron_doble_nombre = re.compile(
+            r"(?:Nombre\s+o\s+raz[oó]n\s+social|Raz[oó]n\s+[Ss]ocial)\s*:\s*"
+            r"[^\n]{3,80}"
+            r"(?:Nombre\s+o\s+raz[oó]n\s+social|Raz[oó]n\s+[Ss]ocial)\s*:\s*"
+            r"([^\n]{3,90})",
+            re.I
+        )
+        for m_doble in patron_doble_nombre.finditer(texto_completo):
+            candidato = limpiar(safe_str(m_doble.group(1)))
+            # Cortar si hay otra etiqueta pegada al final
+            candidato = re.split(
+                r'\s+(?:NIT|NRC|Actividad|Dirección|Correo|Número|Nombre\s+[Cc]omercial)',
+                candidato
+            )[0].strip()
+            if valido(candidato):
+                return candidato
+
+        # ── Estrategia A: etiqueta explícita en sección RECEPTOR ─────────────
         inicio  = max(0, pos_nit - 600)
         fin     = min(len(texto_completo), pos_nit + 1500)
         ventana = texto_completo[inicio:fin]
 
-        # Estrategia A: etiqueta explicita del receptor
+        # Dividir ventana por "RECEPTOR" para tomar solo la parte del receptor
+        partes_rec = re.split(r"(?i)\bRECEPTOR\b", ventana, maxsplit=1)
+        ventana_receptor = partes_rec[1] if len(partes_rec) > 1 else ventana
+
         patron_etq = re.compile(
             r"(?:Nombre(?:\s+[Oo]\s+[Rr]az[oó]n\s+[Ss]ocial)?|"
             r"[Rr]az[oó]n\s+[Ss]ocial|Nombre\s+[Cc]omercial|"
@@ -349,15 +373,20 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             r"\s*[:\s]+\s*([^\n]{3,90}(?:\n[^\n]{3,60})?)",
             re.I
         )
-        for m_etq in patron_etq.finditer(ventana):
-            lineas_cap = safe_str(m_etq.group(1)).split('\n')
+        for m_etq in patron_etq.finditer(ventana_receptor):
+            raw_cap = safe_str(m_etq.group(1))
+            # Ignorar si contiene segunda etiqueta (es otra entrada del emisor)
+            if re.search(r"Nombre\s+o\s+raz[oó]n\s+social", raw_cap, re.I):
+                # Tomar solo lo que hay antes de la segunda etiqueta
+                raw_cap = re.split(r"(?i)Nombre\s+o\s+raz[oó]n\s+social", raw_cap)[0]
+            lineas_cap = raw_cap.split('\n')
             candidato  = limpiar(lineas_cap[0])
             if len(candidato) < 4 and len(lineas_cap) > 1:
                 candidato = limpiar(lineas_cap[0] + " " + lineas_cap[1])
             if valido(candidato):
                 return candidato
 
-        # Estrategia B: lineas DESPUÉS del NIT del receptor
+        # ── Estrategia B: líneas DESPUÉS del NIT del receptor ────────────────
         ventana_despues = texto_completo[pos_nit:fin]
         lineas_despues  = [ln.strip() for ln in ventana_despues.split('\n') if ln.strip()]
         for linea in lineas_despues[:15]:
@@ -365,7 +394,7 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             if valido(candidato):
                 return candidato
 
-        # Estrategia C: lineas ANTES del NIT del receptor
+        # ── Estrategia C: líneas ANTES del NIT del receptor ──────────────────
         ventana_antes = texto_completo[inicio:pos_nit]
         lineas_antes  = [ln.strip() for ln in ventana_antes.split('\n') if ln.strip()]
         for linea in reversed(lineas_antes[-15:]):
@@ -373,8 +402,8 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             if valido(candidato):
                 return candidato
 
-        # Estrategia D: palabras comerciales en ventana
-        for linea in ventana.split('\n'):
+        # ── Estrategia D: palabras comerciales en ventana ────────────────────
+        for linea in ventana_receptor.split('\n'):
             L = safe_str(linea).strip().upper()
             if not any(w in L for w in PALABRAS_COMERCIALES):
                 continue
@@ -383,7 +412,7 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             if valido(candidato):
                 return candidato
 
-        # Estrategia E: sección RECEPTOR delimitada
+        # ── Estrategia E: sección RECEPTOR delimitada ────────────────────────
         m_sec = re.search(
             r"(?i)(?:DATOS\s+DEL\s+(?:RECEPTOR|ADQUIRIENTE|CLIENTE)|"
             r"RECEPTOR\s*[:\-]|ADQUIRIENTE\s*[:\-]|CLIENTE\s*:)"
@@ -412,7 +441,16 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
 
 
 # ══════════════════════════════════════════════════════════════
-# EXTRACTOR PRINCIPAL DE VENTAS
+# FIX: EXTRACTOR PRINCIPAL DE VENTAS — v2
+# Bugs corregidos:
+#   1. Número de control capturaba texto adicional (TIPODETRANSMISI...)
+#      porque se buscaba en t_no_sp (sin espacios). Ahora se usa t_clean.
+#   2. Nombre receptor extraía el nombre del EMISOR cuando ambos aparecían
+#      en la misma línea. Resuelto con patron_doble_nombre.
+#   3. Total: ahora prioriza "Total a Pagar" y "Monto Total de la Operación"
+#      antes de entrar al loop O(n³).
+#   4. IVA: se agregó "Impuesto al Valor Agregado" como patrón prioritario
+#      cuando no hay "Débito Fiscal" explícito.
 # ══════════════════════════════════════════════════════════════
 def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
@@ -436,26 +474,44 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if len(texto_completo.strip()) < 50:
             return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
 
+        # t_clean: colapsa espacios/tabs pero mantiene saltos de línea
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
+        # t_no_sp: elimina TODO el espacio (solo para UUID y búsquedas de códigos sin espacios)
         t_no_sp = re.sub(r'\s+', '', t_clean).upper()
 
-        # ── Tipo DTE ──────────────────────────────────────────
-        m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_sp)
+        # ── FIX BUG 1: Número de Control DTE ─────────────────────────────────
+        # ANTES: re.search en t_no_sp → capturaba "DTE-03-M001P001-000000000000033TIPODETRANSMISI"
+        #        porque sin espacios, el texto siguiente se pegaba al número.
+        # AHORA: buscar en t_clean donde los espacios actúan como delimitadores naturales.
+        #        Regex acotada: el último segmento debe ser solo dígitos (12-18 chars).
         tipo   = "01"
         ctrl   = ""
         num_control = ""
 
+        # Intentar primero en t_clean (con espacios = delimitadores naturales)
+        m_ctrl = re.search(
+            r"\b(DTE-\d{2}-[A-Z0-9]{1,20}-\d{12,18})\b",
+            t_clean, re.I
+        )
+        if not m_ctrl:
+            # Fallback: buscar en t_no_sp pero con regex más estricta (solo dígitos al final)
+            m_ctrl = re.search(
+                r"(DTE-\d{2}-[A-Z0-9]{1,20}-\d{12,18})(?=[^0-9]|$)",
+                t_no_sp
+            )
+
         if m_ctrl:
-            ctrl   = m_ctrl.group(1).replace("O", "0")
+            ctrl   = m_ctrl.group(1).upper().replace("O", "0")
+            # Preservar el formato original sin reemplazar O→0 en la parte alfanumérica
+            ctrl   = m_ctrl.group(1).upper()
             m_tipo = re.search(r"DTE-(\d{2})", ctrl)
             if m_tipo:
                 tipo = m_tipo.group(1)
-            num_control = ctrl  # El número de control DTE completo
+            num_control = ctrl
 
         if not ctrl:
             return {"error_tipo": "No se detecto un Numero de Control DTE valido."}
 
-        # Solo admitimos CCF (03), Factura (01), Nota de Crédito (05), Nota de Débito (06)
         tipos_validos = ("01", "03", "05", "06")
         if tipo not in tipos_validos:
             return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten 01, 03, 05 y 06."}
@@ -464,12 +520,23 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         dui_emisor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('dui', '')))
         excluir_nits = {nit_emisor, dui_emisor} - {""}
 
-        # ── UUID / Código de Generación ───────────────────────
+        # ── UUID / Código de Generación ───────────────────────────────────────
         gen = ""
-        m_url = re.search(r"CODGEN=([A-F0-9\-]{36})", t_no_sp)
-        if m_url:
-            gen = safe_str(m_url.group(1)).upper()
-        else:
+        # Buscar etiqueta "Código de Generación:" en texto con espacios
+        m_gen_etq = re.search(
+            r"C[oó]digo\s+de\s+Generaci[oó]n\s*:\s*"
+            r"([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})",
+            t_clean, re.I
+        )
+        if m_gen_etq:
+            gen = safe_str(m_gen_etq.group(1)).upper()
+
+        if not gen:
+            m_url = re.search(r"CODGEN=([A-F0-9\-]{36})", t_no_sp)
+            if m_url:
+                gen = safe_str(m_url.group(1)).upper()
+
+        if not gen:
             m_uuid = re.search(
                 r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
                 t_no_sp
@@ -495,7 +562,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        # ── NIT/DUI del RECEPTOR (cliente del emisor) ─────────
+        # ── NIT/DUI del RECEPTOR ──────────────────────────────────────────────
         nit_cli       = ""
         dui_cli       = ""
         nom_cli       = "SIN NOMBRE"
@@ -508,10 +575,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             r"((?:\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d)"
             r"|(?:\d{14})"
             r"|(?:\d{8}[\s\-]?\d))",
-            re.I
-        )
-        patron_etq_nrc = re.compile(
-            r"N\.?\s*R\.?\s*C\.?\s*[:\s]\s*(\d{1,10})",
             re.I
         )
         patron_etq_dui = re.compile(
@@ -529,7 +592,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         texto_receptor = ""
         if len(partes_doc) >= 2:
-            # Tomar hasta el primer bloque de descripción de productos
             texto_receptor_raw = partes_doc[1]
             corte_det = re.search(
                 r"(?i)(?:DESCRIPCI[OÓ]N|CANT\.|CANTIDAD|PRECIO|COD\.|"
@@ -542,15 +604,19 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 else texto_receptor_raw[:1500]
             )
         else:
-            # No hay separador claro — buscar en segunda mitad del documento
-            texto_receptor = texto_completo[len(texto_completo)//2:][:1500]
+            # No hay separador claro — buscar en segunda mitad
+            # FIX: También buscar en texto_lineal directamente por la sección RECEPTOR
+            m_rec_lineal = re.search(r"(?i)\bRECEPTOR\b", texto_lineal)
+            if m_rec_lineal:
+                texto_receptor = texto_lineal[m_rec_lineal.start():][:1500]
+            else:
+                texto_receptor = texto_completo[len(texto_completo)//2:][:1500]
 
         # NIT del receptor — estrategia 1: etiqueta en sección receptor
         for m_nit in patron_etq_nit.finditer(texto_receptor):
             nit_cand = re.sub(r'[^0-9]', '', safe_str(m_nit.group(1)))
             if nit_cand not in excluir_nits and len(nit_cand) in (9, 14):
                 nit_cli     = nit_cand
-                # Posición relativa en texto_completo
                 offset = texto_completo.find(texto_receptor[:50])
                 pos_nit_rec = (offset if offset >= 0 else 0) + m_nit.start()
                 break
@@ -587,7 +653,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 nc = re.sub(r'[^0-9]', '', safe_str(m_all.group(1)))
                 if nc not in excluir_nits and len(nc) in (9, 14):
                     todos_nits.append((nc, m_all.start()))
-            # Tomar el segundo NIT encontrado (el primero suele ser del emisor)
             if len(todos_nits) >= 2:
                 nit_cli, pos_nit_rec = todos_nits[1]
             elif len(todos_nits) == 1:
@@ -596,12 +661,12 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if len(nit_cli) == 9:
             dui_cli = nit_cli
 
-        # ── BD de clientes conocidos ──────────────────────────
+        # ── BD de clientes conocidos ──────────────────────────────────────────
         if nit_cli and nit_cli in clientes_db:
             nom_cli  = safe_str(clientes_db[nit_cli].get("nombre", "SIN NOMBRE"))
             es_nuevo = False
 
-        # ── Extraer nombre del receptor ───────────────────────
+        # ── Extraer nombre del receptor ───────────────────────────────────────
         if es_nuevo and nit_cli:
             partes_emisor = [
                 p for p in safe_str(cliente_activo.get('nombre', '')).upper().split()[:4]
@@ -645,7 +710,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
             nom_cli = nombre_encontrado if nombre_encontrado else "SIN NOMBRE"
 
-        # ── Montos de venta ───────────────────────────────────
+        # ── FIX BUG 3 + 4: Montos — priorizar etiquetas explícitas ───────────
         exentas     = 0.0
         no_sujetas  = 0.0
         gravadas    = 0.0
@@ -673,8 +738,14 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_ns:
             no_sujetas = limpiar_monto(m_ns.group(1))
 
-        # Total a pagar
+        # FIX BUG 3: Total — priorizar "Total a Pagar" > "Monto Total de la Operación"
+        # El código anterior tenía los patrones correctos pero no incluía
+        # "Monto Total de la Operación" que es la etiqueta del DTE electrónico
         for pat in [
+            r"(?:TOTAL\s+A\s+PAGAR)[^\d]{0,30}"
+            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:MONTO\s+TOTAL\s+DE\s+LA\s+OPERACI[OÓ]N)[^\d]{0,30}"
+            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
             r"(?:TOTAL\s+A\s+PAGAR|TOTAL\s+PAGAR|MONTO\s+TOTAL)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
             r"(?:TOTAL\s+OPERACI[OÓ]N|VENTA\s+TOTAL|TOTAL\s*\$)[^\d]{0,30}"
@@ -688,13 +759,15 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if total > 0:
                     break
 
-        # IVA débito fiscal
+        # FIX BUG 4: IVA / Débito Fiscal
+        # Agregar "Impuesto al Valor Agregado 13%" como patrón de alta prioridad
+        # (es la etiqueta que usan los DTE electrónicos)
         for pat in [
             r"(?:D[EÉ]BITO\s+FISCAL|Débito\s+Fiscal|Debito\s+Fiscal)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:IVA\s*13\s*%|13\s*%\s*IVA|I\.V\.A\.?)[^\d]{0,30}"
+            r"(?:Impuesto\s+al\s+Valor\s+Agregado\s*(?:13\s*%)?)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:Impuesto\s+al\s+Valor\s+Agregado)[^\d]{0,30}"
+            r"(?:IVA\s*13\s*%|13\s*%\s*IVA|I\.V\.A\.?)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
         ]:
             m_iva = re.search(pat, t_clean, re.I)
@@ -704,6 +777,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                     break
 
         # Ventas gravadas locales
+        # FIX: Agregar "Sub-Total" como proxy de ventas gravadas cuando no hay etiqueta explícita
         m_grav = re.search(
             r"(?:Ventas?\s+Gravadas?\s+Locales?|Subtotal\s+Gravado|"
             r"Ventas?\s+Gravadas?)[^\d]{0,30}"
@@ -713,9 +787,23 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_grav:
             gravadas = limpiar_monto(m_grav.group(1))
 
-        # ── Reconciliación O(n³) ──────────────────────────────
-        encontrado = False
-        if not (total > 0 and debito > 0):
+        # Si tenemos total y débito pero no gravadas, calcular por diferencia
+        if gravadas == 0.0 and total > 0 and debito > 0:
+            gravadas = round(total - debito - exentas - no_sujetas, 2)
+
+        # Si aún falta, buscar Sub-Total como ventas gravadas
+        if gravadas == 0.0:
+            m_sub = re.search(
+                r"Sub[\s\-]?Total\s*:\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+                t_clean, re.I
+            )
+            if m_sub:
+                gravadas = limpiar_monto(m_sub.group(1))
+
+        # ── Reconciliación O(n³) — solo si faltan datos ───────────────────────
+        encontrado = total > 0 and debito > 0 and gravadas > 0
+
+        if not encontrado:
             montos_raw = re.findall(
                 r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
                 t_clean
@@ -762,8 +850,8 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         return {
             "fecha"      : fecha,
             "tipo"       : tipo,
-            "num_control": num_control,   # ← Número de Control DTE
-            "gen"        : gen,           # ← UUID / Código de Generación
+            "num_control": num_control,
+            "gen"        : gen,
             "nit_cli"    : nit_cli,
             "dui_cli"    : dui_cli,
             "nom_cli"    : nom_cli,
@@ -786,42 +874,17 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
 
 # ─────────────────────────────────────────────
-# EXPORTAR EXCEL F-07 VENTAS — openpyxl
+# EXPORTAR EXCEL F-07 VENTAS
 # ─────────────────────────────────────────────
 def to_excel_hacienda_ventas(df: pd.DataFrame) -> bytes:
-    """
-    Genera el Excel con la estructura oficial F-07 Ventas:
-    A  Fecha Emisión
-    B  Clase Documento  → "4"
-    C  Tipo Documento
-    D  Num Resolución   → Número de Control DTE
-    E  Num Serie        → "" (vacío para DTE electrónico)
-    F  Num Documento    → "" (vacío para DTE electrónico)
-    G  Num Control Interno → "" (vacío)
-    H  NIT o NRC Cliente
-    I  Nombre Cliente
-    J  Ventas Exentas
-    K  Ventas No Sujetas
-    L  Ventas Gravadas
-    M  Débito Fiscal
-    N  Ventas a Cuenta Terceros
-    O  Débito Fiscal Terceros
-    P  Total Ventas
-    Q  DUI Cliente
-    R  Tipo Operación   → "1"
-    S  Tipo Ingreso     → "1"
-    T  Num Anexo        → "2"
-    """
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, header=False, sheet_name='Ventas_F07')
         ws = writer.sheets['Ventas_F07']
-        # Anchos: A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T
         anchos = [12, 3, 3, 40, 6, 12, 12, 16, 45, 12, 12, 12, 12, 12, 12, 14, 14, 3, 3, 4]
         for idx_col, ancho in enumerate(anchos, start=1):
             col_letter = ws.cell(1, idx_col).column_letter
             ws.column_dimensions[col_letter].width = ancho
-        # Formato numérico para columnas J–P (10–16)
         for fila in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=10, max_col=16):
             for celda in fila:
                 if isinstance(celda.value, (int, float)):
@@ -830,12 +893,11 @@ def to_excel_hacienda_ventas(df: pd.DataFrame) -> bytes:
 
 
 def construir_df_f07_ventas(df_filtrado: pd.DataFrame) -> pd.DataFrame:
-    """Mapea el DataFrame interno al formato oficial F-07 de Hacienda."""
     df_out = pd.DataFrame()
     df_out["A. Fecha Emisión"]           = df_filtrado["fecha"]
     df_out["B. Clase Doc"]               = "4"
     df_out["C. Tipo Doc"]                = df_filtrado["tipo"]
-    df_out["D. Num Resolución (Control)"]= df_filtrado["num_control"]  # ← Num Control DTE
+    df_out["D. Num Resolución (Control)"]= df_filtrado["num_control"]
     df_out["E. Serie"]                   = ""
     df_out["F. Num Documento"]           = ""
     df_out["G. Control Interno"]         = ""
@@ -1097,7 +1159,7 @@ with st.sidebar:
         st.markdown(f"**💰 Total:** `${st.session_state.db_ventas['total'].sum():,.2f}`")
 
 # ─────────────────────────────────────────────
-# 10. BANDEJA DE REVISIÓN MANUAL
+# 10. BANDEJA DE REVISIÓN MANUAL — MEJORADA
 # ─────────────────────────────────────────────
 if st.session_state.cola_revision_v:
     st.markdown("""
@@ -1108,10 +1170,26 @@ if st.session_state.cola_revision_v:
     """, unsafe_allow_html=True)
 
     total_cola  = len(st.session_state.cola_revision_v)
-    st.info(f"Quedan **{total_cola}** documento(s) por revisar.")
+
+    # ── Navegación entre documentos en cola ──────────────────────────────────
+    col_nav1, col_nav2, col_nav3 = st.columns([1, 3, 1])
+    with col_nav2:
+        st.info(f"📄 Documento **1 de {total_cola}** en revisión | Quedan **{total_cola}** por revisar")
+
+    # ── Descarte masivo ───────────────────────────────────────────────────────
+    with st.expander("🗑️ Gestión masiva de cola"):
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            if st.button("🗑️ Descartar TODOS los pendientes", type="secondary", use_container_width=True):
+                st.session_state.cola_revision_v = []
+                st.rerun()
+        with col_m2:
+            st.caption(f"Total en cola: {total_cola} documentos")
 
     item_actual = st.session_state.cola_revision_v[0]
     datos_act   = item_actual["datos"]
+
+    st.divider()
 
     col_img, col_form = st.columns([1.2, 1], gap="large")
 
@@ -1123,14 +1201,29 @@ if st.session_state.cola_revision_v:
                 texto_crudo = ""
                 for page in pdf.pages:
                     texto_crudo += safe_extract_text(page, layout=True) + "\n"
-                st.markdown("**📝 Texto extraído:**")
+
+                # Mostrar datos extraídos automáticamente como referencia
+                with st.expander("🔍 Datos extraídos automáticamente"):
+                    col_d1, col_d2 = st.columns(2)
+                    with col_d1:
+                        st.caption(f"**Num Control:** `{datos_act.get('num_control','—')}`")
+                        st.caption(f"**UUID:** `{datos_act.get('gen','—')}`")
+                        st.caption(f"**Fecha:** `{datos_act.get('fecha','—')}`")
+                        st.caption(f"**NIT receptor:** `{datos_act.get('nit_cli','—')}`")
+                    with col_d2:
+                        st.caption(f"**Nombre:** `{datos_act.get('nom_cli','—')}`")
+                        st.caption(f"**Total:** `${datos_act.get('total',0):.2f}`")
+                        st.caption(f"**Gravadas:** `${datos_act.get('gravadas',0):.2f}`")
+                        st.caption(f"**Débito:** `${datos_act.get('debito',0):.2f}`")
+
+                st.markdown("**📝 Texto extraído del PDF:**")
                 st.text_area("", value=texto_crudo.strip(),
                              height=220, label_visibility="collapsed")
         except Exception as ex_prev:
             st.error(f"No se pudo cargar la vista previa: {safe_str(ex_prev)}")
 
     with col_form:
-        st.markdown("### ✍️ Corrección Rápida")
+        st.markdown("### ✍️ Corrección Manual")
 
         error_causa = safe_str(datos_act.get("_error", ""))
         if error_causa:
@@ -1138,76 +1231,163 @@ if st.session_state.cola_revision_v:
 
         nit_actual = safe_str(datos_act.get("nit_cli", ""))
         if nit_actual:
-            st.caption(f"NIT receptor detectado: `{nit_actual}`")
+            st.info(f"🆔 NIT receptor detectado: `{nit_actual}`")
+
+        # Indicar qué campos necesitan corrección
+        campos_faltantes = []
+        if not safe_str(datos_act.get("fecha","")).strip():      campos_faltantes.append("Fecha")
+        if not safe_str(datos_act.get("num_control","")).strip(): campos_faltantes.append("Núm. Control")
+        if datos_act.get("nom_cli","") in ("SIN NOMBRE",""):     campos_faltantes.append("Nombre cliente")
+        if datos_act.get("total", 0.0) == 0.0:                   campos_faltantes.append("Total")
+        if campos_faltantes:
+            st.error(f"❌ Campos requeridos: **{', '.join(campos_faltantes)}**")
 
         with st.form(key=f"form_rev_v_{item_actual['archivo']}"):
-            f_fecha = st.text_input("📅 Fecha (DD/MM/YYYY) *",
-                                    value=safe_str(datos_act.get("fecha", "")))
-            f_ctrl  = st.text_input("🔢 Número de Control DTE *",
-                                    value=safe_str(datos_act.get("num_control", "")))
-            f_gen   = st.text_input("🔑 Código de Generación (UUID)",
-                                    value=safe_str(datos_act.get("gen", "")))
+            # ── Identificación ────────────────────────────────────────────────
+            st.markdown("**📋 Identificación del documento**")
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                f_fecha = st.text_input(
+                    "📅 Fecha (DD/MM/YYYY) *",
+                    value=safe_str(datos_act.get("fecha", "")),
+                    placeholder="13/03/2026"
+                )
+                f_tipo = st.selectbox(
+                    "📄 Tipo DTE",
+                    options=["03", "01", "05", "06"],
+                    index=["03","01","05","06"].index(safe_str(datos_act.get("tipo","03")))
+                          if safe_str(datos_act.get("tipo","03")) in ["03","01","05","06"] else 0
+                )
+            with col_f2:
+                f_ctrl = st.text_input(
+                    "🔢 Número de Control DTE *",
+                    value=safe_str(datos_act.get("num_control", "")),
+                    placeholder="DTE-03-M001P001-000000000000033"
+                )
+                f_gen = st.text_input(
+                    "🔑 UUID / Código de Generación",
+                    value=safe_str(datos_act.get("gen", "")),
+                    placeholder="25AA41EA-0412-40BC-803D-405272AC7891"
+                )
+
+            st.markdown("**🏢 Receptor / Cliente**")
+            col_r1, col_r2 = st.columns(2)
+            with col_r1:
+                f_nit = st.text_input(
+                    "🆔 NIT del Cliente",
+                    value=safe_str(datos_act.get("nit_cli", "")),
+                    placeholder="12172810871033"
+                )
+            with col_r2:
+                f_dui = st.text_input(
+                    "🪪 DUI del Cliente",
+                    value=safe_str(datos_act.get("dui_cli", "")),
+                    placeholder="Solo si es persona natural"
+                )
 
             nom_sug = safe_str(datos_act.get("nom_cli", ""))
             if nom_sug in ("SIN NOMBRE", ""):
                 nom_sug = ""
-            f_nom = st.text_input("🏢 Nombre del Cliente *",
-                                  value=nom_sug,
-                                  placeholder="Nombre tal como aparece en el DTE")
+            f_nom = st.text_input(
+                "🏢 Nombre / Razón Social del Cliente *",
+                value=nom_sug,
+                placeholder="JONATHAN NEFTALI RIVAS HERRERA"
+            )
 
-            c1, c2 = st.columns(2)
-            with c1:
-                f_total = st.number_input("💰 Total Ventas ($) *",
-                                          value=float(datos_act.get("total", 0.0)),
-                                          format="%.2f", min_value=0.0)
-            with c2:
-                f_exentas = st.number_input("🔹 Ventas Exentas ($)",
-                                            value=float(datos_act.get("exentas", 0.0)),
-                                            format="%.2f", min_value=0.0)
+            st.markdown("**💰 Montos**")
+            col_m1, col_m2, col_m3 = st.columns(3)
+            with col_m1:
+                f_total = st.number_input(
+                    "💰 Total a Pagar ($) *",
+                    value=float(datos_act.get("total", 0.0)),
+                    format="%.2f", min_value=0.0
+                )
+            with col_m2:
+                f_gravadas = st.number_input(
+                    "🧾 Ventas Gravadas ($)",
+                    value=float(datos_act.get("gravadas", 0.0)),
+                    format="%.2f", min_value=0.0,
+                    help="Dejar en 0 para calcular automáticamente"
+                )
+            with col_m3:
+                f_debito = st.number_input(
+                    "🏦 Débito Fiscal ($)",
+                    value=float(datos_act.get("debito", 0.0)),
+                    format="%.2f", min_value=0.0,
+                    help="Dejar en 0 para calcular automáticamente"
+                )
 
-            c3, c4 = st.columns(2)
-            with c3:
-                f_gravadas = st.number_input("🧾 Ventas Gravadas ($)",
-                                             value=float(datos_act.get("gravadas", 0.0)),
-                                             format="%.2f", min_value=0.0,
-                                             help="0 = calcular automáticamente")
-            with c4:
-                f_debito   = st.number_input("🏦 Débito Fiscal ($)",
-                                             value=float(datos_act.get("debito", 0.0)),
-                                             format="%.2f", min_value=0.0,
-                                             help="0 = calcular automáticamente")
+            col_m4, col_m5 = st.columns(2)
+            with col_m4:
+                f_exentas = st.number_input(
+                    "🔹 Ventas Exentas ($)",
+                    value=float(datos_act.get("exentas", 0.0)),
+                    format="%.2f", min_value=0.0
+                )
+            with col_m5:
+                f_no_sujetas = st.number_input(
+                    "🔸 Ventas No Sujetas ($)",
+                    value=float(datos_act.get("no_sujetas", 0.0)),
+                    format="%.2f", min_value=0.0
+                )
+
+            # Vista previa del cálculo
+            if f_total > 0:
+                grav_preview = f_gravadas if f_gravadas > 0 else round((f_total - f_exentas - f_no_sujetas) / 1.13, 2)
+                deb_preview  = f_debito if f_debito > 0 else round(grav_preview * 0.13, 2)
+                st.caption(
+                    f"📊 Preview: Gravadas `${grav_preview:.2f}` | "
+                    f"IVA `${deb_preview:.2f}` | "
+                    f"Total `${f_total:.2f}`"
+                )
 
             actualizar_otros = st.checkbox(
-                "🔄 Actualizar cliente en todos los registros existentes", value=True
+                "🔄 Actualizar nombre en registros existentes con este NIT", value=True
             )
 
             st.markdown("")
-            b1, b2 = st.columns(2)
+            b1, b2, b3 = st.columns([2, 1, 1])
             with b1:
-                submit_ok  = st.form_submit_button("✅ Aprobar y Guardar",
-                                                   type="primary",
-                                                   use_container_width=True)
+                submit_ok  = st.form_submit_button(
+                    "✅ Aprobar y Agregar al Libro",
+                    type="primary",
+                    use_container_width=True
+                )
             with b2:
-                submit_del = st.form_submit_button("🗑️ Descartar",
-                                                   use_container_width=True)
+                submit_skip = st.form_submit_button(
+                    "⏭️ Saltar",
+                    use_container_width=True,
+                    help="Mover al final de la cola"
+                )
+            with b3:
+                submit_del = st.form_submit_button(
+                    "🗑️ Descartar",
+                    use_container_width=True
+                )
 
             if submit_ok:
                 errores = []
                 if not f_fecha.strip():  errores.append("Fecha requerida.")
                 if not f_ctrl.strip():   errores.append("Número de Control requerido.")
                 if not f_nom.strip():    errores.append("Nombre del Cliente requerido.")
-                if f_total <= 0:         errores.append("Total Ventas debe ser mayor a 0.")
+                if f_total <= 0:         errores.append("Total debe ser mayor a 0.")
+
+                # Validar formato fecha
+                if f_fecha.strip() and not re.match(r'\d{2}/\d{2}/\d{4}', f_fecha.strip()):
+                    errores.append("Formato de fecha inválido. Use DD/MM/YYYY.")
 
                 if errores:
                     for e_msg in errores:
                         st.error(e_msg)
                 else:
                     nombre_limpio = f_nom.strip().upper()
-                    nit_act       = safe_str(datos_act.get("nit_cli", ""))
+                    nit_act       = f_nit.strip() or safe_str(datos_act.get("nit_cli", ""))
+                    dui_act       = f_dui.strip() or safe_str(datos_act.get("dui_cli", ""))
 
                     if nit_act:
                         guardar_cliente_rapido(nit_act, nombre_limpio)
 
+                    # Actualizar en cola pendiente
                     for item_pend in st.session_state.cola_revision_v[1:]:
                         if item_pend["datos"].get("nit_cli") == nit_act:
                             item_pend["datos"]["nom_cli"] = nombre_limpio
@@ -1216,13 +1396,14 @@ if st.session_state.cola_revision_v:
                     if actualizar_otros and nit_act:
                         actualizar_nombre_en_db_ventas(nit_act, nombre_limpio)
 
+                    # Calcular montos faltantes
                     grav_f = f_gravadas
                     deb_f  = f_debito
                     ic     = datos_act.get("iva_calc", False)
 
                     if f_total > 0 and grav_f == 0.0 and deb_f == 0.0:
-                        grav_f = round((f_total - f_exentas) / 1.13, 2)
-                        deb_f  = round(f_total - f_exentas - grav_f, 2)
+                        grav_f = round((f_total - f_exentas - f_no_sujetas) / 1.13, 2)
+                        deb_f  = round(f_total - f_exentas - f_no_sujetas - grav_f, 2)
                         ic     = True
                     elif f_total > 0 and deb_f == 0.0 and grav_f > 0.0:
                         deb_f  = round(grav_f * 0.13, 2)
@@ -1230,11 +1411,15 @@ if st.session_state.cola_revision_v:
 
                     datos_act.update({
                         "fecha"      : f_fecha.strip(),
+                        "tipo"       : f_tipo,
                         "num_control": f_ctrl.strip().upper(),
                         "gen"        : f_gen.strip().upper(),
+                        "nit_cli"    : nit_act,
+                        "dui_cli"    : dui_act,
                         "nom_cli"    : nombre_limpio,
                         "total"      : f_total,
                         "exentas"    : f_exentas,
+                        "no_sujetas" : f_no_sujetas,
                         "gravadas"   : grav_f,
                         "debito"     : deb_f,
                         "iva_calc"   : ic,
@@ -1258,7 +1443,14 @@ if st.session_state.cola_revision_v:
                             st.session_state.reporte_ventas["nuevos_clientes"] = nc_dict
 
                     st.session_state.cola_revision_v.pop(0)
+                    st.success("✅ Documento aprobado y agregado al libro.")
                     st.rerun()
+
+            if submit_skip:
+                # Mover al final de la cola para revisar después
+                item = st.session_state.cola_revision_v.pop(0)
+                st.session_state.cola_revision_v.append(item)
+                st.rerun()
 
             if submit_del:
                 st.session_state.cola_revision_v.pop(0)
@@ -1337,7 +1529,6 @@ if not st.session_state.db_ventas.empty:
 
     st.divider()
 
-    # ── Separar por tipo ──────────────────────────────────────
     df_ccf = df_filtrado[df_filtrado['tipo'] == '03'].copy()
     df_fac = df_filtrado[df_filtrado['tipo'] == '01'].copy()
     df_otro= df_filtrado[~df_filtrado['tipo'].isin(['01','03'])].copy()
@@ -1349,7 +1540,6 @@ if not st.session_state.db_ventas.empty:
     ])
 
     with tab1:
-        # CCF
         if not df_ccf.empty:
             st.markdown("#### 🧾 Ventas a Contribuyentes (CCF — DTE-03)")
             df_f07_ccf = construir_df_f07_ventas(df_ccf)
@@ -1359,7 +1549,6 @@ if not st.session_state.db_ventas.empty:
                 hide_index=True, use_container_width=True
             )
 
-        # Facturas consumidor
         if not df_fac.empty:
             st.markdown("#### 🧾 Ventas a Consumidor Final (Facturas — DTE-01)")
             df_f07_fac = construir_df_f07_ventas(df_fac)
@@ -1369,7 +1558,6 @@ if not st.session_state.db_ventas.empty:
                 hide_index=True, use_container_width=True
             )
 
-        # Otros
         if not df_otro.empty:
             st.markdown("#### 📄 Otros Documentos (NC/ND)")
             df_f07_otro = construir_df_f07_ventas(df_otro)
@@ -1379,7 +1567,6 @@ if not st.session_state.db_ventas.empty:
                 hide_index=True, use_container_width=True
             )
 
-        # ── Totales dinámicos ─────────────────────────────────
         df_f07_total = construir_df_f07_ventas(df_filtrado)
         ETIQUETAS = {
             "J. Ventas Exentas"      : "Exentas",
