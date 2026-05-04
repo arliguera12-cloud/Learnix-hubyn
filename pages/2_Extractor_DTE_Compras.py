@@ -90,7 +90,7 @@ ESTILO = """
   .card-emisor strong { color: #C8D87A !important; }
 
   .scroll-list {
-    max-height       : 150px;
+    max-height       : 200px;
     overflow-y       : auto;
     padding          : 8px 12px;
     background-color : #1A2008;
@@ -99,6 +99,7 @@ ESTILO = """
     font-family      : monospace;
     font-size        : 12px;
     color            : #A8BB45;
+    line-height      : 1.8;
   }
 
   .inbox-revision {
@@ -405,23 +406,25 @@ def extraer_nombre_proveedor(
 # EXTRACTOR PRINCIPAL
 # ══════════════════════════════════════════════════════════════
 def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
+    # ── Validación física del archivo ─────────────────────────
     if not file_bytes or len(file_bytes) < 512:
-        return {"error": "Archivo vacio o demasiado pequeño."}
+        return {"error_fatal": "Archivo vacio o demasiado pequeño."}
 
     try:
         texto_lineal = ""
         texto_visual = ""
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             if not pdf.pages:
-                return {"error": "PDF sin paginas."}
+                return {"error_fatal": "PDF sin paginas."}
             for page in pdf.pages:
                 texto_lineal += (page.extract_text(layout=False) or "") + "\n"
                 texto_visual  += (page.extract_text() or "") + "\n"
 
         texto_completo = texto_lineal + "\n" + texto_visual
 
+        # PDF de imagen — no tiene texto extraible nativamente
         if len(texto_completo.strip()) < 50:
-            return {"error": "PDF de imagen sin texto extraible. Usa OCR."}
+            return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
 
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
         t_no_sp = re.sub(r'\s+', '', t_clean).upper()
@@ -477,6 +480,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             re.I
         )
 
+        # NIT Estrategia 1: etiqueta explicita
         for m_etq_nit in patron_etq_nit.finditer(texto_completo):
             nit_cand = re.sub(r'[^0-9]', '', m_etq_nit.group(1))
             if nit_cand not in excluir_nits and len(nit_cand) in (9, 14):
@@ -484,6 +488,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 pos_nit_emisor = m_etq_nit.start()
                 break
 
+        # NIT Estrategia 2: seccion emisor
         if not nit_prov:
             partes_doc = re.split(
                 r"(?i)\b(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR\s*[:\-]|"
@@ -502,6 +507,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                     pos_nit_emisor = m_raw_nit.start()
                     break
 
+        # NIT Estrategia 3: URL/QR
         if not nit_prov:
             m_url_nit = re.search(r"NIT[=\s]?(\d{14})", t_no_sp)
             if m_url_nit:
@@ -509,6 +515,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if nit_cand not in excluir_nits:
                     nit_prov = nit_cand
 
+        # NIT Estrategia 4: cualquier NIT/DUI
         if not nit_prov:
             patron_todos = re.compile(
                 r"\b\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d\b"
@@ -524,10 +531,12 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if len(nit_prov) == 9:
             dui_prov = nit_prov
 
+        # ── Consultar BD de proveedores ───────────────────────
         if nit_prov and nit_prov in proveedores_db:
             nom_prov = proveedores_db[nit_prov].get("nombre", "")
             es_nuevo = False
 
+        # ── Extracción de nombre ──────────────────────────────
         if es_nuevo and nit_prov:
             partes_cli = [
                 p for p in cliente_activo.get('nombre', '').upper().split()[:4]
@@ -608,6 +617,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_iva:
             i = limpiar_monto(m_iva.group(1))
 
+        # Reconciliación O(n³)
         encontrado = False
         if not (t > 0 and i > 0):
             montos_raw = re.findall(
@@ -669,9 +679,11 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
-        return {"error": "PDF invalido o con sintaxis corrupta."}
+        # ── Único caso de corrupción real por sintaxis ────────
+        return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
     except Exception as err:
-        return {"error": str(err)}
+        # ── Cualquier otro error: fallo de extracción, no corrupción
+        return {"error_extraccion": str(err)}
 
 
 # ─────────────────────────────────────────────
@@ -707,28 +719,51 @@ def ventana_descarga_compras(df_resultados: pd.DataFrame, nombre_archivo: str) -
 
 
 # ─────────────────────────────────────────────
-# HELPER: renderiza alerta + lista expandible
+# HELPER: alerta + lista expandible
 # ─────────────────────────────────────────────
 def alerta_con_lista(
-    tipo_alerta: str,          # "error" | "warning" | "info" | "success"
+    tipo_alerta: str,
     icono: str,
     titulo: str,
     archivos: list,
-    key_exp: str,
 ) -> None:
-    """Muestra un st.<tipo_alerta> con contador y expander con lista de archivos."""
+    """Muestra alerta con contador y expander con lista de archivos."""
     fn = getattr(st, tipo_alerta)
     if archivos:
         fn(f"{icono} **{len(archivos)} {titulo}**")
-        with st.expander(f"Ver {len(archivos)} archivo(s)", expanded=False):
-            lista_html = "".join(
-                f'<div class="scroll-list" style="max-height:200px">'
-                + "".join(f"<div>📄 {a}</div>" for a in archivos)
-                + "</div>"
+        with st.expander(f"Ver {len(archivos)} archivo(s)"):
+            items_html = "".join(f"<div>📄 {a}</div>" for a in archivos)
+            st.markdown(
+                f'<div class="scroll-list">{items_html}</div>',
+                unsafe_allow_html=True
             )
-            st.markdown(lista_html, unsafe_allow_html=True)
     else:
         st.success(f"✅ 0 {titulo}")
+
+
+# ─────────────────────────────────────────────
+# HELPER: datos vacíos para revisión manual
+# ─────────────────────────────────────────────
+def datos_revision_vacio(causa: str = "") -> dict:
+    return {
+        "fecha"    : "",
+        "nit_prov" : "",
+        "dui_prov" : "",
+        "nom_prov" : "",
+        "tipo"     : "03",
+        "gen"      : "",
+        "exe"      : 0.0,
+        "gra"      : 0.0,
+        "iva"      : 0.0,
+        "ret"      : 0.0,
+        "perc"     : 0.0,
+        "tot"      : 0.0,
+        "estado"   : "REVISION",
+        "iva_calc" : False,
+        "es_nuevo" : True,
+        "nit_nuevo": "",
+        "_error"   : causa,
+    }
 
 
 # ─────────────────────────────────────────────
@@ -812,6 +847,7 @@ with st.sidebar:
 
                 file_bytes = f.read()
 
+                # ── Archivo físicamente vacío/corrupto ────────
                 if len(file_bytes) < 512:
                     corruptos.append(f.name)
                     st.session_state.archivos_comp.append(f.name)
@@ -829,13 +865,34 @@ with st.sidebar:
                 )
                 dup_lote = cod_gen and any(d.get('gen') == cod_gen for d in extracted)
 
+                # ══════════════════════════════════════════════
+                # CLASIFICACIÓN DE RESULTADOS
+                # ══════════════════════════════════════════════
+
                 if "error_tipo" in res:
+                    # DTE-01, DTE-14, etc. — tipo no admitido
                     invalidos.append(f.name)
+
                 elif dup_memoria or dup_lote:
+                    # UUID ya existe en memoria o en el lote actual
                     duplicados.append(f.name)
-                elif "error" in res:
+
+                elif "error_fatal" in res:
+                    # PDF genuinamente roto: vacío, sin páginas,
+                    # sintaxis corrupta o imagen sin texto
                     corruptos.append(f.name)
+
+                elif "error_extraccion" in res:
+                    # PDF legible pero la extracción falló por
+                    # alguna razón lógica — va a revisión manual
+                    st.session_state.cola_revision.append({
+                        "archivo": f.name,
+                        "bytes"  : file_bytes,
+                        "datos"  : datos_revision_vacio(res["error_extraccion"]),
+                    })
+
                 else:
+                    # Extracción exitosa — verificar completitud
                     nom_res = str(res.get('nom_prov', '')).strip()
                     va_a_revision = (
                         res.get('tot', 0.0) == 0.0
@@ -847,7 +904,7 @@ with st.sidebar:
                         st.session_state.cola_revision.append({
                             "archivo": f.name,
                             "bytes"  : file_bytes,
-                            "datos"  : res
+                            "datos"  : res,
                         })
                     else:
                         if res.get('iva_calc'):
@@ -937,6 +994,11 @@ if st.session_state.cola_revision:
     with col_form:
         st.markdown("### ✍️ Corrección Rápida")
 
+        # Mostrar causa si vino de error de extraccion
+        error_causa = datos_act.get("_error", "")
+        if error_causa:
+            st.warning(f"⚠️ **Causa del fallo:** `{error_causa}`")
+
         nit_actual = datos_act.get("nit_prov", "")
         if nit_actual:
             st.caption(f"NIT detectado: `{nit_actual}`")
@@ -1004,12 +1066,13 @@ if st.session_state.cola_revision:
                     "🗑️ Descartar Archivo", use_container_width=True
                 )
 
+            # ── Aprobar ──────────────────────────────────────
             if submit_ok:
                 errores = []
-                if not f_fecha.strip():   errores.append("Fecha requerida.")
-                if not f_gen.strip():     errores.append("Código de Generación requerido.")
-                if not f_nom.strip():     errores.append("Razón Social del Proveedor requerida.")
-                if f_tot <= 0:            errores.append("Total a Pagar debe ser mayor a 0.")
+                if not f_fecha.strip(): errores.append("Fecha requerida.")
+                if not f_gen.strip():   errores.append("Código de Generación requerido.")
+                if not f_nom.strip():   errores.append("Razón Social del Proveedor requerida.")
+                if f_tot <= 0:          errores.append("Total a Pagar debe ser mayor a 0.")
 
                 if errores:
                     for e_msg in errores:
@@ -1072,6 +1135,7 @@ if st.session_state.cola_revision:
                     st.session_state.cola_revision.pop(0)
                     st.rerun()
 
+            # ── Descartar ─────────────────────────────────────
             if submit_del:
                 st.session_state.cola_revision.pop(0)
                 st.rerun()
@@ -1091,31 +1155,26 @@ if st.session_state.reporte_compras:
             "error" if rep.get("corruptos") else "success",
             "💀", "Dañados",
             rep.get("corruptos", []),
-            "exp_corruptos"
         )
     with c2:
         alerta_con_lista(
             "warning" if rep.get("invalidos") else "success",
             "⚠️", "Ignorados (tipo incorrecto)",
             rep.get("invalidos", []),
-            "exp_invalidos"
         )
     with c3:
         alerta_con_lista(
             "error" if rep.get("duplicados") else "success",
             "🛑", "Duplicados",
             rep.get("duplicados", []),
-            "exp_duplicados"
         )
     with c4:
         alerta_con_lista(
             "info" if rep.get("iva_calc") else "success",
             "🧮", "IVA Calculado",
             rep.get("iva_calc", []),
-            "exp_iva_calc"
         )
 
-    # Nuevos proveedores guardados
     np_dict = rep.get("nuevos_proveedores", {})
     if np_dict:
         st.markdown(f"**🆕 Proveedores nuevos guardados:** `{len(np_dict)}`")
@@ -1193,8 +1252,6 @@ if not st.session_state.db_compras.empty:
         # ══════════════════════════════════════════════════════
         # TOTALES DINÁMICOS — solo columnas con valores > 0
         # ══════════════════════════════════════════════════════
-
-        # Etiquetas cortas para mostrar en el resumen
         ETIQUETAS_CORTAS = {
             "G. Compra Ext/NS"       : "Exentas/NS",
             "H. Internacion Ext/NS"  : "Intern. Ext",
@@ -1207,25 +1264,18 @@ if not st.session_state.db_compras.empty:
             "O. Total Compras"       : "Total General",
         }
 
-        # Construir partes del resumen solo si la columna suma > 0
         partes_resumen = []
         for col_key, etiqueta in ETIQUETAS_CORTAS.items():
             if col_key in df_f07.columns:
                 suma = df_f07[col_key].sum()
                 if suma > 0:
-                    # Total General siempre en negrita destacada
                     if col_key == "O. Total Compras":
-                        partes_resumen.append(
-                            f"**🟢 {etiqueta}:** `${suma:,.2f}`"
-                        )
+                        partes_resumen.append(f"**🟢 {etiqueta}:** `${suma:,.2f}`")
                     else:
-                        partes_resumen.append(
-                            f"**{etiqueta}:** `${suma:,.2f}`"
-                        )
+                        partes_resumen.append(f"**{etiqueta}:** `${suma:,.2f}`")
 
         if partes_resumen:
-            resumen_str = " &nbsp;|&nbsp; ".join(partes_resumen)
-            st.markdown(f"> {resumen_str}")
+            st.markdown("> " + " &nbsp;|&nbsp; ".join(partes_resumen))
         else:
             st.markdown("> *Sin montos registrados.*")
 
