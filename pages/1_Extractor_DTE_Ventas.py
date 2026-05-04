@@ -588,7 +588,7 @@ if not st.session_state.db_ventas.empty:
         # ── Exportar Excel con dos hojas ──
         st.markdown("---")
         output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_all_f07 = build_f07(df)
             if not df_consumidores.empty:
                 build_f07(df_consumidores).to_excel(

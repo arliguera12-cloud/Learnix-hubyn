@@ -393,7 +393,7 @@ if not st.session_state.db_ret.empty:
     st.markdown("---")
 
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export = df[COLS_MOSTRAR].copy()
         df_export.to_excel(writer, index=False, sheet_name='F14_Retenciones')
         wb = writer.book
