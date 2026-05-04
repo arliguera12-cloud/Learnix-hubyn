@@ -293,83 +293,164 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         nom_prov = "⚠️ PROVEEDOR NUEVO"
         es_nuevo = True
 
-        # Aislar la sección del emisor (antes del receptor)
-        partes_emisor = re.split(
-            r"(?i)\b(?:RECEPTOR|CLIENTE\s*:|CLIENTE\s|SOCIO/EMPRESA)\b",
-            texto_lineal, maxsplit=1
-        )
-        texto_emisor = partes_emisor[0] if len(partes_emisor[0]) > 100 else texto_lineal[:1500]
-
-        # Buscar NITs / DUIs en la sección del emisor
-        patron_ids = (
-            r"\b\d{4}\s*-?\s*\d{6}\s*-?\s*\d{3}\s*-?\s*\d\b"
-            r"|\b\d{14}\b"
-            r"|\b\d{8}\s*-?\s*\d\b"
-            r"|\b\d{9}\b"
-        )
-        ids_raw    = re.findall(patron_ids, texto_emisor)
-        ids_limpios = list(dict.fromkeys(re.sub(r'[^0-9]', '', n) for n in ids_raw))
-        candidatos  = [n for n in ids_limpios if n not in (nit_receptor, dui_receptor) and len(n) >= 9]
+        excluir_nits = {nit_receptor, dui_receptor} - {""}
+        pos_nit_emisor = -1   # posición en texto donde se encontró el NIT del emisor
 
         proveedores_db = cargar_proveedores_json()
 
-        for n in candidatos:
-            if n in proveedores_db:
-                nit_prov = n
-                nom_prov = proveedores_db[n].get("nombre", "")
-                es_nuevo = False
+        # ═══ ESTRATEGIA 1: Etiqueta "NIT:" explícita ═══════════════════════
+        # En cada DTE la etiqueta "NIT:" aparece al menos dos veces
+        # (emisor y receptor). El PRIMER match que no sea el NIT del cliente
+        # es el NIT del emisor (proveedor).
+        patron_etq_nit = re.compile(
+            r"N\.?\s*I\.?\s*T\.?\s*[:\s]\s*"
+            r"((?:\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d)"   # formato 4-6-3-1
+            r"|(?:\d{14})"                                       # 14 dígitos planos
+            r"|(?:\d{8}[\s\-]?\d))",                            # DUI 8-1
+            re.I
+        )
+        for m_etq in patron_etq_nit.finditer(texto_completo):
+            nit_cand = re.sub(r'[^0-9]', '', m_etq.group(1))
+            if nit_cand not in excluir_nits and len(nit_cand) in (9, 14):
+                nit_prov = nit_cand
+                pos_nit_emisor = m_etq.start()
                 break
 
-        if not nit_prov and candidatos:
-            nit_prov = candidatos[0]
+        # ═══ ESTRATEGIA 2: Búsqueda en sección del emisor (más permisiva) ══
+        if not nit_prov:
+            # Aislar emisor con múltiples patrones de separador
+            partes = re.split(
+                r"(?i)\b(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR\s*[:\-]|"
+                r"DATOS\s+DEL\s+ADQUIRIENTE|ADQUIRIENTE\s*[:\-]|"
+                r"RECEPTOR\b|CLIENTE\s*:|COMPRADOR\b)\b",
+                texto_completo, maxsplit=1
+            )
+            texto_emisor = partes[0] if len(partes[0]) > 80 else texto_completo[:2500]
 
+            # Patrón amplio: NIT con espacios o guiones variables
+            patron_nit_raw = re.compile(
+                r"\b(\d{4})[\s\-]?(\d{3,6})[\s\-]?(\d{2,6})[\s\-]?(\d)\b"
+                r"|\b(\d{14})\b"
+            )
+            for m_raw in patron_nit_raw.finditer(texto_emisor):
+                gs = m_raw.groups()
+                nit_cand = re.sub(r'[^0-9]', '', m_raw.group(0))
+                if nit_cand not in excluir_nits and len(nit_cand) == 14:
+                    nit_prov = nit_cand
+                    pos_nit_emisor = m_raw.start()
+                    break
+
+        # ═══ ESTRATEGIA 3: URL/QR code (algunos PDFs incluyen NIT en URL) ══
+        if not nit_prov:
+            m_url_nit = re.search(r"NIT[=\s]?(\d{14})", t_no_sp)
+            if m_url_nit:
+                nit_cand = m_url_nit.group(1)
+                if nit_cand not in excluir_nits:
+                    nit_prov = nit_cand
+
+        # ═══ ESTRATEGIA 4: Cualquier NIT en el documento, excluir receptor ═
+        if not nit_prov:
+            patron_todos = re.compile(
+                r"\b\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d\b"
+                r"|\b\d{14}\b"
+                r"|\b\d{8}[\s\-]?\d\b"
+                r"|\b\d{9}\b"
+            )
+            for m_any in patron_todos.finditer(texto_completo):
+                nit_cand = re.sub(r'[^0-9]', '', m_any.group(0))
+                if nit_cand not in excluir_nits and len(nit_cand) in (9, 14):
+                    nit_prov = nit_cand
+                    pos_nit_emisor = m_any.start()
+                    break
+
+        # ── Determinar si es DUI ──
         if len(nit_prov) == 9:
             dui_prov = nit_prov
 
-        # Nombre del proveedor (solo si es nuevo)
+        # ── Consultar base de datos de proveedores ──
+        if nit_prov and nit_prov in proveedores_db:
+            nom_prov = proveedores_db[nit_prov].get("nombre", "")
+            es_nuevo = False
+
+        # ═══ EXTRACCIÓN DE NOMBRE — solo si es proveedor nuevo ═════════════
         if es_nuevo and nit_prov:
             nombre_encontrado = ""
 
-            # Patrón 1: etiqueta explícita
-            m_etq = re.search(
-                r"(?:Nombre(?:\s+o\s+[Rr]az[oó]n\s+[Ss]ocial)?|[Rr]az[oó]n\s+[Ss]ocial)"
-                r"[:\s]+(.*?)(?:NIT|NRC|Giro|Actividad|Direcci[oó]n|\n\n|$)",
-                texto_emisor, re.I | re.DOTALL
-            )
-            if m_etq:
-                candidato = re.sub(r'\s+', ' ', m_etq.group(1)).strip()
-                if (
-                    len(candidato) > 4
-                    and not any(b in candidato.upper() for b in BASURA_ESTRICTA)
-                    and not any(w in candidato.upper() for w in cliente_activo.get('nombre', '').upper().split()[:2])
-                ):
-                    nombre_encontrado = candidato.upper()
+            # Ventana de texto ANTES del NIT del emisor (1000 chars)
+            if pos_nit_emisor >= 0:
+                inicio_ventana = max(0, pos_nit_emisor - 1200)
+                ventana_antes  = texto_completo[inicio_ventana:pos_nit_emisor]
+            else:
+                # Sin posición, usar primeras 2000 chars
+                ventana_antes = texto_completo[:2000]
 
-            # Patrón 2: línea con sufijo comercial
+            # --- Intento 1: Etiqueta "Nombre:" o "Razón Social:" ---
+            m_nombre_etq = re.search(
+                r"(?:Nombre(?:\s+o\s+[Rr]az[oó]n\s+[Ss]ocial)?|"
+                r"[Rr]az[oó]n\s+[Ss]ocial|Nombre\s+Comercial)"
+                r"\s*[:\s]\s*(.*?)(?=\s*(?:NIT|NRC|Giro|Actividad|Direcci[oó]n|\n\n|$))",
+                ventana_antes, re.I | re.DOTALL
+            )
+            if m_nombre_etq:
+                candidato = re.sub(r'\s+', ' ', m_nombre_etq.group(1)).strip()
+                partes_cli = cliente_activo.get('nombre', '').upper().split()[:2]
+                if (
+                    4 < len(candidato) <= 80
+                    and not any(b in candidato.upper() for b in BASURA_ESTRICTA)
+                    and not any(p in candidato.upper() for p in partes_cli)
+                ):
+                    nombre_encontrado = candidato
+
+            # --- Intento 2: Líneas próximas antes del NIT (hacia atrás) ---
             if not nombre_encontrado:
-                for linea in texto_emisor.split('\n')[:30]:
+                lineas_antes = [l.strip() for l in ventana_antes.split('\n') if l.strip()]
+                for linea in reversed(lineas_antes[-15:]):
+                    L = linea.upper()
+                    if len(L) < 5:
+                        continue
+                    # Descartar si tiene demasiados dígitos (códigos, NITs, fechas)
+                    if sum(c.isdigit() for c in L) / len(L) > 0.38:
+                        continue
+                    # Descartar palabras de encabezado/basura
+                    if any(b in L for b in PALABRAS_BASURA + BASURA_ESTRICTA):
+                        continue
+                    # Descartar si contiene partes del nombre del cliente (receptor)
+                    partes_cli = cliente_activo.get('nombre', '').upper().split()[:2]
+                    if any(p in L for p in partes_cli if len(p) > 3):
+                        continue
+                    # Línea válida
+                    nombre_encontrado = linea
+                    break
+
+            # --- Intento 3: Buscar cualquier línea con sufijo comercial ---
+            if not nombre_encontrado:
+                for linea in ventana_antes.split('\n'):
                     L = linea.strip().upper()
                     if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3:
                         continue
                     if any(b in L for b in PALABRAS_BASURA + BASURA_ESTRICTA):
                         continue
                     if any(w in L for w in PALABRAS_COMERCIALES):
-                        clean = re.split(r'\s{4,}|NIT|NRC', L)[0].strip()
-                        partes_cliente = cliente_activo.get('nombre', '').upper().split()[:2]
-                        if clean and not any(p in clean for p in partes_cliente):
+                        clean = re.split(r'\s{4,}|(?:NIT|NRC)\s', L)[0].strip()
+                        partes_cli = cliente_activo.get('nombre', '').upper().split()[:2]
+                        if clean and not any(p in clean for p in partes_cli if len(p) > 3):
                             nombre_encontrado = clean
                             break
 
-            # Limpiar prefijos del nombre
+            # --- Limpiar y validar el nombre ---
             if nombre_encontrado:
                 nombre_encontrado = re.sub(
-                    r"^(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|NOMBRE COMERCIAL)[\s:]*",
+                    r"^(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
+                    r"NOMBRE\s+COMERCIAL|EMISOR|DATOS\s+DEL\s+EMISOR)[\s:]*",
                     "", nombre_encontrado, flags=re.I
                 ).strip()
                 nombre_encontrado = re.sub(r"^[-_.,;:]+", "", nombre_encontrado).strip()
+                nombre_encontrado = re.sub(r'\s+', ' ', nombre_encontrado)
 
-            if nombre_encontrado and 4 <= len(nombre_encontrado) <= 65:
-                nom_prov = nombre_encontrado
+                if 4 <= len(nombre_encontrado) <= 80:
+                    nom_prov = nombre_encontrado.upper()
+                else:
+                    nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
             else:
                 nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
 
