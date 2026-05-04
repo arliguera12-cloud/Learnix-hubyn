@@ -133,19 +133,46 @@ cliente = st.session_state.cliente_activo
 # 4. CONSTANTES
 # ─────────────────────────────────────────────
 MAX_VALORES_LOOP = 30   # Límite O(n³) controlado
-PALABRAS_BASURA  = [
+
+PALABRAS_BASURA = [
     "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "REPRESENTACIÓN", "RECEPTOR",
     "CLIENTE", "EMISOR", "FACTURA", "CONSUMIDOR", "COMPROBANTE", "CÓDIGO",
-    "SELLO", "VERSIÓN", "TRANSMISIÓN", "MINISTERIO", "HACIENDA", "COLONIA",
-    "BOULEVARD", "CALLE", "AVENIDA", "MUNICIPIO", "GIRO:", "ACTIVIDAD",
-    "ECONOMICA", "SUCURSAL", "AGENCIA", "EFECTIVO", "FECHA", "HORA",
-    "EMISIÓN", "GENERACIÓN", "TELÉFONO"
+    "SELLO", "VERSIÓN", "TRANSMISIÓN", "MINISTERIO", "HACIENDA",
+    "MUNICIPIO", "GIRO:", "ACTIVIDAD", "ECONOMICA", "AGENCIA",
+    "EFECTIVO", "FECHA", "HORA", "EMISIÓN", "GENERACIÓN", "TELÉFONO",
+    "TIPO ESTABLECIMIENTO", "ESTABLECIMIENTO", "CASA MATRIZ",
+    "SUCURSAL:", "NIT:", "NRC:", "REPRESENTACION",
 ]
-BASURA_ESTRICTA  = ["@", "EMAIL", "CORREO", ".COM", "WWW."]
+BASURA_ESTRICTA = ["@", "EMAIL", "CORREO", ".COM", "WWW."]
+
+# Prefijos que identifican una línea de dirección (no un nombre comercial)
+PREFIJOS_DIRECCION = (
+    "KM ", "KM.", "AV.", "AV ", "AVENIDA", "CALLE ", "PASAJE",
+    "COLONIA", "COL.", "COL ", "URB.", "URB ", "URBANIZACION",
+    "URBANIZACIÓN", "RESIDENCIAL", "LOTIFICACION", "LOTIFICACIÓN",
+    "BARRIO", "CANTON", "CANTÓN", "CTON", "CARRETERA", "CARR.",
+    "BULEVAR", "BOULEVARD", "BLVD", "POLIGONO", "POLÍGONO",
+    "LOCAL ", "NIVEL ", "PISO ", "EDIFICIO", "CENTRO COMERCIAL",
+    "COMPLEJO", "PARQUE INDUSTRIAL", "ZONA FRANCA",
+)
+
 PALABRAS_COMERCIALES = [
     "S.A.", "SA ", "C.V.", "CV ", "LTDA.", "LTDA", "SOCIEDAD",
-    "DISTRIBUIDORA", "FARMACIA", "GRUPO", "LABORATORIOS", "INDUSTRIAS"
+    "DISTRIBUIDORA", "FARMACIA", "GRUPO", "LABORATORIOS", "INDUSTRIAS",
+    "SERVICIOS", "COMERCIAL", "IMPORTADORA", "EXPORTADORA",
 ]
+
+# Palabras genéricas que solas no son un nombre válido de empresa
+NOMBRES_INVALIDOS = {
+    "MATRIZ", "LOCAL", "SUCURSAL", "AGENCIA", "OFICINA", "SEDE",
+    "ESTABLECIMIENTO", "PUNTO DE VENTA", "TIENDA", "ALMACEN",
+    "ALMACÉN", "BODEGA", "CASA",
+}
+
+def es_linea_direccion(texto: str) -> bool:
+    """Detecta si una línea es una dirección física y no un nombre comercial."""
+    L = texto.upper().strip()
+    return any(L.startswith(p) or (f" {p}" in L[:40]) for p in PREFIJOS_DIRECCION)
 
 # ─────────────────────────────────────────────
 # 5. FUNCIONES AUXILIARES
@@ -384,75 +411,84 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 # Sin posición, usar primeras 2000 chars
                 ventana_antes = texto_completo[:2000]
 
+            partes_cli = [
+                p for p in cliente_activo.get('nombre', '').upper().split()[:3]
+                if len(p) > 3
+            ]
+
+            def limpiar_nombre_candidato(texto: str) -> str:
+                """Limpia prefijos, sufijos basura y normaliza espacios."""
+                s = re.sub(
+                    r"^(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
+                    r"NOMBRE\s+COMERCIAL|EMISOR|DATOS\s+DEL\s+EMISOR|"
+                    r"TIPO\s+ESTABLECIMIENTO|ESTABLECIMIENTO)[\s:]*",
+                    "", texto, flags=re.I
+                ).strip()
+                # Cortar todo lo que venga después de NIT / NRC / Giro / etc.
+                s = re.sub(
+                    r"\s*\b(?:NIT|NRC|GIRO|ACTIVIDAD|DIRECCI[OÓ]N|CORREO|"
+                    r"TELEF|FONO|TIPO ESTAB)\b.*$",
+                    "", s, flags=re.I
+                ).strip()
+                s = re.sub(r"^[-_.,;:\s]+", "", s).strip()
+                s = re.sub(r'\s+', ' ', s)
+                return s.upper()
+
+            def candidato_valido(texto: str) -> bool:
+                """True si el texto parece un nombre de empresa real."""
+                T = texto.upper().strip()
+                if len(T) < 4 or len(T) > 80:
+                    return False
+                if any(b in T for b in BASURA_ESTRICTA):
+                    return False
+                if es_linea_direccion(T):
+                    return False
+                if any(b in T for b in PALABRAS_BASURA):
+                    return False
+                if T in NOMBRES_INVALIDOS:
+                    return False
+                if any(p in T for p in partes_cli):
+                    return False
+                # Rechazar si >45% son dígitos
+                if len(T) > 0 and sum(c.isdigit() for c in T) / len(T) > 0.45:
+                    return False
+                return True
+
             # --- Intento 1: Etiqueta "Nombre:" o "Razón Social:" ---
+            # Busca sin DOTALL para no capturar líneas adicionales con NIT/NRC
             m_nombre_etq = re.search(
                 r"(?:Nombre(?:\s+o\s+[Rr]az[oó]n\s+[Ss]ocial)?|"
                 r"[Rr]az[oó]n\s+[Ss]ocial|Nombre\s+Comercial)"
-                r"\s*[:\s]\s*(.*?)(?=\s*(?:NIT|NRC|Giro|Actividad|Direcci[oó]n|\n\n|$))",
-                ventana_antes, re.I | re.DOTALL
+                r"\s*[:\s]\s*([^\n]{4,80})",
+                ventana_antes, re.I
             )
             if m_nombre_etq:
-                candidato = re.sub(r'\s+', ' ', m_nombre_etq.group(1)).strip()
-                partes_cli = cliente_activo.get('nombre', '').upper().split()[:2]
-                if (
-                    4 < len(candidato) <= 80
-                    and not any(b in candidato.upper() for b in BASURA_ESTRICTA)
-                    and not any(p in candidato.upper() for p in partes_cli)
-                ):
+                candidato = limpiar_nombre_candidato(m_nombre_etq.group(1))
+                if candidato_valido(candidato):
                     nombre_encontrado = candidato
 
-            # --- Intento 2: Líneas próximas antes del NIT (hacia atrás) ---
+            # --- Intento 2: Líneas próximas ANTES del NIT (de más cerca a más lejos) ---
             if not nombre_encontrado:
                 lineas_antes = [l.strip() for l in ventana_antes.split('\n') if l.strip()]
-                for linea in reversed(lineas_antes[-15:]):
-                    L = linea.upper()
-                    if len(L) < 5:
-                        continue
-                    # Descartar si tiene demasiados dígitos (códigos, NITs, fechas)
-                    if sum(c.isdigit() for c in L) / len(L) > 0.38:
-                        continue
-                    # Descartar palabras de encabezado/basura
-                    if any(b in L for b in PALABRAS_BASURA + BASURA_ESTRICTA):
-                        continue
-                    # Descartar si contiene partes del nombre del cliente (receptor)
-                    partes_cli = cliente_activo.get('nombre', '').upper().split()[:2]
-                    if any(p in L for p in partes_cli if len(p) > 3):
-                        continue
-                    # Línea válida
-                    nombre_encontrado = linea
-                    break
+                for linea in reversed(lineas_antes[-18:]):
+                    candidato = limpiar_nombre_candidato(linea)
+                    if candidato_valido(candidato):
+                        nombre_encontrado = candidato
+                        break
 
-            # --- Intento 3: Buscar cualquier línea con sufijo comercial ---
+            # --- Intento 3: Cualquier línea con sufijo comercial en la ventana ---
             if not nombre_encontrado:
                 for linea in ventana_antes.split('\n'):
                     L = linea.strip().upper()
-                    if len(L) < 5 or sum(c.isdigit() for c in L) / len(L) > 0.3:
+                    if not any(w in L for w in PALABRAS_COMERCIALES):
                         continue
-                    if any(b in L for b in PALABRAS_BASURA + BASURA_ESTRICTA):
-                        continue
-                    if any(w in L for w in PALABRAS_COMERCIALES):
-                        clean = re.split(r'\s{4,}|(?:NIT|NRC)\s', L)[0].strip()
-                        partes_cli = cliente_activo.get('nombre', '').upper().split()[:2]
-                        if clean and not any(p in clean for p in partes_cli if len(p) > 3):
-                            nombre_encontrado = clean
-                            break
+                    clean = re.split(r'\s{4,}|(?:NIT|NRC)\s', L)[0].strip()
+                    candidato = limpiar_nombre_candidato(clean)
+                    if candidato_valido(candidato):
+                        nombre_encontrado = candidato
+                        break
 
-            # --- Limpiar y validar el nombre ---
-            if nombre_encontrado:
-                nombre_encontrado = re.sub(
-                    r"^(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
-                    r"NOMBRE\s+COMERCIAL|EMISOR|DATOS\s+DEL\s+EMISOR)[\s:]*",
-                    "", nombre_encontrado, flags=re.I
-                ).strip()
-                nombre_encontrado = re.sub(r"^[-_.,;:]+", "", nombre_encontrado).strip()
-                nombre_encontrado = re.sub(r'\s+', ' ', nombre_encontrado)
-
-                if 4 <= len(nombre_encontrado) <= 80:
-                    nom_prov = nombre_encontrado.upper()
-                else:
-                    nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
-            else:
-                nom_prov = "ESCRIBE EL NOMBRE AQUÍ"
+            nom_prov = nombre_encontrado if nombre_encontrado else "ESCRIBE EL NOMBRE AQUÍ"
 
         # ── Extracción de montos ──
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
@@ -571,23 +607,21 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
 def to_excel_hacienda_compras(df: pd.DataFrame) -> bytes:
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, header=False, sheet_name='Compras_F07')
-        wb  = writer.book
-        ws  = writer.sheets['Compras_F07']
-        fmt_txt = wb.add_format({'num_format': '@'})
-        fmt_num = wb.add_format({'num_format': '0.00', 'align': 'left'})
+        ws = writer.sheets['Compras_F07']
 
-        def col_width(idx: int) -> int:
-            return max(df.iloc[:, idx].astype(str).map(len).max() if not df.empty else 15, 15) + 2
+        # Anchos de columna
+        anchos = [10, 2, 2, 38, 16, 45, 10, 10, 10, 12, 10, 10, 10, 12, 14, 10, 2, 2, 2, 2, 4]
+        for idx, ancho in enumerate(anchos, start=1):
+            ws.column_dimensions[ws.cell(1, idx).column_letter].width = ancho
 
-        ws.set_column(0, 0, 10,  fmt_txt)
-        ws.set_column(1, 2, 2,   fmt_txt)
-        ws.set_column(3, 3, col_width(3), fmt_txt)
-        ws.set_column(4, 4, 14,  fmt_txt)
-        ws.set_column(5, 5, col_width(5), fmt_txt)
-        ws.set_column(6, 14, 10.71, fmt_num)
-        ws.set_column(15, 20, 8, fmt_txt)
+        # Formato numérico para columnas de montos (G a O)
+        for fila in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=7, max_col=15):
+            for celda in fila:
+                if isinstance(celda.value, (int, float)):
+                    celda.number_format = '#,##0.00'
+
     return output.getvalue()
 
 
