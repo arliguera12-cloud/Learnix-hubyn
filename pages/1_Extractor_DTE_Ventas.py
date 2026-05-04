@@ -615,7 +615,7 @@ if not st.session_state.db_ventas.empty:
                                    "nom_cli", "nit_cli", "exe", "gra",
                                    "iva", "ret", "tot", "estado"] if c in df.columns]
         st.dataframe(
-            df[cols_audit].style.applymap(
+            df[cols_audit].style.map(
                 lambda v: "color: #C8D87A" if v == "✅ OK"
                 else ("color: #FF8C69" if "⚠️" in str(v) else ""),
                 subset=["estado"] if "estado" in cols_audit else []

@@ -7,40 +7,33 @@ import os
 # ─────────────────────────────────────────────
 st.set_page_config(
     page_title = "Learnix DTE Hub",
-    layout     = "wide",         # ✅ wide para consistencia con páginas internas
+    layout     = "wide",
     page_icon  = "⚡",
-    initial_sidebar_state = "collapsed"  # Sidebar oculto en login
+    initial_sidebar_state = "collapsed"
 )
 
 # ─────────────────────────────────────────────
-# 2. CREDENCIALES — Variables de entorno
-#    En local: crea un archivo .env o usa st.secrets
+# 2. CREDENCIALES
 #    En Streamlit Cloud: define en Secrets (Settings > Secrets)
-#
 #    Formato en secrets.toml:
 #    [auth]
 #    usuario = "admin"
 #    clave   = "tu_clave_segura"
 # ─────────────────────────────────────────────
 def verificar_credenciales(usuario: str, clave: str) -> bool:
-    """
-    Valida credenciales contra st.secrets o variables de entorno.
-    Nunca hardcodear en el código fuente.
-    """
     try:
-        # ✅ Método 1: Streamlit Secrets (recomendado para Cloud)
         usr_valido = st.secrets["auth"]["usuario"]
         pwd_valido = st.secrets["auth"]["clave"]
         return usuario.strip().lower() == usr_valido.lower() and clave == pwd_valido
     except (KeyError, FileNotFoundError):
-        # ✅ Método 2: Variables de entorno (para Docker/local)
-        usr_env = os.environ.get("APP_USUARIO", "admin")
-        pwd_env = os.environ.get("APP_CLAVE",   "learnix2026")
+        usr_env = os.environ.get("APP_USUARIO", "")
+        pwd_env = os.environ.get("APP_CLAVE",   "")
+        if not usr_env or not pwd_env:
+            return False
         return usuario.strip().lower() == usr_env.lower() and clave == pwd_env
 
 # ─────────────────────────────────────────────
-# 3. ESTILOS GLOBALES — VERDE OLIVA UNIFICADO
-#    Aplican tanto en login como en páginas internas
+# 3. ESTILOS GLOBALES — VERDE OLIVA PROFESIONAL
 # ─────────────────────────────────────────────
 ESTILO_GLOBAL = """
 <style>
@@ -51,7 +44,7 @@ ESTILO_GLOBAL = """
                                       border-right: 1px solid #4A5520 !important; }
 
   /* ── Tipografía global ── */
-  h1, h2, h3, h4, h5, h6           { color: #C8D87A !important; }
+  h1, h2, h3, h4, h5, h6           { color: #C8D87A !important; letter-spacing: 0.5px; }
   p, label, span, li                { color: #F0EDD8 !important; }
   [data-testid="stDataFrame"] span  { color: inherit !important; }
 
@@ -101,7 +94,7 @@ ESTILO_GLOBAL = """
   div[data-testid="stTextInput"] input::placeholder { color: #4A5520 !important; }
 
   /* ── Tabs ── */
-  button[data-baseweb="tab"]                    { color: #8A9A35 !important; }
+  button[data-baseweb="tab"]                       { color: #8A9A35 !important; }
   button[data-baseweb="tab"][aria-selected="true"] {
     border-bottom : 2px solid #8A9A35 !important;
     color         : #F0EDD8 !important;
@@ -113,7 +106,7 @@ ESTILO_GLOBAL = """
   /* ── Separador ── */
   hr { border-color: #4A5520 !important; opacity: 0.4; }
 
-  /* ── Sidebar nav items ── */
+  /* ── Sidebar nav ── */
   [data-testid="stSidebarNavLink"]               { color: #C8D87A !important; }
   [data-testid="stSidebarNavLink"]:hover         { background-color: #1A2008 !important; }
   [data-testid="stSidebarNavLink"][aria-current] { background-color: #2A3010 !important;
@@ -125,18 +118,18 @@ ESTILO_GLOBAL = """
     padding          : 44px 40px;
     border-radius    : 14px;
     border           : 1px solid #4A5520;
-    box-shadow       : 0 8px 32px rgba(0, 0, 0, 0.6),
-                       0 0 0 1px rgba(138, 154, 53, 0.08);
+    box-shadow       : 0 8px 40px rgba(0, 0, 0, 0.7),
+                       0 0 0 1px rgba(138, 154, 53, 0.10);
   }
   .login-logo {
-    text-align   : center;
-    font-family  : 'Courier New', monospace;
-    font-size    : 2.8rem;
-    font-weight  : bold;
-    letter-spacing: 6px;
-    color        : #C8D87A !important;
-    margin-bottom: 4px;
-    text-shadow  : 0 0 20px rgba(200, 216, 122, 0.3);
+    text-align    : center;
+    font-family   : 'Courier New', monospace;
+    font-size     : 2.8rem;
+    font-weight   : bold;
+    letter-spacing: 8px;
+    color         : #C8D87A !important;
+    margin-bottom : 4px;
+    text-shadow   : 0 0 24px rgba(200, 216, 122, 0.35);
   }
   .login-title {
     text-align : center;
@@ -154,18 +147,28 @@ ESTILO_GLOBAL = """
     background-color : #1A2008;
     border           : 1px solid #4A5520;
     border-radius    : 20px;
-    padding          : 2px 12px;
-    font-size        : 0.75rem;
+    padding          : 3px 14px;
+    font-size        : 0.73rem;
     color            : #8A9A35 !important;
-    letter-spacing   : 1px;
+    letter-spacing   : 2px;
     margin           : 0 auto 20px;
     text-align       : center;
   }
   .login-footer {
     text-align  : center;
-    font-size   : 0.75rem;
+    font-size   : 0.73rem;
     color       : #4A5520 !important;
-    margin-top  : 20px;
+    margin-top  : 24px;
+  }
+  .intentos-badge {
+    display          : inline-block;
+    background-color : #2A1008;
+    border           : 1px solid #8A3520;
+    border-radius    : 6px;
+    padding          : 4px 12px;
+    font-size        : 0.8rem;
+    color            : #E08060 !important;
+    margin-top       : 6px;
   }
 </style>
 """
@@ -184,31 +187,45 @@ if "bloqueado_hasta"  not in st.session_state: st.session_state["bloqueado_hasta
 if not st.session_state["autenticado"]:
 
     st.markdown("<br><br>", unsafe_allow_html=True)
-    _, col_centro, _ = st.columns([1, 1.6, 1])
+    _, col_centro, _ = st.columns([1, 1.5, 1])
 
     with col_centro:
         st.markdown('<div class="login-box">', unsafe_allow_html=True)
 
-        # Logo y título
         st.markdown('<div class="login-logo">YN</div>', unsafe_allow_html=True)
-        st.markdown('<div style="text-align:center"><span class="badge-sistema">LEARNIX DTE HUB</span></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div style="text-align:center">'
+            '<span class="badge-sistema">LEARNIX DTE HUB</span>'
+            '</div>',
+            unsafe_allow_html=True
+        )
         st.markdown('<p class="login-title">Acceso al Sistema</p>', unsafe_allow_html=True)
         st.markdown('<p class="login-sub">Ingresa tus credenciales para continuar.</p>', unsafe_allow_html=True)
 
         st.divider()
 
-        # ── Bloqueo por intentos fallidos ──
-        ahora = time.time()
-        bloqueado = st.session_state["bloqueado_hasta"] > ahora
-        segundos_restantes = int(st.session_state["bloqueado_hasta"] - ahora)
+        ahora             = time.time()
+        bloqueado         = st.session_state["bloqueado_hasta"] > ahora
+        segundos_rest     = int(st.session_state["bloqueado_hasta"] - ahora)
+        intentos_actuales = st.session_state["intentos_login"]
 
         if bloqueado:
             st.error(
                 f"⛔ Demasiados intentos fallidos. "
-                f"Espera **{segundos_restantes}s** antes de intentar de nuevo."
+                f"Espera **{segundos_rest}s** antes de intentar de nuevo."
             )
         else:
-            with st.form("login_form", clear_on_submit=False):
+            if intentos_actuales > 0:
+                restantes = max(0, 5 - intentos_actuales)
+                st.markdown(
+                    f'<div class="intentos-badge">'
+                    f'⚠️ Intento {intentos_actuales}/5 — te quedan <strong>{restantes}</strong> oportunidades'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+                st.markdown("")
+
+            with st.form("login_form", clear_on_submit=True):
                 usuario = st.text_input("Usuario", placeholder="Ingresa tu usuario")
                 clave   = st.text_input("Contraseña", type="password", placeholder="••••••••")
 
@@ -219,78 +236,76 @@ if not st.session_state["autenticado"]:
                 )
 
                 if submitted:
-                    if verificar_credenciales(usuario, clave):
-                        # ✅ Login correcto
-                        st.session_state["autenticado"]    = True
-                        st.session_state["intentos_login"] = 0
-                        st.session_state["bloqueado_hasta"]= 0
+                    if not usuario or not clave:
+                        st.error("Ingresa usuario y contraseña.")
+                    elif verificar_credenciales(usuario, clave):
+                        st.session_state["autenticado"]     = True
+                        st.session_state["intentos_login"]  = 0
+                        st.session_state["bloqueado_hasta"] = 0
                         st.success("✅ Acceso concedido. Cargando entorno...")
-                        st.rerun()   # ✅ Sin time.sleep() — no bloquea el hilo
+                        st.rerun()
                     else:
-                        # ✅ Incrementar contador de intentos
                         st.session_state["intentos_login"] += 1
                         intentos = st.session_state["intentos_login"]
 
                         if intentos >= 5:
-                            st.session_state["bloqueado_hasta"] = time.time() + 60  # Bloqueo 60s
+                            st.session_state["bloqueado_hasta"] = time.time() + 60
                             st.error("⛔ 5 intentos fallidos. Sistema bloqueado por 60 segundos.")
                         else:
-                            restantes = 5 - intentos
-                            st.error(
-                                f"❌ Credenciales incorrectas. "
-                                f"Intentos restantes: **{restantes}**"
-                            )
+                            st.error("❌ Credenciales incorrectas.")
 
-        st.markdown('<p class="login-footer">Learnix DTE Hub v2.0 &nbsp;·&nbsp; El Salvador</p>', unsafe_allow_html=True)
+        st.markdown(
+            '<p class="login-footer">Learnix DTE Hub v2.1 &nbsp;·&nbsp; El Salvador</p>',
+            unsafe_allow_html=True
+        )
         st.markdown('</div>', unsafe_allow_html=True)
 
     st.stop()
 
 # ─────────────────────────────────────────────
-# 6. DEFINICIÓN DE PÁGINAS (solo si autenticado)
+# 6. PÁGINAS (solo si autenticado)
 # ─────────────────────────────────────────────
-page_dashboard   = st.Page("pages/0_Dashboard_Inicio.py",            title="Dashboard Hub",                icon="🏠")
-page_ventas      = st.Page("pages/1_Extractor_DTE_Ventas.py",        title="Extractor DTE Ventas",         icon="📈")
-page_compras     = st.Page("pages/2_Extractor_DTE_Compras.py",       title="Extractor DTE Compras",        icon="🛒")  # ✅ Ruta corregida
-page_retenciones = st.Page("pages/3_Extractor_DTE_retenciones.py",   title="Extractor DTE Retenciones",   icon="✂️")
+page_dashboard   = st.Page("pages/0_Dashboard_Inicio.py",                title="Dashboard Hub",               icon="🏠")
+page_ventas      = st.Page("pages/1_Extractor_DTE_Ventas.py",            title="Extractor DTE Ventas",        icon="📈")
+page_compras     = st.Page("pages/2_Extractor_DTE_Compras.py",           title="Extractor DTE Compras",       icon="🛒")
+page_retenciones = st.Page("pages/3_Extractor_DTE_retenciones.py",       title="Extractor DTE Retenciones",   icon="✂️")
 page_sujetos     = st.Page("pages/4_Extractor_DTE_Sujetos_Excluidos.py", title="Extractor Sujetos Excluidos", icon="⚖️")
-page_clientes    = st.Page("pages/5_Directorio_Clientes.py",         title="Directorio Clientes",          icon="👥")
-page_proveedores = st.Page("pages/6_Directorio_Proveedores.py",      title="Directorio Proveedores",       icon="🏢")
+page_clientes    = st.Page("pages/5_Directorio_Clientes.py",             title="Directorio Clientes",         icon="👥")
+page_proveedores = st.Page("pages/6_Directorio_Proveedores.py",          title="Directorio Proveedores",      icon="🏢")
 
 secciones_menu = {
-    "Inicio"                    : [page_dashboard],
-    "Modulos de Procesamiento"  : [page_ventas, page_compras, page_retenciones, page_sujetos],
-    "Administracion"            : [page_clientes, page_proveedores],
+    "Inicio"                   : [page_dashboard],
+    "Módulos de Procesamiento" : [page_ventas, page_compras, page_retenciones, page_sujetos],
+    "Administración"           : [page_clientes, page_proveedores],
 }
 
 nav = st.navigation(secciones_menu)
 
 # ─────────────────────────────────────────────
-# 7. SIDEBAR — LOGO + INFO + CERRAR SESIÓN
+# 7. SIDEBAR — LOGO + CLIENTE + CERRAR SESIÓN
 # ─────────────────────────────────────────────
 with st.sidebar:
-    # Logo
     st.markdown(
-        "<h2 style='font-family: Courier New, monospace; color: #C8D87A;"   # ✅ Color oliva
-        " letter-spacing: 4px; text-align: center; margin: 8px 0;'>YN</h2>",
+        "<h2 style='font-family: Courier New, monospace; color: #C8D87A;"
+        " letter-spacing: 5px; text-align: center; margin: 8px 0;'>YN</h2>",
         unsafe_allow_html=True
     )
     st.markdown(
-        "<p style='text-align:center; font-size:0.7rem; color:#6B7A2A;"
-        " letter-spacing:1px; margin-top:-8px;'>LEARNIX DTE HUB</p>",
+        "<p style='text-align:center; font-size:0.68rem; color:#6B7A2A;"
+        " letter-spacing:2px; margin-top:-8px;'>LEARNIX DTE HUB</p>",
         unsafe_allow_html=True
     )
     st.divider()
 
-    # Cliente activo (si existe)
     if st.session_state.get("cliente_activo"):
         cliente = st.session_state.cliente_activo
         st.markdown(
-            f"<div style='background:#1A2008; border:1px solid #4A5520;"
+            f"<div style='background:#1A2008; border:1px solid #2A3010;"
+            f" border-left: 3px solid #8A9A35;"
             f" border-radius:8px; padding:10px 12px; font-size:13px;'>"
-            f"<span style='color:#8A9A35; font-size:11px;'>CLIENTE ACTIVO</span><br>"
+            f"<span style='color:#6B7A2A; font-size:10px; letter-spacing:1px;'>CLIENTE ACTIVO</span><br>"
             f"<strong style='color:#C8D87A;'>{cliente.get('nombre','—')}</strong><br>"
-            f"<span style='color:#6B7A2A;'>NIT: {cliente.get('nit','—')}</span>"
+            f"<span style='color:#8A9A35; font-size:12px;'>NIT: {cliente.get('nit','—')}</span>"
             f"</div>",
             unsafe_allow_html=True
         )
@@ -302,7 +317,7 @@ with st.sidebar:
 nav.run()
 
 # ─────────────────────────────────────────────
-# 9. CERRAR SESIÓN — Con confirmación
+# 9. CERRAR SESIÓN
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.divider()
@@ -311,15 +326,14 @@ with st.sidebar:
         st.session_state["confirmar_logout"] = False
 
     if not st.session_state["confirmar_logout"]:
-        if st.button("Cerrar Sesion", use_container_width=True, type="secondary"):
+        if st.button("Cerrar Sesión", use_container_width=True, type="secondary"):
             st.session_state["confirmar_logout"] = True
             st.rerun()
     else:
         st.warning("¿Confirmas que deseas cerrar sesión?")
         c_si, c_no = st.columns(2)
         with c_si:
-            if st.button("Si, salir", type="primary", use_container_width=True):
-                # ✅ Limpieza selectiva — preserva solo lo necesario
+            if st.button("Sí, salir", type="primary", use_container_width=True):
                 keys_a_borrar = [
                     k for k in st.session_state.keys()
                     if k not in ("intentos_login", "bloqueado_hasta")
@@ -332,9 +346,8 @@ with st.sidebar:
                 st.session_state["confirmar_logout"] = False
                 st.rerun()
 
-    # Versión al pie del sidebar
     st.markdown(
-        "<p style='text-align:center; font-size:0.7rem; color:#4A5520;"
-        " margin-top:8px;'>v2.0 · El Salvador</p>",
+        "<p style='text-align:center; font-size:0.68rem; color:#2A3010;"
+        " margin-top:8px;'>v2.1 · El Salvador</p>",
         unsafe_allow_html=True
     )
