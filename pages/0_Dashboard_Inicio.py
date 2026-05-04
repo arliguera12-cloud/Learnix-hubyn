@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 import json
 import os
 
@@ -8,7 +7,7 @@ import os
 # ─────────────────────────────────────────────
 st.set_page_config(
     page_title = "Dashboard · Learnix DTE Hub",
-    layout     = "wide",
+    layout     = "wide",        # ✅ Consistente con app.py y demás páginas
     page_icon  = "🏠"
 )
 
@@ -24,15 +23,19 @@ if not st.session_state.get("autenticado"):
 # ─────────────────────────────────────────────
 ESTILO = """
 <style>
+  /* ── Fondos ── */
   [data-testid="stAppViewContainer"],
   [data-testid="stHeader"]          { background-color: #0D0F07 !important; }
   [data-testid="stSidebar"]         { background-color: #141A08 !important;
                                       border-right: 1px solid #4A5520 !important; }
 
+  /* ── Tipografía ── */
   h1, h2, h3, h4, h5, h6           { color: #C8D87A !important; }
   p, label, span, li                { color: #F0EDD8 !important; }
   [data-testid="stDataFrame"] span  { color: inherit !important; }
 
+  /* ── Selectbox ── */
+  div[data-testid="stSelectbox"] > label { display: none; }
   div[data-testid="stSelectbox"] > div > div {
     background-color : #1A2008 !important;
     border           : 1px solid #4A5520 !important;
@@ -40,6 +43,7 @@ ESTILO = """
     color            : #F0EDD8 !important;
   }
 
+  /* ── Botones ── */
   div.stButton > button[kind="primary"] {
     background-color : #6B7A2A !important;
     border           : 1px solid #8A9A35 !important;
@@ -54,7 +58,10 @@ ESTILO = """
     color: #FFFFFF !important; font-weight: bold !important;
   }
 
+  /* ── Alertas ── */
   div[data-testid="stAlert"] { display: flex; align-items: center; }
+
+  /* ── Separador ── */
   hr { border-color: #4A5520 !important; opacity: 0.4; }
 
   /* ── Tarjetas de módulos ── */
@@ -65,17 +72,31 @@ ESTILO = """
     border           : 1px solid #2A3010;
     height           : 100%;
     min-height       : 130px;
-    transition       : border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
+    transition       : border-color 0.25s ease, box-shadow 0.25s ease,
+                       transform 0.2s ease;
     cursor           : default;
   }
   .modulo-card:hover {
-    border-color : #8A9A35;
-    box-shadow   : 0 0 20px rgba(138, 154, 53, 0.18);
+    border-color : #8A9A35;                          /* ✅ Oliva, no azul */
+    box-shadow   : 0 0 16px rgba(138, 154, 53, 0.2);
     transform    : translateY(-2px);
   }
-  .modulo-icon  { font-size: 2.2rem; margin-bottom: 10px; display: block; }
-  .modulo-title { font-size: 1.1rem; font-weight: bold; color: #C8D87A !important; margin-bottom: 8px; }
-  .modulo-desc  { font-size: 0.875rem; color: #8A9A35 !important; line-height: 1.5; }
+  .modulo-icon  {
+    font-size     : 2.2rem;
+    margin-bottom : 10px;
+    display       : block;
+  }
+  .modulo-title {
+    font-size   : 1.1rem;
+    font-weight : bold;
+    color       : #C8D87A !important;
+    margin-bottom: 8px;
+  }
+  .modulo-desc  {
+    font-size   : 0.875rem;
+    color       : #8A9A35 !important;
+    line-height : 1.5;
+  }
   .modulo-badge {
     display          : inline-block;
     margin-top       : 10px;
@@ -97,10 +118,13 @@ ESTILO = """
     margin-bottom    : 8px;
     font-size        : 14px;
     line-height      : 1.7;
-    border           : 1px solid #2A3010;
-    border-left      : 4px solid #8A9A35;
   }
-  .card-cliente-activo .label  { font-size: 0.72rem; color: #6B7A2A !important; letter-spacing: 1px; text-transform: uppercase; }
+  .card-cliente-activo .label {
+    font-size   : 0.72rem;
+    color       : #6B7A2A !important;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
   .card-cliente-activo .nombre { color: #C8D87A !important; font-weight: bold; font-size: 1rem; }
   .card-cliente-activo .nit    { color: #8A9A35 !important; font-size: 0.85rem; }
 
@@ -109,13 +133,13 @@ ESTILO = """
     background-color : #1A2008;
     border           : 1px solid #2A3010;
     border-radius    : 10px;
-    padding          : 18px 16px;
+    padding          : 16px 18px;
     text-align       : center;
   }
-  .kpi-valor { font-size: 1.9rem; font-weight: bold; color: #C8D87A !important; }
-  .kpi-label { font-size: 0.8rem; color: #6B7A2A !important; margin-top: 4px; }
+  .kpi-valor  { font-size: 1.8rem; font-weight: bold; color: #C8D87A !important; }
+  .kpi-label  { font-size: 0.8rem;  color: #6B7A2A !important; margin-top: 4px; }
 
-  /* ── Bienvenida ── */
+  /* ── Header de bienvenida ── */
   .bienvenida-titulo {
     text-align    : center;
     font-size     : 1.9rem;
@@ -125,10 +149,10 @@ ESTILO = """
     margin-bottom : 4px;
   }
   .bienvenida-sub {
-    text-align    : center;
-    font-size     : 0.95rem;
-    color         : #6B7A2A !important;
-    margin-bottom : 0;
+    text-align : center;
+    font-size  : 0.95rem;
+    color      : #6B7A2A !important;
+    margin-bottom: 0;
   }
 </style>
 """
@@ -138,6 +162,7 @@ st.markdown(ESTILO, unsafe_allow_html=True)
 # 4. CARGA DE CLIENTES
 # ─────────────────────────────────────────────
 def cargar_clientes() -> dict:
+    """Carga la base de datos de clientes con manejo explícito de errores."""
     archivo = "data/clientes.json"
     if not os.path.exists(archivo):
         return {}
@@ -145,14 +170,14 @@ def cargar_clientes() -> dict:
         with open(archivo, "r", encoding="utf-8") as f:
             return json.load(f)
     except json.JSONDecodeError as e:
-        st.warning(f"⚠️ Error de formato en el archivo de clientes: {e}")
+        st.warning(f"⚠️ El archivo de clientes tiene un error de formato JSON: {e}")
         return {}
     except Exception as e:
         st.warning(f"⚠️ No se pudo cargar el directorio de clientes: {e}")
         return {}
 
 # ─────────────────────────────────────────────
-# 5. ENCABEZADO
+# 5. ENCABEZADO DE BIENVENIDA
 # ─────────────────────────────────────────────
 col_logo, col_hdr, _ = st.columns([1, 6, 1])
 with col_logo:
@@ -163,10 +188,7 @@ with col_logo:
     )
 with col_hdr:
     st.markdown("<div class='bienvenida-titulo'>Bienvenido al Hub DTE 👋</div>", unsafe_allow_html=True)
-    st.markdown(
-        "<p class='bienvenida-sub'>Selecciona tu espacio de trabajo para comenzar a procesar documentos.</p>",
-        unsafe_allow_html=True
-    )
+    st.markdown("<p class='bienvenida-sub'>Selecciona tu espacio de trabajo para comenzar a procesar documentos.</p>", unsafe_allow_html=True)
 
 st.divider()
 
@@ -178,17 +200,21 @@ db_clientes = cargar_clientes()
 _, col_sel, _ = st.columns([1, 2, 1])
 with col_sel:
     if not db_clientes:
+        # ✅ No sobreescribir cliente_activo si el JSON está vacío temporalmente
         st.warning("⚠️ El Directorio de Clientes está vacío. Agrégalos desde el menú lateral.")
+
     else:
-        opciones: list[str] = ["— Selecciona una empresa —"]
-        mapa:     dict[str, dict] = {}
+        # ✅ Construir opciones con NIT incluido en los datos del mapa
+        opciones = ["— Selecciona una empresa —"]
+        mapa: dict[str, dict] = {}
 
         for nit, datos in db_clientes.items():
             nombre = datos.get("nombre", "Sin nombre")
             label  = f"{nombre}  ·  {nit}"
-            mapa[label] = {**datos, "nit": nit}
+            mapa[label] = {**datos, "nit": nit}   # ✅ NIT siempre presente en el objeto
             opciones.append(label)
 
+        # ✅ Recuperar selección previa si existe
         cliente_previo = st.session_state.get("cliente_activo")
         idx_previo = 0
         if cliente_previo:
@@ -205,12 +231,14 @@ with col_sel:
 
         if seleccion != "— Selecciona una empresa —":
             cliente_sel = mapa[seleccion]
+            # ✅ Solo actualizar si cambió el cliente
             if (
                 not st.session_state.get("cliente_activo")
                 or st.session_state["cliente_activo"].get("nit") != cliente_sel.get("nit")
             ):
                 st.session_state["cliente_activo"] = cliente_sel
 
+            # Card del cliente activo
             st.markdown(f"""
             <div class="card-cliente-activo">
                 <div class="label">Espacio de Trabajo Activo</div>
@@ -225,19 +253,20 @@ st.markdown("")
 st.divider()
 
 # ─────────────────────────────────────────────
-# 7. KPIs (si hay cliente activo)
+# 7. KPIs EN TIEMPO REAL (si hay cliente activo)
 # ─────────────────────────────────────────────
 cliente_activo = st.session_state.get("cliente_activo")
 
 if cliente_activo:
-    df_ventas  = st.session_state.get("db_ventas",  pd.DataFrame())
-    df_compras = st.session_state.get("db_compras", pd.DataFrame())
+    # Contadores desde session_state (acumulados durante la sesión)
+    n_ventas  = len(st.session_state.get("db_ventas",  __import__("pandas").DataFrame()))
+    n_compras = len(st.session_state.get("db_compras", __import__("pandas").DataFrame()))
 
-    n_ventas  = len(df_ventas)
-    n_compras = len(df_compras)
+    tot_ventas  = st.session_state.get("db_ventas",  __import__("pandas").DataFrame())
+    tot_compras = st.session_state.get("db_compras", __import__("pandas").DataFrame())
 
-    sum_ventas  = float(df_ventas["tot"].sum())  if not df_ventas.empty  and "tot" in df_ventas.columns  else 0.0
-    sum_compras = float(df_compras["tot"].sum()) if not df_compras.empty and "tot" in df_compras.columns else 0.0
+    sum_ventas  = float(tot_ventas["tot"].sum())  if not tot_ventas.empty  and "tot" in tot_ventas.columns  else 0.0
+    sum_compras = float(tot_compras["tot"].sum()) if not tot_compras.empty and "tot" in tot_compras.columns else 0.0
 
     st.markdown("#### 📊 Resumen de Sesión Actual")
     k1, k2, k3, k4 = st.columns(4)
@@ -334,12 +363,12 @@ with c2:
     """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 9. ESTADO VACÍO
+# 9. ESTADO VACÍO — Sin cliente seleccionado
 # ─────────────────────────────────────────────
 if not cliente_activo and db_clientes:
     st.markdown("")
     st.markdown("""
-    <div style="text-align:center; padding: 32px 20px; color:#4A5520;
+    <div style="text-align:center; padding: 30px 20px; color:#4A5520;
                 border: 1px dashed #2A3010; border-radius: 12px; margin-top: 10px;">
         <p style="font-size:1.5rem; margin-bottom:6px;">☝️</p>
         <p style="color:#6B7A2A !important; font-size:0.95rem;">
@@ -356,7 +385,7 @@ st.markdown("")
 st.divider()
 st.markdown(
     "<p style='text-align:center; font-size:0.75rem; color:#4A5520;'>"
-    "Learnix DTE Hub &nbsp;·&nbsp; v2.1 &nbsp;·&nbsp; El Salvador &nbsp;·&nbsp; "
+    "Learnix DTE Hub &nbsp;·&nbsp; v2.0 &nbsp;·&nbsp; El Salvador &nbsp;·&nbsp; "
     "Todos los datos se procesan localmente.</p>",
     unsafe_allow_html=True
 )
