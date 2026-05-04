@@ -79,7 +79,6 @@ ESTILO = """
   .card-emisor {
     padding          : 12px 16px;
     border-radius    : 8px;
-    border-left      : 4px solid #8A9A35;
     background-color : #1A2008;
     color            : #F0EDD8 !important;
     margin-bottom    : 18px;
@@ -120,11 +119,11 @@ st.markdown(ESTILO, unsafe_allow_html=True)
 # 3. VERIFICACIÓN DE SEGURIDAD
 # ─────────────────────────────────────────────
 if not st.session_state.get("autenticado"):
-    st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
+    st.warning("Acceso denegado. Por favor, inicia sesion en la pagina principal.")
     st.stop()
 
 if not st.session_state.get("cliente_activo"):
-    st.warning("⚠️ Debes seleccionar un Cliente Activo en el Dashboard antes de extraer Compras.")
+    st.warning("Debes seleccionar un Cliente Activo en el Dashboard antes de extraer Compras.")
     st.stop()
 
 cliente = st.session_state.cliente_activo
@@ -132,20 +131,21 @@ cliente = st.session_state.cliente_activo
 # ─────────────────────────────────────────────
 # 4. CONSTANTES
 # ─────────────────────────────────────────────
-MAX_VALORES_LOOP = 30   # Límite O(n³) controlado
+MAX_VALORES_LOOP = 30
 
 PALABRAS_BASURA = [
-    "DOCUMENTO", "TRIBUTARIO", "ELECTRÓNICO", "REPRESENTACIÓN", "RECEPTOR",
-    "CLIENTE", "EMISOR", "FACTURA", "CONSUMIDOR", "COMPROBANTE", "CÓDIGO",
-    "SELLO", "VERSIÓN", "TRANSMISIÓN", "MINISTERIO", "HACIENDA",
-    "MUNICIPIO", "GIRO:", "ACTIVIDAD", "ECONOMICA", "AGENCIA",
-    "EFECTIVO", "FECHA", "HORA", "EMISIÓN", "GENERACIÓN", "TELÉFONO",
-    "TIPO ESTABLECIMIENTO", "ESTABLECIMIENTO", "CASA MATRIZ",
-    "SUCURSAL:", "NIT:", "NRC:", "REPRESENTACION",
+    "DOCUMENTO", "TRIBUTARIO", "ELECTRONICO", "ELECTRÓNICO", "REPRESENTACIÓN",
+    "REPRESENTACION", "RECEPTOR", "CLIENTE", "EMISOR", "FACTURA", "CONSUMIDOR",
+    "COMPROBANTE", "CODIGO", "CÓDIGO", "SELLO", "VERSION", "VERSIÓN",
+    "TRANSMISION", "TRANSMISIÓN", "MINISTERIO", "HACIENDA", "MUNICIPIO",
+    "GIRO:", "ACTIVIDAD", "ECONOMICA", "AGENCIA", "EFECTIVO", "FECHA", "HORA",
+    "EMISIÓN", "EMISION", "GENERACIÓN", "GENERACION", "TELÉFONO", "TELEFONO",
+    "TIPO ESTABLECIMIENTO", "ESTABLECIMIENTO", "CASA MATRIZ", "SUCURSAL:",
+    "NIT:", "NRC:", "REPRESENTACION", "NUMERO DE CONTROL", "NÚMERO DE CONTROL",
+    "MODELO DE FACTURACION", "TIPO DE TRANSMISION",
 ]
-BASURA_ESTRICTA = ["@", "EMAIL", "CORREO", ".COM", "WWW."]
+BASURA_ESTRICTA = ["@", "EMAIL", "CORREO", ".COM", "WWW.", "HTTP"]
 
-# Prefijos que identifican una línea de dirección (no un nombre comercial)
 PREFIJOS_DIRECCION = (
     "KM ", "KM.", "AV.", "AV ", "AVENIDA", "CALLE ", "PASAJE",
     "COLONIA", "COL.", "COL ", "URB.", "URB ", "URBANIZACION",
@@ -154,25 +154,38 @@ PREFIJOS_DIRECCION = (
     "BULEVAR", "BOULEVARD", "BLVD", "POLIGONO", "POLÍGONO",
     "LOCAL ", "NIVEL ", "PISO ", "EDIFICIO", "CENTRO COMERCIAL",
     "COMPLEJO", "PARQUE INDUSTRIAL", "ZONA FRANCA",
+    "FINAL ", "FINAL,", "ENTRE ", "#", "NO.",
 )
 
 PALABRAS_COMERCIALES = [
-    "S.A.", "SA ", "C.V.", "CV ", "LTDA.", "LTDA", "SOCIEDAD",
+    "S.A.", "S.A.S.", "SA ", "C.V.", "CV ", "LTDA.", "LTDA", "SOCIEDAD",
     "DISTRIBUIDORA", "FARMACIA", "GRUPO", "LABORATORIOS", "INDUSTRIAS",
-    "SERVICIOS", "COMERCIAL", "IMPORTADORA", "EXPORTADORA",
-]
+    "SERVICIOS", "COMERCIAL", "IMPORTADORA", "EXPORTADORA", "CONSTRUCTORA",
+    "CONSULTORES", "CONSULTORA", "INVERSIONES", "ALIMENTOS", "TECNOLOGIA",
+    "CLINICA", "HOSPITAL", "SUPERMERCADO", "FERRETERIA", "EMPRESA",
+)
 
-# Palabras genéricas que solas no son un nombre válido de empresa
 NOMBRES_INVALIDOS = {
     "MATRIZ", "LOCAL", "SUCURSAL", "AGENCIA", "OFICINA", "SEDE",
     "ESTABLECIMIENTO", "PUNTO DE VENTA", "TIENDA", "ALMACEN",
-    "ALMACÉN", "BODEGA", "CASA",
+    "ALMACÉN", "BODEGA", "CASA", "CONTRIBUYENTE", "DATOS",
 }
 
+# Patrones que indican fin de nombre (al encontrarlos, cortar)
+CORTE_NOMBRE = re.compile(
+    r"\s*(?:NIT|NRC|GIRO|ACTIVIDAD|DIRECCI[OÓ]N|CORREO|TEL[EÉ]F|FONO|"
+    r"TIPO\s+ESTAB|MUNICIPIO|DEPARTAMENTO|NUMERO\s+DE\s+CONTROL|"
+    r"MODELO\s+DE|TIPO\s+DE\s+TRANS|N\.?\s*I\.?\s*T\.?\s*[:\s]|"
+    r"N\.?\s*R\.?\s*C\.?\s*[:\s]|\d{4}[\s\-]\d{6})"
+    r".*$",
+    re.I | re.S
+)
+
+
 def es_linea_direccion(texto: str) -> bool:
-    """Detecta si una línea es una dirección física y no un nombre comercial."""
     L = texto.upper().strip()
-    return any(L.startswith(p) or (f" {p}" in L[:40]) for p in PREFIJOS_DIRECCION)
+    return any(L.startswith(p) or (f" {p}" in L[:50]) for p in PREFIJOS_DIRECCION)
+
 
 # ─────────────────────────────────────────────
 # 5. FUNCIONES AUXILIARES
@@ -184,7 +197,6 @@ def cargar_proveedores_json() -> dict:
     try:
         with open(archivo, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Migración formato antiguo (valor string → dict)
         for k, v in data.items():
             if isinstance(v, str):
                 data[k] = {"nombre": v, "nrc": ""}
@@ -194,6 +206,9 @@ def cargar_proveedores_json() -> dict:
 
 
 def guardar_proveedor_rapido(nit: str, nombre: str) -> None:
+    """Guarda o actualiza un proveedor en la BD JSON."""
+    if not nit or not nombre.strip():
+        return
     archivo = "data/proveedores.json"
     if not os.path.exists("data"):
         os.makedirs("data")
@@ -202,6 +217,18 @@ def guardar_proveedor_rapido(nit: str, nombre: str) -> None:
     db[nit] = {"nombre": nombre.strip().upper(), "nrc": nrc_existente}
     with open(archivo, "w", encoding="utf-8") as f:
         json.dump(db, f, indent=4, ensure_ascii=False)
+
+
+def actualizar_nombre_en_db(nit: str, nombre: str) -> None:
+    """Actualiza el nom_prov de todos los registros con ese NIT en db_compras."""
+    if not nit or not nombre.strip():
+        return
+    df = st.session_state.get("db_compras", pd.DataFrame())
+    if df.empty or "nit_prov" not in df.columns:
+        return
+    mask = df["nit_prov"] == nit
+    if mask.any():
+        st.session_state.db_compras.loc[mask, "nom_prov"] = nombre.strip().upper()
 
 
 def limpiar_monto(monto_str: str) -> float:
@@ -254,36 +281,175 @@ def extraer_y_formatear_fecha(texto: str) -> str:
             return f"{p1:02d}/{p2:02d}/{y}"
         elif p2 <= 12 and p1 <= 31:
             return f"{p1:02d}/{p2:02d}/{y}"
+    return ""
+
+
+# ══════════════════════════════════════════════════════════════
+# EXTRACCIÓN DE NOMBRE — versión mejorada (stand-alone)
+# ══════════════════════════════════════════════════════════════
+def extraer_nombre_proveedor(
+    texto_completo: str,
+    pos_nit: int,
+    partes_cli: list,
+) -> str:
+    """
+    Intenta extraer el nombre del emisor (proveedor) usando múltiples
+    estrategias ordenadas de mayor a menor fiabilidad.
+    Devuelve el nombre limpio en mayúsculas o "" si no lo encuentra.
+    """
+
+    # ── helpers internos ────────────────────────────────────────
+    def limpiar(s: str) -> str:
+        """Quita prefijos de etiqueta y caracteres basura."""
+        s = re.sub(
+            r"^[\s\-:]*(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
+            r"NOMBRE\s+COMERCIAL|EMISOR|DATOS\s+DEL\s+EMISOR|"
+            r"TIPO\s+DE?\s+ESTABLECIMIENTO|ESTABLECIMIENTO|"
+            r"CONTRIBUYENTE\s+EMISOR)[\s:]*",
+            s, flags=re.I
+        ).strip()
+        s = CORTE_NOMBRE.sub("", s).strip()
+        s = re.sub(r"^[-_.,;:\s]+|[-_.,;:\s]+$", "", s)
+        s = re.sub(r'\s{2,}', ' ', s)
+        return s.upper()
+
+    def valido(s: str) -> bool:
+        T = s.strip().upper()
+        if len(T) < 4 or len(T) > 90:
+            return False
+        if any(b in T for b in BASURA_ESTRICTA):
+            return False
+        if es_linea_direccion(T):
+            return False
+        # Rechazar líneas que contienen palabras de basura COMO SUBSTRING
+        for b in PALABRAS_BASURA:
+            if b in T and len(b) > 5:   # evitar falsos positivos por palabras cortas
+                return False
+        if T in NOMBRES_INVALIDOS:
+            return False
+        if any(p in T for p in partes_cli):
+            return False
+        # Rechazar si >40% son dígitos
+        digitos = sum(c.isdigit() for c in T)
+        if len(T) > 0 and digitos / len(T) > 0.40:
+            return False
+        # Rechazar líneas que parecen solo números / códigos
+        if re.fullmatch(r'[\d\s\-\.]+', T):
+            return False
+        return True
+
+    # Ventana alrededor del NIT: 1500 chars antes, 600 chars después
+    inicio  = max(0, pos_nit - 1500)
+    fin     = min(len(texto_completo), pos_nit + 600)
+    ventana = texto_completo[inicio:fin]
+
+    # ── Estrategia A: etiqueta explícita en ventana extendida ───
+    # Busca "Nombre:", "Razón Social:", "Nombre Comercial:" etc.
+    # Permite capturar hasta 2 líneas (nombre largo en 2 renglones)
+    patron_etq = re.compile(
+        r"(?:Nombre(?:\s+[Oo]\s+[Rr]az[oó]n\s+[Ss]ocial)?|"
+        r"[Rr]az[oó]n\s+[Ss]ocial|Nombre\s+[Cc]omercial|"
+        r"[Rr]az[oó]n\s*[Ss]ocial\s*del\s*[Ee]misor)"
+        r"\s*[:\s]+\s*"
+        r"([^\n]{3,80}(?:\n[^\n]{3,60})?)",    # permite hasta 2 líneas
+        re.I
+    )
+    for m in patron_etq.finditer(ventana):
+        # Tomar solo la primera línea si la segunda parece dirección/basura
+        lineas_cap = m.group(1).split('\n')
+        candidato = limpiar(lineas_cap[0])
+        # Si la primera línea es muy corta y la segunda parece continuación, unir
+        if len(candidato) < 6 and len(lineas_cap) > 1:
+            candidato = limpiar(lineas_cap[0] + " " + lineas_cap[1])
+        if valido(candidato):
+            return candidato
+
+    # ── Estrategia B: líneas inmediatamente ANTES del NIT ───────
+    # Las 20 líneas previas al NIT, recorridas de la más cercana a la más lejana
+    ventana_antes = texto_completo[inicio:pos_nit]
+    lineas_antes  = [l.strip() for l in ventana_antes.split('\n') if l.strip()]
+    for linea in reversed(lineas_antes[-22:]):
+        candidato = limpiar(linea)
+        if valido(candidato):
+            return candidato
+
+    # ── Estrategia C: líneas inmediatamente DESPUÉS del NIT ─────
+    ventana_despues = texto_completo[pos_nit:fin]
+    lineas_despues  = [l.strip() for l in ventana_despues.split('\n') if l.strip()]
+    for linea in lineas_despues[:10]:
+        candidato = limpiar(linea)
+        if valido(candidato):
+            return candidato
+
+    # ── Estrategia D: sufijos comerciales en toda la ventana ────
+    for linea in ventana.split('\n'):
+        L = linea.strip().upper()
+        if not any(w in L for w in PALABRAS_COMERCIALES):
+            continue
+        # Tomar la parte antes de columnas amplias / NIT / NRC
+        clean = re.split(r'\s{4,}|(?:NIT|NRC|N\.I\.T|N\.R\.C)\s', L)[0].strip()
+        candidato = limpiar(clean)
+        if valido(candidato):
+            return candidato
+
+    # ── Estrategia E: sección EMISOR delimitada explícitamente ──
+    m_sec = re.search(
+        r"(?i)(?:DATOS\s+DEL\s+EMISOR|EMISOR\s*[:\-]|CONTRIBUYENTE\s+EMISOR)"
+        r"(.{10,600}?)"
+        r"(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR|ADQUIRIENTE|CLIENTE\s*:)",
+        texto_completo, re.S
+    )
+    if m_sec:
+        seccion = m_sec.group(1)
+        # Buscar etiqueta nombre dentro de la sección
+        m_n = re.search(
+            r"(?:Nombre|Raz[oó]n\s+[Ss]ocial)[:\s]+([^\n]{4,80})",
+            seccion, re.I
+        )
+        if m_n:
+            candidato = limpiar(m_n.group(1))
+            if valido(candidato):
+                return candidato
+        # Fallback: primera línea no-basura de la sección
+        for linea in seccion.split('\n'):
+            candidato = limpiar(linea.strip())
+            if valido(candidato):
+                return candidato
 
     return ""
 
 
+# ══════════════════════════════════════════════════════════════
+# EXTRACTOR PRINCIPAL
+# ══════════════════════════════════════════════════════════════
 def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
     if not file_bytes or len(file_bytes) < 512:
-        return {"error": "Archivo vacío o demasiado pequeño."}
+        return {"error": "Archivo vacio o demasiado pequeño."}
 
     try:
         texto_lineal = ""
         texto_visual = ""
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             if not pdf.pages:
-                return {"error": "PDF sin páginas."}
+                return {"error": "PDF sin paginas."}
             for page in pdf.pages:
                 texto_lineal += (page.extract_text(layout=False) or "") + "\n"
                 texto_visual  += (page.extract_text() or "") + "\n"
 
+        # Usar ambas extracciones: la lineal suele tener mejor orden de tokens
+        # la visual mantiene mejor la estructura de columnas
         texto_completo = texto_lineal + "\n" + texto_visual
 
         if len(texto_completo.strip()) < 50:
-            return {"error": "PDF de imagen — sin texto extraíble. Usa OCR."}
+            return {"error": "PDF de imagen — sin texto extraible. Usa OCR."}
 
-        t_clean    = re.sub(r'[ \t]+', ' ', texto_completo)
-        t_no_sp    = re.sub(r'\s+', '', t_clean).upper()
+        t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
+        t_no_sp = re.sub(r'\s+', '', t_clean).upper()
 
-        # ── Código de control / Tipo DTE ──
+        # ── Código de control / Tipo DTE ──────────────────────
         m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_sp)
-        tipo   = "01"
-        ctrl   = ""
+        tipo = "01"
+        ctrl = ""
         if m_ctrl:
             ctrl   = m_ctrl.group(1).replace("O", "0")
             m_tipo = re.search(r"DTE-(\d{2})", ctrl)
@@ -291,14 +457,15 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 tipo = m_tipo.group(1)
 
         if not ctrl:
-            return {"error_tipo": "No se detectó un Número de Control DTE válido."}
+            return {"error_tipo": "No se detecto un Numero de Control DTE valido."}
         if tipo not in ("03", "05", "06"):
             return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten 03, 05 y 06."}
 
         nit_receptor = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
         dui_receptor = re.sub(r'[^0-9]', '', cliente_activo.get('dui', ''))
+        excluir_nits = {nit_receptor, dui_receptor} - {""}
 
-        # ── UUID / Código de Generación ──
+        # ── UUID / Código de Generación ───────────────────────
         gen = ""
         m_url = re.search(r"CODGEN=([A-F0-9\-]{36})", t_no_sp)
         if m_url:
@@ -314,26 +481,20 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        # ── Datos del proveedor (emisor del DTE) ──
-        nit_prov = ""
-        dui_prov = ""
-        nom_prov = "⚠️ PROVEEDOR NUEVO"
-        es_nuevo = True
-
-        excluir_nits = {nit_receptor, dui_receptor} - {""}
-        pos_nit_emisor = -1   # posición en texto donde se encontró el NIT del emisor
-
+        # ── Datos del proveedor ───────────────────────────────
+        nit_prov       = ""
+        dui_prov       = ""
+        nom_prov       = "ESCRIBE EL NOMBRE AQUI"
+        es_nuevo       = True
+        pos_nit_emisor = -1
         proveedores_db = cargar_proveedores_json()
 
-        # ═══ ESTRATEGIA 1: Etiqueta "NIT:" explícita ═══════════════════════
-        # En cada DTE la etiqueta "NIT:" aparece al menos dos veces
-        # (emisor y receptor). El PRIMER match que no sea el NIT del cliente
-        # es el NIT del emisor (proveedor).
+        # === NIT: Estrategia 1 — etiqueta explícita NIT: ======
         patron_etq_nit = re.compile(
             r"N\.?\s*I\.?\s*T\.?\s*[:\s]\s*"
-            r"((?:\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d)"   # formato 4-6-3-1
-            r"|(?:\d{14})"                                       # 14 dígitos planos
-            r"|(?:\d{8}[\s\-]?\d))",                            # DUI 8-1
+            r"((?:\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d)"
+            r"|(?:\d{14})"
+            r"|(?:\d{8}[\s\-]?\d))",
             re.I
         )
         for m_etq in patron_etq_nit.finditer(texto_completo):
@@ -343,31 +504,24 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 pos_nit_emisor = m_etq.start()
                 break
 
-        # ═══ ESTRATEGIA 2: Búsqueda en sección del emisor (más permisiva) ══
+        # === NIT: Estrategia 2 — sección emisor ===============
         if not nit_prov:
-            # Aislar emisor con múltiples patrones de separador
-            partes = re.split(
+            partes_doc = re.split(
                 r"(?i)\b(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR\s*[:\-]|"
                 r"DATOS\s+DEL\s+ADQUIRIENTE|ADQUIRIENTE\s*[:\-]|"
                 r"RECEPTOR\b|CLIENTE\s*:|COMPRADOR\b)\b",
                 texto_completo, maxsplit=1
             )
-            texto_emisor = partes[0] if len(partes[0]) > 80 else texto_completo[:2500]
-
-            # Patrón amplio: NIT con espacios o guiones variables
-            patron_nit_raw = re.compile(
-                r"\b(\d{4})[\s\-]?(\d{3,6})[\s\-]?(\d{2,6})[\s\-]?(\d)\b"
-                r"|\b(\d{14})\b"
-            )
+            texto_emisor = partes_doc[0] if len(partes_doc[0]) > 80 else texto_completo[:2500]
+            patron_nit_raw = re.compile(r"\b(\d{4})[\s\-]?\d{3,6}[\s\-]?\d{2,6}[\s\-]?\d\b|\b(\d{14})\b")
             for m_raw in patron_nit_raw.finditer(texto_emisor):
-                gs = m_raw.groups()
                 nit_cand = re.sub(r'[^0-9]', '', m_raw.group(0))
                 if nit_cand not in excluir_nits and len(nit_cand) == 14:
                     nit_prov = nit_cand
                     pos_nit_emisor = m_raw.start()
                     break
 
-        # ═══ ESTRATEGIA 3: URL/QR code (algunos PDFs incluyen NIT en URL) ══
+        # === NIT: Estrategia 3 — URL/QR =======================
         if not nit_prov:
             m_url_nit = re.search(r"NIT[=\s]?(\d{14})", t_no_sp)
             if m_url_nit:
@@ -375,13 +529,11 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if nit_cand not in excluir_nits:
                     nit_prov = nit_cand
 
-        # ═══ ESTRATEGIA 4: Cualquier NIT en el documento, excluir receptor ═
+        # === NIT: Estrategia 4 — cualquier NIT/DUI ============
         if not nit_prov:
             patron_todos = re.compile(
                 r"\b\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d\b"
-                r"|\b\d{14}\b"
-                r"|\b\d{8}[\s\-]?\d\b"
-                r"|\b\d{9}\b"
+                r"|\b\d{14}\b|\b\d{8}[\s\-]?\d\b|\b\d{9}\b"
             )
             for m_any in patron_todos.finditer(texto_completo):
                 nit_cand = re.sub(r'[^0-9]', '', m_any.group(0))
@@ -390,111 +542,50 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                     pos_nit_emisor = m_any.start()
                     break
 
-        # ── Determinar si es DUI ──
         if len(nit_prov) == 9:
             dui_prov = nit_prov
 
-        # ── Consultar base de datos de proveedores ──
+        # ── Consultar BD de proveedores ───────────────────────
         if nit_prov and nit_prov in proveedores_db:
             nom_prov = proveedores_db[nit_prov].get("nombre", "")
             es_nuevo = False
 
-        # ═══ EXTRACCIÓN DE NOMBRE — solo si es proveedor nuevo ═════════════
+        # ── Extracción de nombre (solo proveedores nuevos) ────
         if es_nuevo and nit_prov:
-            nombre_encontrado = ""
-
-            # Ventana de texto ANTES del NIT del emisor (1000 chars)
-            if pos_nit_emisor >= 0:
-                inicio_ventana = max(0, pos_nit_emisor - 1200)
-                ventana_antes  = texto_completo[inicio_ventana:pos_nit_emisor]
-            else:
-                # Sin posición, usar primeras 2000 chars
-                ventana_antes = texto_completo[:2000]
-
             partes_cli = [
-                p for p in cliente_activo.get('nombre', '').upper().split()[:3]
+                p for p in cliente_activo.get('nombre', '').upper().split()[:4]
                 if len(p) > 3
             ]
+            pos_busqueda = pos_nit_emisor if pos_nit_emisor >= 0 else len(texto_completo) // 4
 
-            def limpiar_nombre_candidato(texto: str) -> str:
-                """Limpia prefijos, sufijos basura y normaliza espacios."""
-                s = re.sub(
-                    r"^(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
-                    r"NOMBRE\s+COMERCIAL|EMISOR|DATOS\s+DEL\s+EMISOR|"
-                    r"TIPO\s+ESTABLECIMIENTO|ESTABLECIMIENTO)[\s:]*",
-                    "", texto, flags=re.I
-                ).strip()
-                # Cortar todo lo que venga después de NIT / NRC / Giro / etc.
-                s = re.sub(
-                    r"\s*\b(?:NIT|NRC|GIRO|ACTIVIDAD|DIRECCI[OÓ]N|CORREO|"
-                    r"TELEF|FONO|TIPO ESTAB)\b.*$",
-                    "", s, flags=re.I
-                ).strip()
-                s = re.sub(r"^[-_.,;:\s]+", "", s).strip()
-                s = re.sub(r'\s+', ' ', s)
-                return s.upper()
-
-            def candidato_valido(texto: str) -> bool:
-                """True si el texto parece un nombre de empresa real."""
-                T = texto.upper().strip()
-                if len(T) < 4 or len(T) > 80:
-                    return False
-                if any(b in T for b in BASURA_ESTRICTA):
-                    return False
-                if es_linea_direccion(T):
-                    return False
-                if any(b in T for b in PALABRAS_BASURA):
-                    return False
-                if T in NOMBRES_INVALIDOS:
-                    return False
-                if any(p in T for p in partes_cli):
-                    return False
-                # Rechazar si >45% son dígitos
-                if len(T) > 0 and sum(c.isdigit() for c in T) / len(T) > 0.45:
-                    return False
-                return True
-
-            # --- Intento 1: Etiqueta "Nombre:" o "Razón Social:" ---
-            # Busca sin DOTALL para no capturar líneas adicionales con NIT/NRC
-            m_nombre_etq = re.search(
-                r"(?:Nombre(?:\s+o\s+[Rr]az[oó]n\s+[Ss]ocial)?|"
-                r"[Rr]az[oó]n\s+[Ss]ocial|Nombre\s+Comercial)"
-                r"\s*[:\s]\s*([^\n]{4,80})",
-                ventana_antes, re.I
+            nombre_encontrado = extraer_nombre_proveedor(
+                texto_completo, pos_busqueda, partes_cli
             )
-            if m_nombre_etq:
-                candidato = limpiar_nombre_candidato(m_nombre_etq.group(1))
-                if candidato_valido(candidato):
-                    nombre_encontrado = candidato
 
-            # --- Intento 2: Líneas próximas ANTES del NIT (de más cerca a más lejos) ---
-            if not nombre_encontrado:
-                lineas_antes = [l.strip() for l in ventana_antes.split('\n') if l.strip()]
-                for linea in reversed(lineas_antes[-18:]):
-                    candidato = limpiar_nombre_candidato(linea)
-                    if candidato_valido(candidato):
-                        nombre_encontrado = candidato
+            # Si el primer intento falló, probar con texto_visual por separado
+            if not nombre_encontrado and texto_visual.strip():
+                # Buscar la posición del NIT en texto_visual
+                pos_vis = -1
+                for m_vis in patron_etq_nit.finditer(texto_visual):
+                    nc = re.sub(r'[^0-9]', '', m_vis.group(1))
+                    if nc == nit_prov:
+                        pos_vis = m_vis.start()
                         break
+                if pos_vis < 0:
+                    # Buscar el NIT crudo en texto_visual
+                    m_crudo = re.search(re.escape(nit_prov[:8]), texto_visual)
+                    pos_vis = m_crudo.start() if m_crudo else len(texto_visual) // 4
 
-            # --- Intento 3: Cualquier línea con sufijo comercial en la ventana ---
-            if not nombre_encontrado:
-                for linea in ventana_antes.split('\n'):
-                    L = linea.strip().upper()
-                    if not any(w in L for w in PALABRAS_COMERCIALES):
-                        continue
-                    clean = re.split(r'\s{4,}|(?:NIT|NRC)\s', L)[0].strip()
-                    candidato = limpiar_nombre_candidato(clean)
-                    if candidato_valido(candidato):
-                        nombre_encontrado = candidato
-                        break
+                nombre_encontrado = extraer_nombre_proveedor(
+                    texto_visual, pos_vis, partes_cli
+                )
 
-            nom_prov = nombre_encontrado if nombre_encontrado else "ESCRIBE EL NOMBRE AQUÍ"
+            nom_prov = nombre_encontrado if nombre_encontrado else "ESCRIBE EL NOMBRE AQUI"
 
-        # ── Extracción de montos ──
+        # ── Extracción de montos ──────────────────────────────
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
 
-        # Exentos: FOVIAL / COTRANS / etiqueta explícita
         m_fovial = re.search(r"FOVIAL.{0,50}", t_clean, re.I)
         if m_fovial:
             nums = re.findall(r"\d+\.\d{2}", m_fovial.group(0))
@@ -508,25 +599,24 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 e += max(float(n) for n in nums)
 
         m_exe = re.search(
-            r"(?:Ventas?\s+Exentas?|Total\s+Exento)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:Ventas?\s+Exentas?|Total\s+Exento)[^\d]{0,30}"
+            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
             t_clean, re.I
         )
         if m_exe:
             val_exe = limpiar_monto(m_exe.group(1))
             if val_exe > e:
                 e = val_exe
-
         e = round(e, 2)
 
-        # Retención explícita
         m_ret = re.search(
-            r"(?:Retenido|Retenci[oó]n)[^\d]{0,25}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:Retenido|Retenci[oó]n)[^\d]{0,25}"
+            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
             t_clean, re.I
         )
         if m_ret:
             ret = limpiar_monto(m_ret.group(1))
 
-        # Total e IVA explícitos (antes del bucle O(n³))
         m_tot = re.search(
             r"(?:TOTAL\s+A\s+PAGAR|TOTAL\s+PAGAR|MONTO\s+TOTAL|"
             r"TOTAL\s+OPERACI[OÓ]N|VENTA\s+TOTAL|TOTAL\s*\$)[^\d]{0,30}"
@@ -544,7 +634,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_iva:
             i = limpiar_monto(m_iva.group(1))
 
-        # Reconciliación O(n³) con límite de seguridad
         encontrado = False
         if not (t > 0 and i > 0):
             montos_raw = re.findall(
@@ -555,7 +644,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 list({limpiar_monto(m) for m in montos_raw if limpiar_monto(m) > 0}),
                 reverse=True
             )[:MAX_VALORES_LOOP]
-
             for vt in valores:
                 if encontrado: break
                 for vg in valores:
@@ -569,7 +657,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                                 encontrado = True
                                 break
 
-        # Fallback si tenemos total e IVA explícitos
         if not encontrado:
             if t > 0 and i > 0:
                 g = round(t - i - e + ret, 2)
@@ -593,53 +680,52 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             "ret"      : ret,
             "perc"     : perc,
             "tot"      : t,
-            "estado"   : "✅ OK",
+            "estado"   : "OK",
             "iva_calc" : iva_calculado,
             "es_nuevo" : es_nuevo,
             "nit_nuevo": nit_prov,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
-        return {"error": "PDF inválido o con sintaxis corrupta."}
+        return {"error": "PDF invalido o con sintaxis corrupta."}
     except Exception as err:
         return {"error": str(err)}
 
 
+# ─────────────────────────────────────────────
+# EXPORTAR EXCEL
+# ─────────────────────────────────────────────
 def to_excel_hacienda_compras(df: pd.DataFrame) -> bytes:
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, header=False, sheet_name='Compras_F07')
         ws = writer.sheets['Compras_F07']
-
-        # Anchos de columna
         anchos = [10, 2, 2, 38, 16, 45, 10, 10, 10, 12, 10, 10, 10, 12, 14, 10, 2, 2, 2, 2, 4]
         for idx, ancho in enumerate(anchos, start=1):
             ws.column_dimensions[ws.cell(1, idx).column_letter].width = ancho
-
-        # Formato numérico para columnas de montos (G a O)
         for fila in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=7, max_col=15):
             for celda in fila:
                 if isinstance(celda.value, (int, float)):
                     celda.number_format = '#,##0.00'
-
     return output.getvalue()
 
 
-@st.dialog("⚠️ Seguro de Calidad de Compras")
+@st.dialog("Seguro de Calidad de Compras")
 def ventana_descarga_compras(df_resultados: pd.DataFrame, nombre_archivo: str) -> None:
     st.write(
-        "Asegúrate de haber procesado únicamente los comprobantes que deseas "
+        "Asegurate de haber procesado unicamente los comprobantes que deseas "
         "declarar en el anexo de Compras antes de descargar."
     )
     st.download_button(
-        "📥 Confirmar y Descargar Anexo F-07",
+        "Confirmar y Descargar Anexo F-07",
         data=to_excel_hacienda_compras(df_resultados),
         file_name=nombre_archivo,
         type="primary"
     )
 
+
 # ─────────────────────────────────────────────
-# 6. ENCABEZADO DE PÁGINA
+# 6. ENCABEZADO
 # ─────────────────────────────────────────────
 col_logo, col_titulo = st.columns([1, 8])
 with col_logo:
@@ -649,7 +735,7 @@ with col_logo:
         unsafe_allow_html=True
     )
 with col_titulo:
-    st.title("🛒 Extractor DTE — Compras")
+    st.title("Extractor DTE - Compras")
 
 st.markdown(f"""
 <div class="card-emisor">
@@ -661,17 +747,17 @@ st.markdown(f"""
 # ─────────────────────────────────────────────
 # 7. SESSION STATE
 # ─────────────────────────────────────────────
-if 'cola_revision'       not in st.session_state: st.session_state.cola_revision       = []
-if 'comp_uploader_key'   not in st.session_state: st.session_state.comp_uploader_key   = 0
-if 'db_compras'          not in st.session_state: st.session_state.db_compras          = pd.DataFrame()
-if 'archivos_comp'       not in st.session_state: st.session_state.archivos_comp       = []
-if 'reporte_compras'     not in st.session_state: st.session_state.reporte_compras     = None
+if 'cola_revision'     not in st.session_state: st.session_state.cola_revision     = []
+if 'comp_uploader_key' not in st.session_state: st.session_state.comp_uploader_key = 0
+if 'db_compras'        not in st.session_state: st.session_state.db_compras        = pd.DataFrame()
+if 'archivos_comp'     not in st.session_state: st.session_state.archivos_comp     = []
+if 'reporte_compras'   not in st.session_state: st.session_state.reporte_compras   = None
 
 # ─────────────────────────────────────────────
-# 8. SIDEBAR — CARGA Y PROCESAMIENTO
+# 8. SIDEBAR
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 📂 Carga de Compras")
+    st.markdown("### Carga de Compras")
     st.divider()
 
     archivos = st.file_uploader(
@@ -682,7 +768,7 @@ with st.sidebar:
     )
 
     procesar = st.button(
-        "🚀 Procesar Compras",
+        "Procesar Compras",
         type="primary",
         use_container_width=True,
         disabled=not archivos
@@ -693,15 +779,15 @@ with st.sidebar:
         nuevos = [f for f in archivos if f.name not in nombres_procesados]
 
         if not nuevos:
-            st.info("ℹ️ Todos los archivos ya fueron procesados.")
+            st.info("Todos los archivos ya fueron procesados.")
         else:
             extracted, duplicados, iva_calc_files = [], [], []
             invalidos, corruptos, nuevos_proveedores = [], [], {}
 
-            bar           = st.progress(0)
-            txt_progreso  = st.empty()
-            t_inicio      = time.time()
-            total         = len(nuevos)
+            bar          = st.progress(0)
+            txt_progreso = st.empty()
+            t_inicio     = time.time()
+            total        = len(nuevos)
 
             for idx, f in enumerate(nuevos):
                 if idx > 0 and idx % 50 == 0:
@@ -710,10 +796,10 @@ with st.sidebar:
                 if idx > 0:
                     elapsed   = time.time() - t_inicio
                     remaining = int((elapsed / idx) * (total - idx))
-                    m, s      = divmod(remaining, 60)
-                    txt_progreso.caption(f"⏳ {idx+1}/{total} — Restante: {m:02d}:{s:02d}")
+                    m_t, s_t  = divmod(remaining, 60)
+                    txt_progreso.caption(f"Procesando {idx+1}/{total} — Restante: {m_t:02d}:{s_t:02d}")
                 else:
-                    txt_progreso.caption(f"⏳ Procesando 1 de {total}…")
+                    txt_progreso.caption(f"Procesando 1 de {total}...")
 
                 file_bytes = f.read()
 
@@ -725,13 +811,14 @@ with st.sidebar:
 
                 res = extraer_compras_nativo_pro(file_bytes, cliente)
 
-                cod_gen         = res.get('gen', '')
-                dup_memoria     = (
+                cod_gen     = res.get('gen', '')
+                dup_memoria = (
                     not st.session_state.db_compras.empty
                     and cod_gen
+                    and 'gen' in st.session_state.db_compras.columns
                     and (st.session_state.db_compras['gen'] == cod_gen).any()
                 )
-                dup_lote        = cod_gen and any(d.get('gen') == cod_gen for d in extracted)
+                dup_lote    = cod_gen and any(d.get('gen') == cod_gen for d in extracted)
 
                 if "error_tipo" in res:
                     invalidos.append(f.name)
@@ -745,7 +832,7 @@ with st.sidebar:
                         res.get('tot', 0.0) == 0.0
                         or not res.get('gen')
                         or not str(res.get('fecha', '')).strip()
-                        or nom in ("ESCRIBE EL NOMBRE AQUÍ", "")
+                        or nom in ("ESCRIBE EL NOMBRE AQUI", "")
                     )
                     if va_a_revision:
                         st.session_state.cola_revision.append({
@@ -757,14 +844,18 @@ with st.sidebar:
                         if res.get('iva_calc'):
                             iva_calc_files.append(f.name)
                         if res.get("es_nuevo") and res.get("nit_nuevo"):
-                            nuevos_proveedores[res["nit_nuevo"]] = res["nom_prov"]
+                            nit_n = res["nit_nuevo"]
+                            nom_n = res["nom_prov"]
+                            nuevos_proveedores[nit_n] = nom_n
+                            # Guardar inmediatamente en BD
+                            guardar_proveedor_rapido(nit_n, nom_n)
                         res["archivo"] = f.name
                         extracted.append(res)
 
                 st.session_state.archivos_comp.append(f.name)
                 bar.progress((idx + 1) / total)
 
-            txt_progreso.success(f"✅ {total} facturas escaneadas.")
+            txt_progreso.success(f"{total} facturas escaneadas.")
 
             st.session_state.reporte_compras = {
                 "invalidos"         : invalidos,
@@ -784,7 +875,7 @@ with st.sidebar:
                     )
 
     st.divider()
-    if st.button("🧹 Limpiar Memoria Compras", type="secondary", use_container_width=True):
+    if st.button("Limpiar Memoria Compras", type="secondary", use_container_width=True):
         for key in ('db_compras', 'archivos_comp', 'reporte_compras', 'cola_revision'):
             if key in st.session_state:
                 del st.session_state[key]
@@ -795,25 +886,25 @@ with st.sidebar:
         st.divider()
         total_docs  = len(st.session_state.db_compras)
         total_monto = st.session_state.db_compras["tot"].sum()
-        st.markdown(f"**📄 Documentos:** `{total_docs}`")
-        st.markdown(f"**💰 Total:** `${total_monto:,.2f}`")
+        st.markdown(f"**Documentos:** `{total_docs}`")
+        st.markdown(f"**Total:** `${total_monto:,.2f}`")
 
 # ─────────────────────────────────────────────
-# 9. BANDEJA DE REVISIÓN MANUAL
+# 9. BANDEJA DE REVISIÓN MANUAL (MEJORADA)
 # ─────────────────────────────────────────────
 if st.session_state.cola_revision:
     st.markdown("""
     <div class="inbox-revision">
-        <h3>📥 Bandeja de Revisión Manual</h3>
+        <h3>Bandeja de Revision Manual</h3>
         <p>Datos borrosos o incompletos detectados. Revisa y corrige antes de agregar al libro.</p>
     </div>
     """, unsafe_allow_html=True)
 
-    total_cola  = len(st.session_state.cola_revision)
+    total_cola = len(st.session_state.cola_revision)
     st.info(f"Quedan **{total_cola}** documento(s) por revisar.")
 
-    item_actual  = st.session_state.cola_revision[0]
-    datos_act    = item_actual["datos"]
+    item_actual = st.session_state.cola_revision[0]
+    datos_act   = item_actual["datos"]
 
     col_img, col_form = st.columns([1.2, 1], gap="large")
 
@@ -821,75 +912,152 @@ if st.session_state.cola_revision:
         try:
             with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
                 img = pdf.pages[0].to_image(resolution=200).original
-                st.image(img, caption=f"📄 {item_actual['archivo']}", use_container_width=True)
+                st.image(img, caption=item_actual['archivo'], use_container_width=True)
                 texto_crudo = ""
                 for page in pdf.pages:
                     texto_crudo += (page.extract_text(layout=True) or page.extract_text() or "") + "\n"
-                st.markdown("📝 **Texto extraído:**")
-                st.text_area("", value=texto_crudo.strip(), height=200, label_visibility="collapsed")
+                st.markdown("**Texto extraido:**")
+                st.text_area("", value=texto_crudo.strip(), height=220, label_visibility="collapsed")
         except Exception:
             st.error("No se pudo cargar la vista previa.")
 
     with col_form:
-        st.markdown("### ✍️ Corrección Rápida")
+        st.markdown("### Correccion Rapida")
+
+        nit_actual = datos_act.get("nit_prov", "")
+        if nit_actual:
+            st.caption(f"NIT detectado: `{nit_actual}`")
+
         with st.form(key=f"form_revision_{item_actual['archivo']}"):
-            f_fecha = st.text_input("📅 Fecha (DD/MM/YYYY) *", value=datos_act.get("fecha", ""))
-            f_gen   = st.text_input("🔑 Código de Generación (UUID) *", value=datos_act.get("gen", ""))
+            f_fecha = st.text_input("Fecha (DD/MM/YYYY) *", value=datos_act.get("fecha", ""))
+            f_gen   = st.text_input("Codigo de Generacion (UUID) *", value=datos_act.get("gen", ""))
 
             nom_sug = datos_act.get("nom_prov", "")
-            if nom_sug == "ESCRIBE EL NOMBRE AQUÍ":
+            if nom_sug in ("ESCRIBE EL NOMBRE AQUI", "ESCRIBE EL NOMBRE AQUÍ", ""):
                 nom_sug = ""
-            f_nom = st.text_input("🏢 Razón Social del Proveedor *", value=nom_sug)
+            f_nom = st.text_input(
+                "Razon Social del Proveedor *",
+                value=nom_sug,
+                placeholder="Nombre completo tal como aparece en el DTE"
+            )
 
             c1, c2 = st.columns(2)
             with c1:
-                f_tot = st.number_input("💰 Total a Pagar ($) *", value=float(datos_act.get("tot", 0.0)), format="%.2f")
+                f_tot = st.number_input("Total a Pagar ($) *", value=float(datos_act.get("tot", 0.0)), format="%.2f")
             with c2:
-                f_exe = st.number_input("⛽ Exento/Fovial ($)", value=float(datos_act.get("exe", 0.0)), format="%.2f")
+                f_exe = st.number_input("Exento/Fovial ($)", value=float(datos_act.get("exe", 0.0)), format="%.2f")
+
+            f_gra = st.number_input(
+                "Compra Gravada ($)",
+                value=float(datos_act.get("gra", 0.0)),
+                format="%.2f",
+                help="Deja en 0 para calcular automaticamente"
+            )
+            f_iva = st.number_input(
+                "IVA Credito Fiscal ($)",
+                value=float(datos_act.get("iva", 0.0)),
+                format="%.2f",
+                help="Deja en 0 para calcular automaticamente"
+            )
+
+            actualizar_otros = st.checkbox(
+                "Actualizar este proveedor en todos los registros existentes",
+                value=True,
+                help="Si ya habia facturas de este NIT, actualiza el nombre en toda la tabla."
+            )
 
             st.markdown("")
             b1, b2 = st.columns(2)
 
             with b1:
-                if st.form_submit_button("✅ Aprobar y Guardar", type="primary", use_container_width=True):
-                    if not f_fecha or not f_gen or not f_nom or f_tot <= 0:
-                        st.error("Completa todos los campos marcados con (*).")
-                    else:
-                        nit_act = datos_act.get("nit_prov", "")
-                        if nit_act:
-                            guardar_proveedor_rapido(nit_act, f_nom)
-                            for item in st.session_state.cola_revision[1:]:
-                                if item["datos"].get("nit_prov") == nit_act:
-                                    item["datos"]["nom_prov"] = f_nom.upper()
-
-                        datos_act.update({
-                            "fecha"   : f_fecha,
-                            "gen"     : f_gen.upper(),
-                            "nom_prov": f_nom.upper(),
-                            "tot"     : f_tot,
-                            "exe"     : f_exe,
-                            "archivo" : item_actual["archivo"],
-                        })
-
-                        if f_tot > 0 and datos_act.get("iva", 0) == 0:
-                            datos_act["gra"] = round((f_tot - f_exe) / 1.13, 2)
-                            datos_act["iva"] = round(f_tot - f_exe - datos_act["gra"], 2)
-                            datos_act["iva_calc"] = True
-
-                        nuevo_df = pd.DataFrame([datos_act])
-                        if st.session_state.db_compras.empty:
-                            st.session_state.db_compras = nuevo_df
-                        else:
-                            st.session_state.db_compras = pd.concat(
-                                [st.session_state.db_compras, nuevo_df], ignore_index=True
-                            )
-                        st.session_state.cola_revision.pop(0)
-                        st.rerun()
-
+                submit_ok = st.form_submit_button("Aprobar y Guardar", type="primary", use_container_width=True)
             with b2:
-                if st.form_submit_button("🗑️ Descartar Archivo", use_container_width=True):
+                submit_del = st.form_submit_button("Descartar Archivo", use_container_width=True)
+
+            # ── Aprobar ──────────────────────────────────────────
+            if submit_ok:
+                errores = []
+                if not f_fecha.strip():
+                    errores.append("Fecha requerida.")
+                if not f_gen.strip():
+                    errores.append("Codigo de Generacion requerido.")
+                if not f_nom.strip():
+                    errores.append("Razon Social del Proveedor requerida.")
+                if f_tot <= 0:
+                    errores.append("Total a Pagar debe ser mayor a 0.")
+
+                if errores:
+                    for e_msg in errores:
+                        st.error(e_msg)
+                else:
+                    nombre_limpio = f_nom.strip().upper()
+                    nit_act       = datos_act.get("nit_prov", "")
+
+                    # 1) Guardar / actualizar en proveedores.json
+                    if nit_act:
+                        guardar_proveedor_rapido(nit_act, nombre_limpio)
+
+                    # 2) Actualizar cola_revision: otros items con mismo NIT
+                    for item_pendiente in st.session_state.cola_revision[1:]:
+                        if item_pendiente["datos"].get("nit_prov") == nit_act:
+                            item_pendiente["datos"]["nom_prov"] = nombre_limpio
+                            item_pendiente["datos"]["es_nuevo"]  = False
+
+                    # 3) Actualizar db_compras existente si el usuario lo pidio
+                    if actualizar_otros and nit_act:
+                        actualizar_nombre_en_db(nit_act, nombre_limpio)
+
+                    # 4) Calcular montos si faltan
+                    gra_final = f_gra
+                    iva_final = f_iva
+                    iva_calc  = datos_act.get("iva_calc", False)
+
+                    if f_tot > 0 and gra_final == 0.0 and iva_final == 0.0:
+                        gra_final = round((f_tot - f_exe) / 1.13, 2)
+                        iva_final = round(f_tot - f_exe - gra_final, 2)
+                        iva_calc  = True
+                    elif f_tot > 0 and iva_final == 0.0 and gra_final > 0.0:
+                        iva_final = round(gra_final * 0.13, 2)
+                        iva_calc  = True
+
+                    # 5) Armar registro aprobado
+                    datos_act.update({
+                        "fecha"    : f_fecha.strip(),
+                        "gen"      : f_gen.strip().upper(),
+                        "nom_prov" : nombre_limpio,
+                        "tot"      : f_tot,
+                        "exe"      : f_exe,
+                        "gra"      : gra_final,
+                        "iva"      : iva_final,
+                        "iva_calc" : iva_calc,
+                        "es_nuevo" : False,
+                        "archivo"  : item_actual["archivo"],
+                    })
+
+                    # 6) Agregar a db_compras
+                    nuevo_df = pd.DataFrame([datos_act])
+                    if st.session_state.db_compras.empty:
+                        st.session_state.db_compras = nuevo_df
+                    else:
+                        st.session_state.db_compras = pd.concat(
+                            [st.session_state.db_compras, nuevo_df], ignore_index=True
+                        )
+
+                    # 7) Actualizar reporte de nuevos proveedores
+                    if nit_act:
+                        rep = st.session_state.get("reporte_compras") or {}
+                        np_dict = rep.get("nuevos_proveedores", {})
+                        np_dict[nit_act] = nombre_limpio
+                        if st.session_state.reporte_compras:
+                            st.session_state.reporte_compras["nuevos_proveedores"] = np_dict
+
                     st.session_state.cola_revision.pop(0)
                     st.rerun()
+
+            # ── Descartar ────────────────────────────────────────
+            if submit_del:
+                st.session_state.cola_revision.pop(0)
+                st.rerun()
 
     st.stop()
 
@@ -898,28 +1066,37 @@ if st.session_state.cola_revision:
 # ─────────────────────────────────────────────
 if st.session_state.reporte_compras:
     rep = st.session_state.reporte_compras
-    st.markdown("### 📋 Alertas de Procesamiento")
+    st.markdown("### Alertas de Procesamiento")
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         if rep.get("corruptos"):
-            st.error(f"💀 **{len(rep['corruptos'])} Dañados**")
+            st.error(f"**{len(rep['corruptos'])} Danados**")
         else:
-            st.success("✅ 0 Dañados")
+            st.success("0 Danados")
     with c2:
         if rep.get("invalidos"):
-            st.warning(f"⚠️ **{len(rep['invalidos'])} Ignorados** (tipo incorrecto)")
+            st.warning(f"**{len(rep['invalidos'])} Ignorados** (tipo incorrecto)")
         else:
-            st.success("✅ 0 Ignorados")
+            st.success("0 Ignorados")
     with c3:
         if rep.get("duplicados"):
-            st.error(f"🛑 **{len(rep['duplicados'])} Duplicados**")
+            st.error(f"**{len(rep['duplicados'])} Duplicados**")
         else:
-            st.success("✅ 0 Duplicados")
+            st.success("0 Duplicados")
     with c4:
         if rep.get("iva_calc"):
-            st.info(f"🧮 **{len(rep['iva_calc'])} IVA Calculado**")
+            st.info(f"**{len(rep['iva_calc'])} IVA Calculado**")
         else:
-            st.success("✅ IVA directo")
+            st.success("IVA directo")
+
+    # Mostrar nuevos proveedores guardados
+    np_dict = rep.get("nuevos_proveedores", {})
+    if np_dict:
+        st.markdown(f"**Proveedores nuevos guardados:** `{len(np_dict)}`")
+        with st.expander("Ver proveedores nuevos registrados"):
+            for nit_k, nom_k in np_dict.items():
+                st.markdown(f"- `{nit_k}` — **{nom_k}**")
+
     st.divider()
 
 # ─────────────────────────────────────────────
@@ -928,25 +1105,25 @@ if st.session_state.reporte_compras:
 if not st.session_state.db_compras.empty:
     df = st.session_state.db_compras.copy()
 
-    st.markdown("### 🔍 Filtros de Auditoría")
+    st.markdown("### Filtros de Auditoria")
     col_f1, col_f2 = st.columns([2, 1])
     with col_f1:
-        busqueda = st.text_input("Buscar proveedor 🔎", placeholder="Nombre, NIT o UUID…")
+        busqueda = st.text_input("Buscar proveedor", placeholder="Nombre, NIT o UUID...")
     with col_f2:
         filtro_tipo = st.multiselect(
-            "Tipo DTE 📄",
+            "Tipo DTE",
             options=df['tipo'].unique().tolist(),
             default=df['tipo'].unique().tolist()
         )
 
     df_filtrado = df.copy()
     if busqueda:
-        t = busqueda.upper()
+        t_bus = busqueda.upper()
         mask = (
-            df_filtrado['nom_prov'].str.contains(t, case=False, na=False) |
-            df_filtrado['nit_prov'].str.contains(t, na=False) |
-            df_filtrado['dui_prov'].str.contains(t, na=False) |
-            df_filtrado['gen'].str.contains(t, case=False, na=False)
+            df_filtrado['nom_prov'].str.contains(t_bus, case=False, na=False) |
+            df_filtrado['nit_prov'].str.contains(t_bus, na=False) |
+            df_filtrado['dui_prov'].str.contains(t_bus, na=False) |
+            df_filtrado['gen'].str.contains(t_bus, case=False, na=False)
         )
         df_filtrado = df_filtrado[mask]
     if filtro_tipo:
@@ -954,31 +1131,31 @@ if not st.session_state.db_compras.empty:
 
     st.divider()
 
-    tab1, tab2 = st.tabs(["📊 Libro F-07 Compras", "🔍 Auditoría Completa"])
+    tab1, tab2 = st.tabs(["Libro F-07 Compras", "Auditoria Completa"])
 
     with tab1:
         df_f07 = pd.DataFrame()
-        df_f07["A. Fecha Emisión"]       = df_filtrado["fecha"]
-        df_f07["B. Clase"]               = "4"
-        df_f07["C. Tipo Doc"]            = df_filtrado["tipo"]
-        df_f07["D. Num Documento"]       = df_filtrado["gen"]
-        df_f07["E. NIT/NRC Prov"]        = df_filtrado["nit_prov"]
-        df_f07["F. Nombre Prov"]         = df_filtrado["nom_prov"]
-        df_f07["G. Compra Ext/NS"]       = df_filtrado["exe"]
-        df_f07["H. Internacion Ext/NS"]  = 0.00
-        df_f07["I. Importacion Ext/NS"]  = 0.00
-        df_f07["J. Compra Gravada"]      = df_filtrado["gra"]
-        df_f07["K. Inter. Grav Bienes"]  = 0.00
-        df_f07["L. Impor. Grav Bienes"]  = 0.00
-        df_f07["M. Impor. Grav Serv"]    = 0.00
-        df_f07["N. Crédito Fiscal (IVA)"]= df_filtrado["iva"]
-        df_f07["O. Total Compras"]       = df_filtrado["tot"]
-        df_f07["P. DUI Prov"]            = df_filtrado["dui_prov"]
-        df_f07["Q. Tipo Operacion"]      = "1"
-        df_f07["R. Clasificacion"]       = "1"
-        df_f07["S. Sector"]              = "1"
-        df_f07["T. Tipo Costo/Gasto"]    = "1"
-        df_f07["U. Num Anexo"]           = "3"
+        df_f07["A. Fecha Emision"]        = df_filtrado["fecha"]
+        df_f07["B. Clase"]                = "4"
+        df_f07["C. Tipo Doc"]             = df_filtrado["tipo"]
+        df_f07["D. Num Documento"]        = df_filtrado["gen"]
+        df_f07["E. NIT/NRC Prov"]         = df_filtrado["nit_prov"]
+        df_f07["F. Nombre Prov"]          = df_filtrado["nom_prov"]
+        df_f07["G. Compra Ext/NS"]        = df_filtrado["exe"]
+        df_f07["H. Internacion Ext/NS"]   = 0.00
+        df_f07["I. Importacion Ext/NS"]   = 0.00
+        df_f07["J. Compra Gravada"]       = df_filtrado["gra"]
+        df_f07["K. Inter. Grav Bienes"]   = 0.00
+        df_f07["L. Impor. Grav Bienes"]   = 0.00
+        df_f07["M. Impor. Grav Serv"]     = 0.00
+        df_f07["N. Credito Fiscal (IVA)"] = df_filtrado["iva"]
+        df_f07["O. Total Compras"]        = df_filtrado["tot"]
+        df_f07["P. DUI Prov"]             = df_filtrado["dui_prov"]
+        df_f07["Q. Tipo Operacion"]       = "1"
+        df_f07["R. Clasificacion"]        = "1"
+        df_f07["S. Sector"]               = "1"
+        df_f07["T. Tipo Costo/Gasto"]     = "1"
+        df_f07["U. Num Anexo"]            = "3"
 
         COLS_NUM = [c for c in df_f07.columns if df_f07[c].dtype == float]
         st.dataframe(
@@ -989,25 +1166,25 @@ if not st.session_state.db_compras.empty:
 
         st.markdown(
             f"> **Total Gravadas:** `${df_f07['J. Compra Gravada'].sum():,.2f}` &nbsp;|&nbsp;"
-            f"**IVA:** `${df_f07['N. Crédito Fiscal (IVA)'].sum():,.2f}` &nbsp;|&nbsp;"
+            f"**IVA:** `${df_f07['N. Credito Fiscal (IVA)'].sum():,.2f}` &nbsp;|&nbsp;"
             f"**Total General:** `${df_f07['O. Total Compras'].sum():,.2f}`"
         )
 
         st.markdown("---")
-        if st.button("📥 Generar Excel para Hacienda", type="primary"):
+        if st.button("Generar Excel para Hacienda", type="primary"):
             ventana_descarga_compras(
                 df_f07,
-                f"F07_Compras_{cliente['nombre'].replace(' ','_')}.xlsx"
+                f"F07_Compras_{cliente['nombre'].replace(' ', '_')}.xlsx"
             )
 
     with tab2:
-        st.write(f"📊 Registros: **{len(df_filtrado)}** de **{len(df)}**")
+        st.write(f"Registros: **{len(df_filtrado)}** de **{len(df)}**")
         st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
 
 else:
     st.markdown("""
-    <div style="text-align:center; padding: 60px 20px; color: #6B7A2A;">
-        <h3 style="color:#8A9A35 !important;">📂 Sin documentos cargados</h3>
+    <div style="text-align:center; padding: 60px 20px;">
+        <h3 style="color:#8A9A35 !important;">Sin documentos cargados</h3>
         <p style="color:#4A5520 !important;">Usa el panel lateral para cargar y procesar PDFs de compras.</p>
     </div>
     """, unsafe_allow_html=True)
