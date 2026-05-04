@@ -222,7 +222,6 @@ def guardar_proveedor_rapido(nit: str, nombre: str) -> None:
 
 
 def actualizar_nombre_en_db(nit: str, nombre: str) -> None:
-    """Actualiza nom_prov en todos los registros de db_compras con ese NIT."""
     if not nit or not nombre.strip():
         return
     df = st.session_state.get("db_compras", pd.DataFrame())
@@ -287,7 +286,7 @@ def extraer_y_formatear_fecha(texto: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
-# EXTRACCIÓN DE NOMBRE — múltiples estrategias
+# EXTRACCIÓN DE NOMBRE
 # ══════════════════════════════════════════════════════════════
 def extraer_nombre_proveedor(
     texto_completo: str,
@@ -351,7 +350,7 @@ def extraer_nombre_proveedor(
         if valido(candidato):
             return candidato
 
-    # Estrategia B: líneas antes del NIT
+    # Estrategia B: lineas antes del NIT
     ventana_antes = texto_completo[inicio:pos_nit]
     lineas_antes  = [ln.strip() for ln in ventana_antes.split('\n') if ln.strip()]
     for linea in reversed(lineas_antes[-22:]):
@@ -359,7 +358,7 @@ def extraer_nombre_proveedor(
         if valido(candidato):
             return candidato
 
-    # Estrategia C: líneas despues del NIT
+    # Estrategia C: lineas despues del NIT
     ventana_despues = texto_completo[pos_nit:fin]
     lineas_despues  = [ln.strip() for ln in ventana_despues.split('\n') if ln.strip()]
     for linea in lineas_despues[:10]:
@@ -377,7 +376,7 @@ def extraer_nombre_proveedor(
         if valido(candidato):
             return candidato
 
-    # Estrategia E: sección EMISOR delimitada
+    # Estrategia E: seccion EMISOR delimitada
     m_sec = re.search(
         r"(?i)(?:DATOS\s+DEL\s+EMISOR|EMISOR\s*[:\-]|CONTRIBUYENTE\s+EMISOR)"
         r"(.{10,600}?)"
@@ -427,7 +426,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
         t_no_sp = re.sub(r'\s+', '', t_clean).upper()
 
-        # ── Código de control / Tipo DTE ──────────────────────
+        # ── Tipo DTE ──────────────────────────────────────────
         m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_sp)
         tipo   = "01"
         ctrl   = ""
@@ -447,8 +446,8 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         excluir_nits = {nit_receptor, dui_receptor} - {""}
 
         # ── UUID ──────────────────────────────────────────────
-        gen    = ""
-        m_url  = re.search(r"CODGEN=([A-F0-9\-]{36})", t_no_sp)
+        gen   = ""
+        m_url = re.search(r"CODGEN=([A-F0-9\-]{36})", t_no_sp)
         if m_url:
             gen = m_url.group(1).upper()
         else:
@@ -462,7 +461,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        # ── Datos del proveedor ───────────────────────────────
+        # ── Proveedor ─────────────────────────────────────────
         nit_prov       = ""
         dui_prov       = ""
         nom_prov       = "ESCRIBE EL NOMBRE AQUI"
@@ -478,7 +477,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             re.I
         )
 
-        # NIT Estrategia 1: etiqueta explicita
         for m_etq_nit in patron_etq_nit.finditer(texto_completo):
             nit_cand = re.sub(r'[^0-9]', '', m_etq_nit.group(1))
             if nit_cand not in excluir_nits and len(nit_cand) in (9, 14):
@@ -486,7 +484,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 pos_nit_emisor = m_etq_nit.start()
                 break
 
-        # NIT Estrategia 2: seccion emisor
         if not nit_prov:
             partes_doc = re.split(
                 r"(?i)\b(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR\s*[:\-]|"
@@ -505,7 +502,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                     pos_nit_emisor = m_raw_nit.start()
                     break
 
-        # NIT Estrategia 3: URL/QR
         if not nit_prov:
             m_url_nit = re.search(r"NIT[=\s]?(\d{14})", t_no_sp)
             if m_url_nit:
@@ -513,7 +509,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if nit_cand not in excluir_nits:
                     nit_prov = nit_cand
 
-        # NIT Estrategia 4: cualquier NIT/DUI
         if not nit_prov:
             patron_todos = re.compile(
                 r"\b\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d\b"
@@ -529,12 +524,10 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if len(nit_prov) == 9:
             dui_prov = nit_prov
 
-        # ── Consultar BD de proveedores ───────────────────────
         if nit_prov and nit_prov in proveedores_db:
             nom_prov = proveedores_db[nit_prov].get("nombre", "")
             es_nuevo = False
 
-        # ── Extracción de nombre ──────────────────────────────
         if es_nuevo and nit_prov:
             partes_cli = [
                 p for p in cliente_activo.get('nombre', '').upper().split()[:4]
@@ -546,7 +539,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 texto_completo, pos_busqueda, partes_cli
             )
 
-            # Retry con texto_visual si fallo
             if not nombre_encontrado and texto_visual.strip():
                 pos_vis = -1
                 for m_vis_nit in patron_etq_nit.finditer(texto_visual):
@@ -564,7 +556,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
             nom_prov = nombre_encontrado if nombre_encontrado else "ESCRIBE EL NOMBRE AQUI"
 
-        # ── Extracción de montos ──────────────────────────────
+        # ── Montos ────────────────────────────────────────────
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
 
@@ -616,7 +608,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_iva:
             i = limpiar_monto(m_iva.group(1))
 
-        # Reconciliación O(n³)
         encontrado = False
         if not (t > 0 and i > 0):
             montos_raw = re.findall(
@@ -644,7 +635,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                             continue
                         if abs(round(vg * 0.13, 2) - round(vi, 2)) <= 0.05:
                             if abs(round(vg + vi + e - ret, 2) - round(vt, 2)) <= 0.05:
-                                g, i, t   = vg, vi, vt
+                                g, i, t    = vg, vi, vt
                                 encontrado = True
                                 break
 
@@ -708,11 +699,36 @@ def ventana_descarga_compras(df_resultados: pd.DataFrame, nombre_archivo: str) -
         "declarar en el anexo de Compras antes de descargar."
     )
     st.download_button(
-        "Confirmar y Descargar Anexo F-07",
+        "📥 Confirmar y Descargar Anexo F-07",
         data=to_excel_hacienda_compras(df_resultados),
         file_name=nombre_archivo,
         type="primary"
     )
+
+
+# ─────────────────────────────────────────────
+# HELPER: renderiza alerta + lista expandible
+# ─────────────────────────────────────────────
+def alerta_con_lista(
+    tipo_alerta: str,          # "error" | "warning" | "info" | "success"
+    icono: str,
+    titulo: str,
+    archivos: list,
+    key_exp: str,
+) -> None:
+    """Muestra un st.<tipo_alerta> con contador y expander con lista de archivos."""
+    fn = getattr(st, tipo_alerta)
+    if archivos:
+        fn(f"{icono} **{len(archivos)} {titulo}**")
+        with st.expander(f"Ver {len(archivos)} archivo(s)", expanded=False):
+            lista_html = "".join(
+                f'<div class="scroll-list" style="max-height:200px">'
+                + "".join(f"<div>📄 {a}</div>" for a in archivos)
+                + "</div>"
+            )
+            st.markdown(lista_html, unsafe_allow_html=True)
+    else:
+        st.success(f"✅ 0 {titulo}")
 
 
 # ─────────────────────────────────────────────
@@ -785,9 +801,9 @@ with st.sidebar:
                     gc.collect()
 
                 if idx > 0:
-                    elapsed    = time.time() - t_inicio
-                    remaining  = int((elapsed / idx) * (total - idx))
-                    m_t, s_t   = divmod(remaining, 60)
+                    elapsed   = time.time() - t_inicio
+                    remaining = int((elapsed / idx) * (total - idx))
+                    m_t, s_t  = divmod(remaining, 60)
                     txt_progreso.caption(
                         f"⏳ {idx+1}/{total} — Restante: {m_t:02d}:{s_t:02d}"
                     )
@@ -988,17 +1004,12 @@ if st.session_state.cola_revision:
                     "🗑️ Descartar Archivo", use_container_width=True
                 )
 
-            # ── Aprobar ──────────────────────────────────────
             if submit_ok:
                 errores = []
-                if not f_fecha.strip():
-                    errores.append("Fecha requerida.")
-                if not f_gen.strip():
-                    errores.append("Código de Generación requerido.")
-                if not f_nom.strip():
-                    errores.append("Razón Social del Proveedor requerida.")
-                if f_tot <= 0:
-                    errores.append("Total a Pagar debe ser mayor a 0.")
+                if not f_fecha.strip():   errores.append("Fecha requerida.")
+                if not f_gen.strip():     errores.append("Código de Generación requerido.")
+                if not f_nom.strip():     errores.append("Razón Social del Proveedor requerida.")
+                if f_tot <= 0:            errores.append("Total a Pagar debe ser mayor a 0.")
 
                 if errores:
                     for e_msg in errores:
@@ -1007,21 +1018,17 @@ if st.session_state.cola_revision:
                     nombre_limpio = f_nom.strip().upper()
                     nit_act       = datos_act.get("nit_prov", "")
 
-                    # 1) Guardar en proveedores.json
                     if nit_act:
                         guardar_proveedor_rapido(nit_act, nombre_limpio)
 
-                    # 2) Propagar nombre a cola pendiente con mismo NIT
                     for item_pend in st.session_state.cola_revision[1:]:
                         if item_pend["datos"].get("nit_prov") == nit_act:
                             item_pend["datos"]["nom_prov"] = nombre_limpio
                             item_pend["datos"]["es_nuevo"]  = False
 
-                    # 3) Actualizar db_compras si el usuario lo pidio
                     if actualizar_otros and nit_act:
                         actualizar_nombre_en_db(nit_act, nombre_limpio)
 
-                    # 4) Calcular montos faltantes
                     gra_final = f_gra
                     iva_final = f_iva
                     iva_calc  = datos_act.get("iva_calc", False)
@@ -1034,7 +1041,6 @@ if st.session_state.cola_revision:
                         iva_final = round(gra_final * 0.13, 2)
                         iva_calc  = True
 
-                    # 5) Armar registro aprobado
                     datos_act.update({
                         "fecha"    : f_fecha.strip(),
                         "gen"      : f_gen.strip().upper(),
@@ -1048,7 +1054,6 @@ if st.session_state.cola_revision:
                         "archivo"  : item_actual["archivo"],
                     })
 
-                    # 6) Agregar a db_compras
                     nuevo_df = pd.DataFrame([datos_act])
                     if st.session_state.db_compras.empty:
                         st.session_state.db_compras = nuevo_df
@@ -1057,7 +1062,6 @@ if st.session_state.cola_revision:
                             [st.session_state.db_compras, nuevo_df], ignore_index=True
                         )
 
-                    # 7) Actualizar reporte de nuevos proveedores
                     if nit_act:
                         rep_actual = st.session_state.get("reporte_compras") or {}
                         np_dict    = rep_actual.get("nuevos_proveedores", {})
@@ -1068,7 +1072,6 @@ if st.session_state.cola_revision:
                     st.session_state.cola_revision.pop(0)
                     st.rerun()
 
-            # ── Descartar ─────────────────────────────────────
             if submit_del:
                 st.session_state.cola_revision.pop(0)
                 st.rerun()
@@ -1076,33 +1079,43 @@ if st.session_state.cola_revision:
     st.stop()
 
 # ─────────────────────────────────────────────
-# 10. REPORTE DE PROCESAMIENTO
+# 10. REPORTE DE PROCESAMIENTO — con listas
 # ─────────────────────────────────────────────
 if st.session_state.reporte_compras:
     rep = st.session_state.reporte_compras
     st.markdown("### 📋 Alertas de Procesamiento")
+
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        if rep.get("corruptos"):
-            st.error(f"💀 **{len(rep['corruptos'])} Dañados**")
-        else:
-            st.success("✅ 0 Dañados")
+        alerta_con_lista(
+            "error" if rep.get("corruptos") else "success",
+            "💀", "Dañados",
+            rep.get("corruptos", []),
+            "exp_corruptos"
+        )
     with c2:
-        if rep.get("invalidos"):
-            st.warning(f"⚠️ **{len(rep['invalidos'])} Ignorados**")
-        else:
-            st.success("✅ 0 Ignorados")
+        alerta_con_lista(
+            "warning" if rep.get("invalidos") else "success",
+            "⚠️", "Ignorados (tipo incorrecto)",
+            rep.get("invalidos", []),
+            "exp_invalidos"
+        )
     with c3:
-        if rep.get("duplicados"):
-            st.error(f"🛑 **{len(rep['duplicados'])} Duplicados**")
-        else:
-            st.success("✅ 0 Duplicados")
+        alerta_con_lista(
+            "error" if rep.get("duplicados") else "success",
+            "🛑", "Duplicados",
+            rep.get("duplicados", []),
+            "exp_duplicados"
+        )
     with c4:
-        if rep.get("iva_calc"):
-            st.info(f"🧮 **{len(rep['iva_calc'])} IVA Calculado**")
-        else:
-            st.success("✅ IVA directo")
+        alerta_con_lista(
+            "info" if rep.get("iva_calc") else "success",
+            "🧮", "IVA Calculado",
+            rep.get("iva_calc", []),
+            "exp_iva_calc"
+        )
 
+    # Nuevos proveedores guardados
     np_dict = rep.get("nuevos_proveedores", {})
     if np_dict:
         st.markdown(f"**🆕 Proveedores nuevos guardados:** `{len(np_dict)}`")
@@ -1146,6 +1159,7 @@ if not st.session_state.db_compras.empty:
     tab1, tab2 = st.tabs(["📊 Libro F-07 Compras", "🔍 Auditoría Completa"])
 
     with tab1:
+        # ── Construir df_f07 ──────────────────────────────────
         df_f07 = pd.DataFrame()
         df_f07["A. Fecha Emisión"]        = df_filtrado["fecha"]
         df_f07["B. Clase"]                = "4"
@@ -1176,11 +1190,44 @@ if not st.session_state.db_compras.empty:
             use_container_width=True
         )
 
-        st.markdown(
-            f"> **Total Gravadas:** `${df_f07['J. Compra Gravada'].sum():,.2f}` &nbsp;|&nbsp;"
-            f"**IVA:** `${df_f07['N. Crédito Fiscal (IVA)'].sum():,.2f}` &nbsp;|&nbsp;"
-            f"**Total General:** `${df_f07['O. Total Compras'].sum():,.2f}`"
-        )
+        # ══════════════════════════════════════════════════════
+        # TOTALES DINÁMICOS — solo columnas con valores > 0
+        # ══════════════════════════════════════════════════════
+
+        # Etiquetas cortas para mostrar en el resumen
+        ETIQUETAS_CORTAS = {
+            "G. Compra Ext/NS"       : "Exentas/NS",
+            "H. Internacion Ext/NS"  : "Intern. Ext",
+            "I. Importacion Ext/NS"  : "Import. Ext",
+            "J. Compra Gravada"      : "Gravadas",
+            "K. Inter. Grav Bienes"  : "Intern. Grav",
+            "L. Impor. Grav Bienes"  : "Import. Grav B",
+            "M. Impor. Grav Serv"    : "Import. Grav S",
+            "N. Crédito Fiscal (IVA)": "IVA",
+            "O. Total Compras"       : "Total General",
+        }
+
+        # Construir partes del resumen solo si la columna suma > 0
+        partes_resumen = []
+        for col_key, etiqueta in ETIQUETAS_CORTAS.items():
+            if col_key in df_f07.columns:
+                suma = df_f07[col_key].sum()
+                if suma > 0:
+                    # Total General siempre en negrita destacada
+                    if col_key == "O. Total Compras":
+                        partes_resumen.append(
+                            f"**🟢 {etiqueta}:** `${suma:,.2f}`"
+                        )
+                    else:
+                        partes_resumen.append(
+                            f"**{etiqueta}:** `${suma:,.2f}`"
+                        )
+
+        if partes_resumen:
+            resumen_str = " &nbsp;|&nbsp; ".join(partes_resumen)
+            st.markdown(f"> {resumen_str}")
+        else:
+            st.markdown("> *Sin montos registrados.*")
 
         st.markdown("---")
         if st.button("📥 Generar Excel para Hacienda", type="primary"):
