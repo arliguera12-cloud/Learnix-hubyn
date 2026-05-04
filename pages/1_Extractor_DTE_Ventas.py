@@ -283,8 +283,6 @@ def extraer_y_formatear_fecha(texto: str) -> str:
 
 # ══════════════════════════════════════════════════════════════
 # FIX: EXTRACCIÓN DE NOMBRE DEL RECEPTOR/CLIENTE — v2
-# Resuelve el bug donde emisor y receptor están en la misma línea
-# con etiqueta "Nombre o razón social: EMISOR Nombre o razón social: RECEPTOR"
 # ══════════════════════════════════════════════════════════════
 def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: list) -> str:
     texto_completo = safe_str(texto_completo)
@@ -311,6 +309,13 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             T = safe_str(s).strip().upper()
             if len(T) < 3 or len(T) > 100:
                 return False
+            
+            # --- NUEVA REGLA ESTRICTA ---
+            nombre_emisor_str = " ".join(partes_emisor).strip()
+            if nombre_emisor_str and (T == nombre_emisor_str or T.startswith(nombre_emisor_str[:15])):
+                return False
+            # -----------------------------
+
             if any(b in T for b in BASURA_ESTRICTA):
                 return False
             if es_linea_direccion(T):
@@ -335,10 +340,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             return False
 
     try:
-        # ── FIX PRINCIPAL: Detectar líneas con DOS "Nombre o razón social" ──────
-        # Ocurre cuando emisor y receptor están lado a lado en la misma línea.
-        # Patrón: "Nombre o razón social: X Nombre o razón social: Y"
-        # Queremos capturar Y (el segundo = receptor)
         patron_doble_nombre = re.compile(
             r"(?:Nombre\s+o\s+raz[oó]n\s+social|Raz[oó]n\s+[Ss]ocial)\s*:\s*"
             r"[^\n]{3,80}"
@@ -348,7 +349,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
         )
         for m_doble in patron_doble_nombre.finditer(texto_completo):
             candidato = limpiar(safe_str(m_doble.group(1)))
-            # Cortar si hay otra etiqueta pegada al final
             candidato = re.split(
                 r'\s+(?:NIT|NRC|Actividad|Dirección|Correo|Número|Nombre\s+[Cc]omercial)',
                 candidato
@@ -356,12 +356,10 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             if valido(candidato):
                 return candidato
 
-        # ── Estrategia A: etiqueta explícita en sección RECEPTOR ─────────────
         inicio  = max(0, pos_nit - 600)
         fin     = min(len(texto_completo), pos_nit + 1500)
         ventana = texto_completo[inicio:fin]
 
-        # Dividir ventana por "RECEPTOR" para tomar solo la parte del receptor
         partes_rec = re.split(r"(?i)\bRECEPTOR\b", ventana, maxsplit=1)
         ventana_receptor = partes_rec[1] if len(partes_rec) > 1 else ventana
 
@@ -375,9 +373,7 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
         )
         for m_etq in patron_etq.finditer(ventana_receptor):
             raw_cap = safe_str(m_etq.group(1))
-            # Ignorar si contiene segunda etiqueta (es otra entrada del emisor)
             if re.search(r"Nombre\s+o\s+raz[oó]n\s+social", raw_cap, re.I):
-                # Tomar solo lo que hay antes de la segunda etiqueta
                 raw_cap = re.split(r"(?i)Nombre\s+o\s+raz[oó]n\s+social", raw_cap)[0]
             lineas_cap = raw_cap.split('\n')
             candidato  = limpiar(lineas_cap[0])
@@ -386,7 +382,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             if valido(candidato):
                 return candidato
 
-        # ── Estrategia B: líneas DESPUÉS del NIT del receptor ────────────────
         ventana_despues = texto_completo[pos_nit:fin]
         lineas_despues  = [ln.strip() for ln in ventana_despues.split('\n') if ln.strip()]
         for linea in lineas_despues[:15]:
@@ -394,7 +389,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             if valido(candidato):
                 return candidato
 
-        # ── Estrategia C: líneas ANTES del NIT del receptor ──────────────────
         ventana_antes = texto_completo[inicio:pos_nit]
         lineas_antes  = [ln.strip() for ln in ventana_antes.split('\n') if ln.strip()]
         for linea in reversed(lineas_antes[-15:]):
@@ -402,7 +396,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             if valido(candidato):
                 return candidato
 
-        # ── Estrategia D: palabras comerciales en ventana ────────────────────
         for linea in ventana_receptor.split('\n'):
             L = safe_str(linea).strip().upper()
             if not any(w in L for w in PALABRAS_COMERCIALES):
@@ -412,7 +405,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
             if valido(candidato):
                 return candidato
 
-        # ── Estrategia E: sección RECEPTOR delimitada ────────────────────────
         m_sec = re.search(
             r"(?i)(?:DATOS\s+DEL\s+(?:RECEPTOR|ADQUIRIENTE|CLIENTE)|"
             r"RECEPTOR\s*[:\-]|ADQUIRIENTE\s*[:\-]|CLIENTE\s*:)"
@@ -442,15 +434,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, partes_emisor: li
 
 # ══════════════════════════════════════════════════════════════
 # FIX: EXTRACTOR PRINCIPAL DE VENTAS — v2
-# Bugs corregidos:
-#   1. Número de control capturaba texto adicional (TIPODETRANSMISI...)
-#      porque se buscaba en t_no_sp (sin espacios). Ahora se usa t_clean.
-#   2. Nombre receptor extraía el nombre del EMISOR cuando ambos aparecían
-#      en la misma línea. Resuelto con patron_doble_nombre.
-#   3. Total: ahora prioriza "Total a Pagar" y "Monto Total de la Operación"
-#      antes de entrar al loop O(n³).
-#   4. IVA: se agregó "Impuesto al Valor Agregado" como patrón prioritario
-#      cuando no hay "Débito Fiscal" explícito.
 # ══════════════════════════════════════════════════════════════
 def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
@@ -474,35 +457,24 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if len(texto_completo.strip()) < 50:
             return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
 
-        # t_clean: colapsa espacios/tabs pero mantiene saltos de línea
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
-        # t_no_sp: elimina TODO el espacio (solo para UUID y búsquedas de códigos sin espacios)
         t_no_sp = re.sub(r'\s+', '', t_clean).upper()
 
-        # ── FIX BUG 1: Número de Control DTE ─────────────────────────────────
-        # ANTES: re.search en t_no_sp → capturaba "DTE-03-M001P001-000000000000033TIPODETRANSMISI"
-        #        porque sin espacios, el texto siguiente se pegaba al número.
-        # AHORA: buscar en t_clean donde los espacios actúan como delimitadores naturales.
-        #        Regex acotada: el último segmento debe ser solo dígitos (12-18 chars).
         tipo   = "01"
         ctrl   = ""
         num_control = ""
 
-        # Intentar primero en t_clean (con espacios = delimitadores naturales)
         m_ctrl = re.search(
             r"\b(DTE-\d{2}-[A-Z0-9]{1,20}-\d{12,18})\b",
             t_clean, re.I
         )
         if not m_ctrl:
-            # Fallback: buscar en t_no_sp pero con regex más estricta (solo dígitos al final)
             m_ctrl = re.search(
                 r"(DTE-\d{2}-[A-Z0-9]{1,20}-\d{12,18})(?=[^0-9]|$)",
                 t_no_sp
             )
 
         if m_ctrl:
-            ctrl   = m_ctrl.group(1).upper().replace("O", "0")
-            # Preservar el formato original sin reemplazar O→0 en la parte alfanumérica
             ctrl   = m_ctrl.group(1).upper()
             m_tipo = re.search(r"DTE-(\d{2})", ctrl)
             if m_tipo:
@@ -516,13 +488,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if tipo not in tipos_validos:
             return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten 01, 03, 05 y 06."}
 
-        nit_emisor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
-        dui_emisor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('dui', '')))
-        excluir_nits = {nit_emisor, dui_emisor} - {""}
-
-        # ── UUID / Código de Generación ───────────────────────────────────────
         gen = ""
-        # Buscar etiqueta "Código de Generación:" en texto con espacios
         m_gen_etq = re.search(
             r"C[oó]digo\s+de\s+Generaci[oó]n\s*:\s*"
             r"([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})",
@@ -562,6 +528,12 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         fecha = extraer_y_formatear_fecha(t_clean)
 
+        # ── EXCLUSIONES ESTRICTAS DEL EMISOR (CLIENTE ACTIVO) ─────────────────
+        nit_emisor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
+        dui_emisor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('dui', '')))
+        nrc_emisor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nrc', '')))
+        excluir_numeros = {nit_emisor, dui_emisor, nrc_emisor} - {""}
+
         # ── NIT/DUI del RECEPTOR ──────────────────────────────────────────────
         nit_cli       = ""
         dui_cli       = ""
@@ -570,19 +542,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         pos_nit_rec   = -1
         clientes_db   = cargar_clientes_json()
 
-        patron_etq_nit = re.compile(
-            r"N\.?\s*I\.?\s*T\.?\s*[:\s]\s*"
-            r"((?:\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d)"
-            r"|(?:\d{14})"
-            r"|(?:\d{8}[\s\-]?\d))",
-            re.I
-        )
-        patron_etq_dui = re.compile(
-            r"D\.?\s*U\.?\s*I\.?\s*[:\s]\s*(\d{8}[\s\-]?\d)",
-            re.I
-        )
-
-        # Dividir texto en sección emisor / receptor
         partes_doc = re.split(
             r"(?i)\b(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR\s*[:\-]|"
             r"DATOS\s+DEL\s+ADQUIRIENTE|ADQUIRIENTE\s*[:\-]|"
@@ -591,6 +550,8 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         )
 
         texto_receptor = ""
+        offset_receptor = 0
+
         if len(partes_doc) >= 2:
             texto_receptor_raw = partes_doc[1]
             corte_det = re.search(
@@ -598,65 +559,40 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 r"ARTICULO|ITEM\b|DETALLE\b|\n\s*\n)",
                 texto_receptor_raw
             )
-            texto_receptor = (
-                texto_receptor_raw[:corte_det.start()]
-                if corte_det
-                else texto_receptor_raw[:1500]
-            )
+            texto_receptor = texto_receptor_raw[:corte_det.start()] if corte_det else texto_receptor_raw[:1500]
+            offset_receptor = texto_completo.find(texto_receptor[:50])
+            if offset_receptor == -1: offset_receptor = len(partes_doc[0])
         else:
-            # No hay separador claro — buscar en segunda mitad
-            # FIX: También buscar en texto_lineal directamente por la sección RECEPTOR
             m_rec_lineal = re.search(r"(?i)\bRECEPTOR\b", texto_lineal)
             if m_rec_lineal:
                 texto_receptor = texto_lineal[m_rec_lineal.start():][:1500]
+                offset_receptor = texto_completo.find(texto_receptor[:50])
             else:
-                texto_receptor = texto_completo[len(texto_completo)//2:][:1500]
+                offset_receptor = len(texto_completo) // 2
+                texto_receptor = texto_completo[offset_receptor:][:1500]
 
-        # NIT del receptor — estrategia 1: etiqueta en sección receptor
-        for m_nit in patron_etq_nit.finditer(texto_receptor):
-            nit_cand = re.sub(r'[^0-9]', '', safe_str(m_nit.group(1)))
-            if nit_cand not in excluir_nits and len(nit_cand) in (9, 14):
-                nit_cli     = nit_cand
-                offset = texto_completo.find(texto_receptor[:50])
-                pos_nit_rec = (offset if offset >= 0 else 0) + m_nit.start()
-                break
+        patron_universal = re.compile(
+            r"\b(?:\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d" 
+            r"|\d{14}"                                      
+            r"|\d{8}[\s\-]?\d"                              
+            r"|\d{9})\b"                                    
+        )
 
-        # NIT del receptor — estrategia 2: DUI con etiqueta
-        if not nit_cli:
-            for m_dui in patron_etq_dui.finditer(texto_receptor):
-                dui_cand = re.sub(r'[^0-9]', '', safe_str(m_dui.group(1)))
-                if dui_cand not in excluir_nits and len(dui_cand) == 9:
-                    nit_cli     = dui_cand
-                    dui_cli     = dui_cand
-                    offset      = texto_completo.find(texto_receptor[:50])
-                    pos_nit_rec = (offset if offset >= 0 else 0) + m_dui.start()
-                    break
+        candidatos_validos = []
+        for match in patron_universal.finditer(texto_completo):
+            num_limpio = re.sub(r'[^0-9]', '', match.group(0))
+            if num_limpio not in excluir_numeros and len(num_limpio) in (9, 14):
+                candidatos_validos.append((num_limpio, match.start()))
 
-        # NIT del receptor — estrategia 3: cualquier número en sección receptor
-        if not nit_cli:
-            patron_raw = re.compile(
-                r"\b\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d\b"
-                r"|\b\d{14}\b|\b\d{8}[\s\-]?\d\b|\b\d{9}\b"
-            )
-            for m_any in patron_raw.finditer(texto_receptor):
-                nit_cand = re.sub(r'[^0-9]', '', safe_str(m_any.group(0)))
-                if nit_cand not in excluir_nits and len(nit_cand) in (9, 14):
-                    nit_cli     = nit_cand
-                    offset      = texto_completo.find(texto_receptor[:50])
-                    pos_nit_rec = (offset if offset >= 0 else 0) + m_any.start()
-                    break
+        cands_en_receptor = [
+            c for c in candidatos_validos 
+            if offset_receptor <= c[1] <= (offset_receptor + len(texto_receptor) + 200)
+        ]
 
-        # NIT del receptor — estrategia 4: buscar en todo el texto
-        if not nit_cli:
-            todos_nits = []
-            for m_all in patron_etq_nit.finditer(texto_completo):
-                nc = re.sub(r'[^0-9]', '', safe_str(m_all.group(1)))
-                if nc not in excluir_nits and len(nc) in (9, 14):
-                    todos_nits.append((nc, m_all.start()))
-            if len(todos_nits) >= 2:
-                nit_cli, pos_nit_rec = todos_nits[1]
-            elif len(todos_nits) == 1:
-                nit_cli, pos_nit_rec = todos_nits[0]
+        if cands_en_receptor:
+            nit_cli, pos_nit_rec = cands_en_receptor[0]
+        elif candidatos_validos:
+            nit_cli, pos_nit_rec = candidatos_validos[0]
 
         if len(nit_cli) == 9:
             dui_cli = nit_cli
@@ -687,7 +623,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                     texto_visual, pos_vis, partes_emisor
                 )
 
-            # Intentar también directamente en texto_receptor
             if not nombre_encontrado and texto_receptor.strip():
                 lineas_rec = [ln.strip() for ln in texto_receptor.split('\n') if ln.strip()]
                 for linea in lineas_rec[:20]:
@@ -710,7 +645,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
             nom_cli = nombre_encontrado if nombre_encontrado else "SIN NOMBRE"
 
-        # ── FIX BUG 3 + 4: Montos — priorizar etiquetas explícitas ───────────
+        # ── Montos — priorizar etiquetas explícitas ───────────
         exentas     = 0.0
         no_sujetas  = 0.0
         gravadas    = 0.0
@@ -720,7 +655,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         total       = 0.0
         iva_calc    = False
 
-        # Ventas exentas
         m_exe = re.search(
             r"(?:Ventas?\s+Exentas?|Total\s+Exento|Exentas?)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -729,7 +663,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_exe:
             exentas = limpiar_monto(m_exe.group(1))
 
-        # Ventas no sujetas
         m_ns = re.search(
             r"(?:No\s+Sujetas?|Ventas?\s+No\s+Sujetas?)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -738,9 +671,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_ns:
             no_sujetas = limpiar_monto(m_ns.group(1))
 
-        # FIX BUG 3: Total — priorizar "Total a Pagar" > "Monto Total de la Operación"
-        # El código anterior tenía los patrones correctos pero no incluía
-        # "Monto Total de la Operación" que es la etiqueta del DTE electrónico
         for pat in [
             r"(?:TOTAL\s+A\s+PAGAR)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -759,9 +689,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if total > 0:
                     break
 
-        # FIX BUG 4: IVA / Débito Fiscal
-        # Agregar "Impuesto al Valor Agregado 13%" como patrón de alta prioridad
-        # (es la etiqueta que usan los DTE electrónicos)
         for pat in [
             r"(?:D[EÉ]BITO\s+FISCAL|Débito\s+Fiscal|Debito\s+Fiscal)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -776,8 +703,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if debito > 0:
                     break
 
-        # Ventas gravadas locales
-        # FIX: Agregar "Sub-Total" como proxy de ventas gravadas cuando no hay etiqueta explícita
         m_grav = re.search(
             r"(?:Ventas?\s+Gravadas?\s+Locales?|Subtotal\s+Gravado|"
             r"Ventas?\s+Gravadas?)[^\d]{0,30}"
@@ -787,11 +712,9 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_grav:
             gravadas = limpiar_monto(m_grav.group(1))
 
-        # Si tenemos total y débito pero no gravadas, calcular por diferencia
         if gravadas == 0.0 and total > 0 and debito > 0:
             gravadas = round(total - debito - exentas - no_sujetas, 2)
 
-        # Si aún falta, buscar Sub-Total como ventas gravadas
         if gravadas == 0.0:
             m_sub = re.search(
                 r"Sub[\s\-]?Total\s*:\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -800,7 +723,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             if m_sub:
                 gravadas = limpiar_monto(m_sub.group(1))
 
-        # ── Reconciliación O(n³) — solo si faltan datos ───────────────────────
+        # ── Reconciliación O(n³) ───────────────────────
         encontrado = total > 0 and debito > 0 and gravadas > 0
 
         if not encontrado:
@@ -1171,12 +1094,10 @@ if st.session_state.cola_revision_v:
 
     total_cola  = len(st.session_state.cola_revision_v)
 
-    # ── Navegación entre documentos en cola ──────────────────────────────────
     col_nav1, col_nav2, col_nav3 = st.columns([1, 3, 1])
     with col_nav2:
         st.info(f"📄 Documento **1 de {total_cola}** en revisión | Quedan **{total_cola}** por revisar")
 
-    # ── Descarte masivo ───────────────────────────────────────────────────────
     with st.expander("🗑️ Gestión masiva de cola"):
         col_m1, col_m2 = st.columns(2)
         with col_m1:
@@ -1202,7 +1123,6 @@ if st.session_state.cola_revision_v:
                 for page in pdf.pages:
                     texto_crudo += safe_extract_text(page, layout=True) + "\n"
 
-                # Mostrar datos extraídos automáticamente como referencia
                 with st.expander("🔍 Datos extraídos automáticamente"):
                     col_d1, col_d2 = st.columns(2)
                     with col_d1:
@@ -1233,7 +1153,6 @@ if st.session_state.cola_revision_v:
         if nit_actual:
             st.info(f"🆔 NIT receptor detectado: `{nit_actual}`")
 
-        # Indicar qué campos necesitan corrección
         campos_faltantes = []
         if not safe_str(datos_act.get("fecha","")).strip():      campos_faltantes.append("Fecha")
         if not safe_str(datos_act.get("num_control","")).strip(): campos_faltantes.append("Núm. Control")
@@ -1243,7 +1162,6 @@ if st.session_state.cola_revision_v:
             st.error(f"❌ Campos requeridos: **{', '.join(campos_faltantes)}**")
 
         with st.form(key=f"form_rev_v_{item_actual['archivo']}"):
-            # ── Identificación ────────────────────────────────────────────────
             st.markdown("**📋 Identificación del documento**")
             col_f1, col_f2 = st.columns(2)
             with col_f1:
@@ -1331,7 +1249,6 @@ if st.session_state.cola_revision_v:
                     format="%.2f", min_value=0.0
                 )
 
-            # Vista previa del cálculo
             if f_total > 0:
                 grav_preview = f_gravadas if f_gravadas > 0 else round((f_total - f_exentas - f_no_sujetas) / 1.13, 2)
                 deb_preview  = f_debito if f_debito > 0 else round(grav_preview * 0.13, 2)
@@ -1372,7 +1289,6 @@ if st.session_state.cola_revision_v:
                 if not f_nom.strip():    errores.append("Nombre del Cliente requerido.")
                 if f_total <= 0:         errores.append("Total debe ser mayor a 0.")
 
-                # Validar formato fecha
                 if f_fecha.strip() and not re.match(r'\d{2}/\d{2}/\d{4}', f_fecha.strip()):
                     errores.append("Formato de fecha inválido. Use DD/MM/YYYY.")
 
@@ -1387,7 +1303,6 @@ if st.session_state.cola_revision_v:
                     if nit_act:
                         guardar_cliente_rapido(nit_act, nombre_limpio)
 
-                    # Actualizar en cola pendiente
                     for item_pend in st.session_state.cola_revision_v[1:]:
                         if item_pend["datos"].get("nit_cli") == nit_act:
                             item_pend["datos"]["nom_cli"] = nombre_limpio
@@ -1396,7 +1311,6 @@ if st.session_state.cola_revision_v:
                     if actualizar_otros and nit_act:
                         actualizar_nombre_en_db_ventas(nit_act, nombre_limpio)
 
-                    # Calcular montos faltantes
                     grav_f = f_gravadas
                     deb_f  = f_debito
                     ic     = datos_act.get("iva_calc", False)
@@ -1447,7 +1361,6 @@ if st.session_state.cola_revision_v:
                     st.rerun()
 
             if submit_skip:
-                # Mover al final de la cola para revisar después
                 item = st.session_state.cola_revision_v.pop(0)
                 st.session_state.cola_revision_v.append(item)
                 st.rerun()
