@@ -248,11 +248,14 @@ def limpiar_monto(monto_str) -> float:
 
 
 def extraer_y_formatear_fecha(texto: str) -> str:
-    """Extrae y normaliza fecha a DD/MM/YYYY. Nunca lanza excepción."""
+    """Extrae y normaliza fecha a DD/MM/YYYY. Inmune a horas y formatos mixtos."""
     try:
         texto = safe_str(texto)
+        # Limpiar horas pegadas (ej. 14/04/2026-16:38 o 2026-04-20 11:15:43)
+        texto = re.sub(r'-\s*\d{1,2}:\d{2}(?::\d{2})?', '', texto)
+        texto = re.sub(r'\s+\d{1,2}:\d{2}(?::\d{2})?', '', texto)
 
-        # Formato ISO: YYYY-MM-DD o YYYY/MM/DD
+        # 1. Formato ISO: YYYY-MM-DD o YYYY/MM/DD
         m_f = re.search(
             r"\b(20[2-3]\d)\s*[-\/]\s*(0[1-9]|1[0-2])\s*[-\/]\s*([0-2]\d|3[01])\b",
             texto
@@ -260,7 +263,7 @@ def extraer_y_formatear_fecha(texto: str) -> str:
         if m_f:
             return f"{int(m_f.group(3)):02d}/{int(m_f.group(2)):02d}/{m_f.group(1)}"
 
-        # Con etiqueta FECHA DE EMISION / GENERACION
+        # 2. Con etiqueta FECHA DE EMISION / GENERACION (Universal)
         m_f = re.search(
             r"(?:FECHA\s*(?:DE\s*)?(?:EMISI[OÓ]N|GENERACI[OÓ]N|EMISION|GENERACION)?)"
             r"[^\d]{0,20}(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})",
@@ -273,7 +276,7 @@ def extraer_y_formatear_fecha(texto: str) -> str:
             if mo <= 12:
                 return f"{d:02d}/{mo:02d}/{y}"
 
-        # DD/MM/YYYY libre
+        # 3. DD-MM-YYYY o DD/MM/YYYY libre
         m_f = re.search(
             r"\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b",
             texto
@@ -292,18 +295,29 @@ def extraer_y_formatear_fecha(texto: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
-# EXTRACCIÓN DE NOMBRE DEL PROVEEDOR
+# EXTRACCIÓN DE NOMBRE DEL PROVEEDOR (Con Filtro Inverso)
 # ══════════════════════════════════════════════════════════════
 def extraer_nombre_proveedor(
     texto_completo: str,
     pos_nit: int,
-    partes_cli: list,
+    cliente_activo: dict,
 ) -> str:
     texto_completo = safe_str(texto_completo)
+    
+    # INVERSIÓN DE FILTRO: Obtenemos el nombre de nuestro cliente para ignorarlo radicalmente
+    nombre_receptor = safe_str(cliente_activo.get('nombre', '')).strip().upper()
 
     def limpiar(s: str) -> str:
         try:
             s = safe_str(s)
+            
+            # Borrar activamente a nuestro cliente de la linea (Evita fusiones)
+            if nombre_receptor and len(nombre_receptor) > 3:
+                s = re.compile(re.escape(nombre_receptor), re.I).sub("", s)
+            
+            # Si quedaron etiquetas pegadas (ej. NOMBRE O RAZON:), cortar por la derecha
+            s = re.split(r"(?i)(?:NOMBRE\s+O\s+RAZ[OÓ]N\s+SOCIAL|RAZ[OÓ]N\s+SOCIAL|CLIENTE)\s*[:\-]*\s*", s)[0]
+
             s = re.sub(
                 r"^[\s\-:]*(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
                 r"NOMBRE\s+COMERCIAL|EMISOR|DATOS\s+DEL\s+EMISOR|"
@@ -323,6 +337,9 @@ def extraer_nombre_proveedor(
             T = safe_str(s).strip().upper()
             if len(T) < 4 or len(T) > 90:
                 return False
+            # Bloqueo estricto
+            if nombre_receptor and (T == nombre_receptor or T.startswith(nombre_receptor[:15])):
+                return False
             if any(b in T for b in BASURA_ESTRICTA):
                 return False
             if es_linea_direccion(T):
@@ -331,8 +348,6 @@ def extraer_nombre_proveedor(
                 if b in T and len(b) > 5:
                     return False
             if T in NOMBRES_INVALIDOS:
-                return False
-            if any(p in T for p in partes_cli):
                 return False
             digitos = sum(c.isdigit() for c in T)
             if len(T) > 0 and digitos / len(T) > 0.40:
@@ -421,7 +436,7 @@ def extraer_nombre_proveedor(
 
 
 # ══════════════════════════════════════════════════════════════
-# EXTRACTOR PRINCIPAL — con manejo robusto de None
+# EXTRACTOR PRINCIPAL — COMPRAS (Robustecido)
 # ══════════════════════════════════════════════════════════════
 def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
@@ -437,11 +452,9 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             if not pdf.pages:
                 return {"error_fatal": "PDF sin paginas."}
             for page in pdf.pages:
-                # ── FIX CRÍTICO: safe_str en CADA extracción ──
                 texto_lineal += safe_extract_text(page, layout=False) + "\n"
                 texto_visual  += safe_extract_text(page, layout=True)  + "\n"
 
-        # Garantizar strings limpios sin None
         texto_lineal   = safe_str(texto_lineal)
         texto_visual   = safe_str(texto_visual)
         texto_completo = texto_lineal + "\n" + texto_visual
@@ -487,7 +500,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if len(raw) == 32:
                     gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
 
-        # UUID alternativo: buscar en texto con formato visual
         if not gen:
             m_uuid2 = re.search(
                 r"([0-9A-Fa-f]{8}[- ]?[0-9A-Fa-f]{4}[- ]?"
@@ -499,7 +511,12 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if len(raw2) == 32:
                     gen = f"{raw2[:8]}-{raw2[8:12]}-{raw2[12:16]}-{raw2[16:20]}-{raw2[20:]}".upper()
 
-        fecha = extraer_y_formatear_fecha(t_clean)
+        # ── Zona segura para Fechas (Header Cropping) ─────────
+        # Cortamos ANTES de la tabla de detalles para no atrapar fechas de vencimiento de productos
+        corte_detalles = re.search(r"(?i)\b(CANTIDAD|CANT\.|DESCRIPCI[OÓ]N|DOCUMENTOS RELACIONADOS|CÓDIGO)\b", texto_completo)
+        texto_encabezado = texto_completo[:corte_detalles.start()] if corte_detalles else texto_completo[:1500]
+        
+        fecha = extraer_y_formatear_fecha(texto_encabezado)
 
         # ── Datos del proveedor ───────────────────────────────
         nit_prov       = ""
@@ -517,7 +534,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             re.I
         )
 
-        # NIT Estrategia 1: etiqueta NIT explicita
         for m_etq_nit in patron_etq_nit.finditer(texto_completo):
             nit_cand = re.sub(r'[^0-9]', '', safe_str(m_etq_nit.group(1)))
             if nit_cand not in excluir_nits and len(nit_cand) in (9, 14):
@@ -525,7 +541,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 pos_nit_emisor = m_etq_nit.start()
                 break
 
-        # NIT Estrategia 2: seccion emisor antes del receptor
         if not nit_prov:
             partes_doc = re.split(
                 r"(?i)\b(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR\s*[:\-]|"
@@ -544,7 +559,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                     pos_nit_emisor = m_raw_nit.start()
                     break
 
-        # NIT Estrategia 3: URL/QR params
         if not nit_prov:
             m_url_nit = re.search(r"NIT[=\s]?(\d{14})", t_no_sp)
             if m_url_nit:
@@ -552,7 +566,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if nit_cand not in excluir_nits:
                     nit_prov = nit_cand
 
-        # NIT Estrategia 4: cualquier numero con formato NIT/DUI
         if not nit_prov:
             patron_todos = re.compile(
                 r"\b\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d\b"
@@ -568,24 +581,20 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if len(nit_prov) == 9:
             dui_prov = nit_prov
 
-        # ── BD de proveedores ─────────────────────────────────
+        # ── BD de proveedores (Filtro Directo) ────────────────
         if nit_prov and nit_prov in proveedores_db:
             nom_prov = safe_str(proveedores_db[nit_prov].get("nombre", ""))
             es_nuevo = False
 
         # ── Nombre del proveedor ──────────────────────────────
         if es_nuevo and nit_prov:
-            partes_cli = [
-                p for p in safe_str(cliente_activo.get('nombre', '')).upper().split()[:4]
-                if len(p) > 3
-            ]
             pos_busqueda = pos_nit_emisor if pos_nit_emisor >= 0 else len(texto_completo) // 4
 
+            # Le pasamos el cliente_activo para aislar y borrar su nombre
             nombre_encontrado = extraer_nombre_proveedor(
-                texto_completo, pos_busqueda, partes_cli
+                texto_completo, pos_busqueda, cliente_activo
             )
 
-            # Retry con texto visual si fallo
             if not nombre_encontrado and texto_visual.strip():
                 pos_vis = -1
                 for m_vis_nit in patron_etq_nit.finditer(texto_visual):
@@ -598,7 +607,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                     pos_vis = m_crudo.start() if m_crudo else len(texto_visual) // 4
 
                 nombre_encontrado = extraer_nombre_proveedor(
-                    texto_visual, pos_vis, partes_cli
+                    texto_visual, pos_vis, cliente_activo
                 )
 
             nom_prov = nombre_encontrado if nombre_encontrado else "ESCRIBE EL NOMBRE AQUI"
@@ -607,21 +616,12 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
 
-        # Exentos: FOVIAL
-        m_fovial = re.search(r"FOVIAL.{0,60}", t_clean, re.I)
-        if m_fovial:
-            nums_fov = re.findall(r"\d+\.\d{2}", safe_str(m_fovial.group(0)))
-            if nums_fov:
-                e += max(float(n) for n in nums_fov)
+        # FIX GASOLINERAS: Exentos -> FOVIAL y COTRANS
+        for impuesto in ["FOVIAL", "COTRANS"]:
+            m_imp = re.search(fr"{impuesto}[^\d]{{0,30}}(\d{{1,3}}(?:[.,]\d{{3}})*[.,]\d{{1,2}})", t_clean, re.I)
+            if m_imp:
+                e += limpiar_monto(safe_str(m_imp.group(1)))
 
-        # Exentos: COTRANS
-        m_cotrans = re.search(r"COTRANS.{0,60}", t_clean, re.I)
-        if m_cotrans:
-            nums_cot = re.findall(r"\d+\.\d{2}", safe_str(m_cotrans.group(0)))
-            if nums_cot:
-                e += max(float(n) for n in nums_cot)
-
-        # Exentos: etiqueta explicita
         m_exe = re.search(
             r"(?:Ventas?\s+Exentas?|Total\s+Exento|Exentas?)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -629,11 +629,11 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         )
         if m_exe:
             val_exe = limpiar_monto(safe_str(m_exe.group(1)))
+            # Priorizamos el valor explicito Exento si es mayor que la suma manual de fovial
             if val_exe > e:
                 e = val_exe
         e = round(e, 2)
 
-        # Retención
         m_ret = re.search(
             r"(?:Retenido|Retenci[oó]n\s+IVA|IVA\s+Retenido)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -642,7 +642,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_ret:
             ret = limpiar_monto(safe_str(m_ret.group(1)))
 
-        # Total a pagar — múltiples patrones
         patrones_total = [
             r"(?:TOTAL\s+A\s+PAGAR|TOTAL\s+PAGAR)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -662,7 +661,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if t > 0:
                     break
 
-        # IVA — múltiples patrones
         patrones_iva = [
             r"(?:Impuesto\s+al\s+Valor\s+Agregado|IVA\s*13\s*%|13\s*%\s*IVA)"
             r"[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -678,7 +676,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if i > 0:
                     break
 
-        # ── Reconciliación O(n³) ──────────────────────────────
+        # ── Reconciliación ──────────────────────────────
         encontrado = False
         if not (t > 0 and i > 0):
             montos_raw = re.findall(
@@ -742,7 +740,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
         return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
     except Exception as err:
-        # PDF legible pero fallo logico — va a revisión, NO a dañados
         return {"error_extraccion": safe_str(err)}
 
 
@@ -901,7 +898,6 @@ with st.sidebar:
 
                 file_bytes = f.read()
 
-                # Archivo físicamente vacío o corrupto
                 if len(file_bytes) < 512:
                     corruptos.append(f.name)
                     st.session_state.archivos_comp.append(f.name)
@@ -919,21 +915,16 @@ with st.sidebar:
                 )
                 dup_lote = cod_gen and any(d.get('gen') == cod_gen for d in extracted)
 
-                # ── Clasificación ─────────────────────────────
                 if "error_tipo" in res:
-                    # DTE tipo no admitido (01, 14, etc.)
                     invalidos.append(f.name)
 
                 elif dup_memoria or dup_lote:
-                    # UUID duplicado
                     duplicados.append(f.name)
 
                 elif "error_fatal" in res:
-                    # PDF genuinamente roto, vacío o sin texto
                     corruptos.append(f.name)
 
                 elif "error_extraccion" in res:
-                    # PDF legible, extracción falló → revisión manual
                     st.session_state.cola_revision.append({
                         "archivo": f.name,
                         "bytes"  : file_bytes,
@@ -941,13 +932,12 @@ with st.sidebar:
                     })
 
                 else:
-                    # Extracción exitosa — verificar completitud
                     nom_res = safe_str(res.get('nom_prov', '')).strip()
                     va_a_revision = (
                         res.get('tot', 0.0) == 0.0
                         or not res.get('gen')
                         or not safe_str(res.get('fecha', '')).strip()
-                        or nom_res in ("ESCRIBE EL NOMBRE AQUI", "")
+                        or nom_res in ("ESCRIBE EL NOMBRE AQUI", "ESCRIBE EL NOMBRE AQUÍ", "")
                     )
                     if va_a_revision:
                         st.session_state.cola_revision.append({
@@ -1041,7 +1031,6 @@ if st.session_state.cola_revision:
     with col_form:
         st.markdown("### ✍️ Corrección Rápida")
 
-        # Mostrar causa del fallo si existe
         error_causa = safe_str(datos_act.get("_error", ""))
         if error_causa:
             st.warning(f"⚠️ **Causa del fallo:** `{error_causa}`")
@@ -1113,7 +1102,6 @@ if st.session_state.cola_revision:
                     "🗑️ Descartar Archivo", use_container_width=True
                 )
 
-            # ── Aprobar ──────────────────────────────────────
             if submit_ok:
                 errores = []
                 if not f_fecha.strip(): errores.append("Fecha requerida.")
