@@ -92,6 +92,10 @@ ESTILO = """
     border-radius: 8px; padding: 14px 20px; margin: 12px 0;
     font-size: 14px; line-height: 2;
   }
+  .badge-03 { background:#1a3a1a; color:#6ddb6d; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold; }
+  .badge-01 { background:#1a2a3a; color:#6db0db; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold; }
+  .badge-05 { background:#3a2a1a; color:#dba06d; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold; }
+  .badge-06 { background:#3a1a1a; color:#db6d6d; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold; }
 </style>
 """
 st.markdown(ESTILO, unsafe_allow_html=True)
@@ -112,6 +116,13 @@ cliente = st.session_state.cliente_activo
 # 4. CONSTANTES
 # ─────────────────────────────────────────────
 MAX_VALORES_LOOP = 30
+
+# Tipos válidos y su clasificación según F-07
+# Anexo 1 (Ventas a Contribuyentes): 03, 05, 06
+# Anexo 2 (Ventas a Consumidor Final): 01, 02, 10, 11
+TIPOS_CONTRIBUYENTES = {"03", "05", "06"}
+TIPOS_CONSUMIDOR     = {"01", "02", "10", "11"}
+TODOS_TIPOS_VALIDOS  = TIPOS_CONTRIBUYENTES | TIPOS_CONSUMIDOR
 
 PALABRAS_BASURA_NOMBRE = [
     "DOCUMENTO", "TRIBUTARIO", "ELECTRONICO", "ELECTRÓNICO",
@@ -135,15 +146,8 @@ PREFIJOS_DIRECCION = (
     "BOULEVARD", "BLVD", "POLIGONO", "POLÍGONO", "LOCAL ",
     "NIVEL ", "PISO ", "EDIFICIO", "CENTRO COMERCIAL",
     "COMPLEJO", "PARQUE INDUSTRIAL", "FINAL ", "ENTRE ", "#",
+    "BLVD ", "BLVD.",
 )
-PALABRAS_COMERCIALES = [
-    "S.A.", "S.A.S.", "SA DE", "C.V.", "LTDA.", "LTDA",
-    "SOCIEDAD", "DISTRIBUIDORA", "FARMACIA", "GRUPO",
-    "LABORATORIOS", "INDUSTRIAS", "SERVICIOS", "COMERCIAL",
-    "IMPORTADORA", "EXPORTADORA", "CONSTRUCTORA", "CONSULTORES",
-    "CONSULTORA", "INVERSIONES", "ALIMENTOS", "TECNOLOGIA",
-    "CLINICA", "HOSPITAL", "SUPERMERCADO", "FERRETERIA",
-]
 NOMBRES_INVALIDOS = {
     "MATRIZ", "LOCAL", "SUCURSAL", "AGENCIA", "OFICINA",
     "ESTABLECIMIENTO", "PUNTO DE VENTA", "TIENDA", "ALMACEN",
@@ -165,7 +169,6 @@ CORTE_NOMBRE = re.compile(
 def safe_str(val) -> str:
     return "" if val is None else str(val)
 
-
 def safe_extract_text(page, layout: bool = False) -> str:
     try:
         return safe_str(page.extract_text(layout=layout))
@@ -174,7 +177,6 @@ def safe_extract_text(page, layout: bool = False) -> str:
             return safe_str(page.extract_text())
         except Exception:
             return ""
-
 
 def es_linea_direccion(texto: str) -> bool:
     L = safe_str(texto).upper().strip()
@@ -185,7 +187,6 @@ def es_linea_direccion(texto: str) -> bool:
 # 6. FUNCIONES AUXILIARES
 # ─────────────────────────────────────────────
 def cargar_clientes_json() -> dict:
-    """Carga directorio de clientes/receptores conocidos."""
     for ruta in ("data/clientes.json", "data/proveedores.json"):
         if os.path.exists(ruta):
             try:
@@ -199,7 +200,6 @@ def cargar_clientes_json() -> dict:
                 pass
     return {}
 
-
 def guardar_cliente_rapido(nit: str, nombre: str) -> None:
     if not nit or not safe_str(nombre).strip():
         return
@@ -212,7 +212,6 @@ def guardar_cliente_rapido(nit: str, nombre: str) -> None:
     with open(ruta, "w", encoding="utf-8") as f:
         json.dump(db, f, indent=4, ensure_ascii=False)
 
-
 def actualizar_nombre_en_db_ventas(nit: str, nombre: str) -> None:
     if not nit or not safe_str(nombre).strip():
         return
@@ -222,7 +221,6 @@ def actualizar_nombre_en_db_ventas(nit: str, nombre: str) -> None:
     mask = df["nit_cli"] == nit
     if mask.any():
         st.session_state.db_ventas.loc[mask, "nom_cli"] = safe_str(nombre).strip().upper()
-
 
 def limpiar_monto(monto_str) -> float:
     try:
@@ -240,16 +238,18 @@ def limpiar_monto(monto_str) -> float:
     except Exception:
         return 0.0
 
-
 def extraer_y_formatear_fecha(texto: str) -> str:
+    """Extrae fecha del texto y retorna en formato DD/MM/YYYY."""
     try:
         texto = safe_str(texto)
+        # Formato ISO: 2026-04-01
         m = re.search(
             r"\b(20[2-3]\d)\s*[-\/]\s*(0[1-9]|1[0-2])\s*[-\/]\s*([0-2]\d|3[01])\b",
             texto
         )
         if m:
             return f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/{m.group(1)}"
+        # Formato con etiqueta
         m = re.search(
             r"(?:FECHA\s*(?:DE\s*)?(?:EMISI[OÓ]N|GENERACI[OÓ]N)?)"
             r"[^\d]{0,20}(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})",
@@ -261,6 +261,7 @@ def extraer_y_formatear_fecha(texto: str) -> str:
                 d, mo = mo, d
             if mo <= 12:
                 return f"{d:02d}/{mo:02d}/{y}"
+        # Formato DD/MM/YYYY genérico
         m = re.search(
             r"\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b",
             texto
@@ -279,24 +280,18 @@ def extraer_y_formatear_fecha(texto: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
-# FIX: EXTRACCIÓN DE NOMBRE DEL RECEPTOR/CLIENTE
-# Se borra activamente el nombre del emisor para evitar fusiones
+# EXTRACCIÓN DE NOMBRE DEL RECEPTOR/CLIENTE
 # ══════════════════════════════════════════════════════════════
 def extraer_nombre_receptor(texto_completo: str, pos_nit: int, cliente_activo: dict) -> str:
     texto_completo = safe_str(texto_completo)
     nombre_emisor = safe_str(cliente_activo.get('nombre', '')).strip().upper()
-    partes_emisor = [p for p in nombre_emisor.split()[:4] if len(p) > 3]
 
     def limpiar(s: str) -> str:
         try:
             s = safe_str(s)
-            # 1. Neutralizar la fusión borrando el nombre exacto del emisor si se coló
             if nombre_emisor and len(nombre_emisor) > 3:
                 s = re.compile(re.escape(nombre_emisor), re.I).sub("", s)
-            
-            # 2. Si se pegaron las etiquetas (ej. NOMBRE O RAZON SOCIAL: DANIEL SORTO), tomar la última parte
             s = re.split(r"(?i)(?:NOMBRE\s+O\s+RAZ[OÓ]N\s+SOCIAL|RAZ[OÓ]N\s+SOCIAL|CLIENTE)\s*[:\-]*\s*", s)[-1]
-            
             s = re.sub(
                 r"^[\s\-:]*(?:NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
                 r"NOMBRE\s+COMERCIAL|RECEPTOR|ADQUIRIENTE|DATOS\s+DEL\s+RECEPTOR|"
@@ -304,7 +299,6 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, cliente_activo: d
                 r"CONTRIBUYENTE\s+RECEPTOR)[\s:]*",
                 s, flags=re.I
             ).strip()
-            
             s = CORTE_NOMBRE.sub("", s).strip()
             s = re.sub(r"^[-_.,;:\s]+|[-_.,;:\s]+$", "", s)
             s = re.sub(r'\s{2,}', ' ', s)
@@ -350,8 +344,8 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, cliente_activo: d
         patron_etq = re.compile(
             r"(?:Nombre(?:\s+[Oo]\s+[Rr]az[oó]n\s+[Ss]ocial)?|"
             r"[Rr]az[oó]n\s+[Ss]ocial|Nombre\s+[Cc]omercial|"
-            r"Nombre\s+del\s+[Cc]liente|Nombre\s+del\s+[Rr]eceptor|"
-            r"Nombre\s+del\s+[Aa]dquiriente|[Aa]dquiriente|[Rr]eceptor)"
+            r"Nombre\s+[Dd]el\s+[Cc]liente|Nombre\s+[Dd]el\s+[Rr]eceptor|"
+            r"Nombre\s+[Dd]el\s+[Aa]dquiriente|[Aa]dquiriente|[Rr]eceptor)"
             r"\s*[:\s]+\s*([^\n]{3,90}(?:\n[^\n]{3,60})?)",
             re.I
         )
@@ -398,11 +392,22 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, cliente_activo: d
 
 
 # ══════════════════════════════════════════════════════════════
-# FIX: EXTRACTOR PRINCIPAL DE VENTAS — v3
-# Agregada extracción del Sello de Recepción (Serie)
+# EXTRACTOR PRINCIPAL DE VENTAS
+# Maneja DTE-01 (Factura), DTE-03 (CCF), DTE-05 (NC), DTE-06 (ND)
 # ══════════════════════════════════════════════════════════════
 def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
-
+    """
+    Extrae datos de un DTE PDF de ventas.
+    
+    Retorna dict con:
+      - tipo: '01', '03', '05', '06'
+      - anexo: '1' (contribuyentes: 03,05,06) o '2' (consumidor: 01,02,10,11)
+      - Para tipo 03/05/06: nit_cli, dui_cli, nom_cli (datos del receptor)
+      - Para tipo 01: dui_cli (DUI del consumidor, NIT vacío según manual)
+      - sello: sello de recepción (40 chars)
+      - gen: UUID/código de generación
+      - num_control: número de control DTE sin guiones
+    """
     if not file_bytes or len(file_bytes) < 512:
         return {"error_fatal": "Archivo vacio o demasiado pequeño."}
 
@@ -426,41 +431,57 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
         t_no_sp = re.sub(r'\s+', '', t_clean).upper()
 
-        tipo   = "01"
-        ctrl   = ""
+        # ── Número de Control DTE ─────────────────────────────────────────────
+        tipo        = ""
+        ctrl        = ""
         num_control = ""
 
         m_ctrl = re.search(
-            r"\b(DTE-\d{2}-[A-Z0-9]{1,20}-\d{12,18})\b",
+            r"\b(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})\b",
             t_clean, re.I
         )
         if not m_ctrl:
             m_ctrl = re.search(
-                r"(DTE-\d{2}-[A-Z0-9]{1,20}-\d{12,18})(?=[^0-9]|$)",
+                r"(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})(?=[^0-9]|$)",
                 t_no_sp
             )
 
         if m_ctrl:
-            ctrl   = m_ctrl.group(1).upper()
-            m_tipo = re.search(r"DTE-(\d{2})", ctrl)
-            if m_tipo:
-                tipo = m_tipo.group(1)
-            num_control = ctrl
+            ctrl        = m_ctrl.group(1).upper()
+            tipo        = m_ctrl.group(2) if m_ctrl.lastindex >= 2 else ""
+            # Si el match fue en t_no_sp, grupo 2 no existe, extraer del ctrl
+            if not tipo:
+                m_tipo_aux = re.search(r"DTE-(\d{2})", ctrl)
+                tipo = m_tipo_aux.group(1) if m_tipo_aux else ""
+            # Número de control sin guiones (para columna D del anexo)
+            num_control = ctrl.replace("-", "")
 
         if not ctrl:
             return {"error_tipo": "No se detecto un Numero de Control DTE valido."}
 
-        tipos_validos = ("01", "03", "05", "06")
-        if tipo not in tipos_validos:
-            return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten 01, 03, 05 y 06."}
+        # ── Validar tipo de documento ──────────────────────────────────────────
+        if tipo not in TODOS_TIPOS_VALIDOS:
+            return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten: {', '.join(sorted(TODOS_TIPOS_VALIDOS))}."}
 
-        # ── Sello de Recepción (40 caracteres alfanuméricos) ────────────────
+        # Determinar a qué anexo pertenece
+        if tipo in TIPOS_CONTRIBUYENTES:
+            anexo = "1"  # Ventas a Contribuyentes
+        else:
+            anexo = "2"  # Ventas a Consumidor Final
+
+        # ── Sello de Recepción (40 chars alfanuméricos, empieza con año) ───────
         sello = ""
+        # Patrón específico: 4 dígitos de año + 36 chars alfanuméricos = 40 total
         m_sello = re.search(r"\b(20[2-3]\d[A-Z0-9]{36})\b", t_no_sp)
         if m_sello:
             sello = m_sello.group(1)
+        # Fallback: buscar cadena de exactamente 40 chars alfanuméricos
+        if not sello:
+            m_sello2 = re.search(r"\b([A-Z0-9]{40})\b", t_no_sp)
+            if m_sello2:
+                sello = m_sello2.group(1)
 
-        # ── Código de Generación / UUID ──────────────────────────────────────
+        # ── Código de Generación / UUID ────────────────────────────────────────
         gen = ""
         m_gen_etq = re.search(
             r"C[oó]digo\s+de\s+Generaci[oó]n\s*:\s*"
@@ -485,22 +506,27 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if len(raw) == 32:
                     gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}".upper()
 
+        # Gen sin guiones para columna F del anexo
+        gen_sin_guiones = gen.replace("-", "")
+
+        # ── Fecha ──────────────────────────────────────────────────────────────
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        # ── EXCLUSIONES ESTRICTAS DEL EMISOR (CLIENTE ACTIVO) ─────────────────
+        # ── Exclusiones del emisor ─────────────────────────────────────────────
         nit_emisor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
         dui_emisor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('dui', '')))
         nrc_emisor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nrc', '')))
         excluir_numeros = {nit_emisor, dui_emisor, nrc_emisor} - {""}
 
-        # ── NIT/DUI del RECEPTOR ──────────────────────────────────────────────
-        nit_cli       = ""
-        dui_cli       = ""
-        nom_cli       = "SIN NOMBRE"
-        es_nuevo      = True
-        pos_nit_rec   = -1
-        clientes_db   = cargar_clientes_json()
+        # ── Datos del Receptor ─────────────────────────────────────────────────
+        nit_cli     = ""
+        dui_cli     = ""
+        nom_cli     = "SIN NOMBRE"
+        es_nuevo    = True
+        pos_nit_rec = -1
+        clientes_db = cargar_clientes_json()
 
+        # Separar sección del receptor del texto
         partes_doc = re.split(
             r"(?i)\b(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR\s*[:\-]|"
             r"DATOS\s+DEL\s+ADQUIRIENTE|ADQUIRIENTE\s*[:\-]|"
@@ -508,7 +534,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             texto_completo, maxsplit=1
         )
 
-        texto_receptor = ""
+        texto_receptor  = ""
         offset_receptor = 0
 
         if len(partes_doc) >= 2:
@@ -520,7 +546,8 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             )
             texto_receptor = texto_receptor_raw[:corte_det.start()] if corte_det else texto_receptor_raw[:1500]
             offset_receptor = texto_completo.find(texto_receptor[:50])
-            if offset_receptor == -1: offset_receptor = len(partes_doc[0])
+            if offset_receptor == -1:
+                offset_receptor = len(partes_doc[0])
         else:
             m_rec_lineal = re.search(r"(?i)\bRECEPTOR\b", texto_lineal)
             if m_rec_lineal:
@@ -530,11 +557,12 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 offset_receptor = len(texto_completo) // 2
                 texto_receptor = texto_completo[offset_receptor:][:1500]
 
+        # ── Buscar NIT (14 dígitos) o DUI (9 dígitos) del receptor ────────────
         patron_universal = re.compile(
-            r"\b(?:\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d" 
-            r"|\d{14}"                                      
-            r"|\d{8}[\s\-]?\d"                              
-            r"|\d{9})\b"                                    
+            r"\b(?:\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d"  # NIT con separadores
+            r"|\d{14}"                                          # NIT sin separadores
+            r"|\d{8}[\s\-]?\d"                                 # DUI con separador
+            r"|\d{9})\b"                                       # DUI sin separadores
         )
 
         candidatos_validos = []
@@ -544,7 +572,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 candidatos_validos.append((num_limpio, match.start()))
 
         cands_en_receptor = [
-            c for c in candidatos_validos 
+            c for c in candidatos_validos
             if offset_receptor <= c[1] <= (offset_receptor + len(texto_receptor) + 200)
         ]
 
@@ -553,40 +581,53 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         elif candidatos_validos:
             nit_cli, pos_nit_rec = candidatos_validos[0]
 
+        # ── Para DTE-01 (consumidor final): si es DUI (9 dígitos) ─────────────
+        # Según manual F-07 V14: si completa DUI, campo NIT debe quedar VACÍO
         if len(nit_cli) == 9:
             dui_cli = nit_cli
+            if tipo in TIPOS_CONSUMIDOR:
+                # Para consumidor final: NIT vacío, solo DUI
+                nit_cli = ""
+            # Para contribuyentes con DUI: también guardar en dui_cli
+        elif len(nit_cli) == 14:
+            dui_cli = ""  # Es NIT, no DUI
 
-        if nit_cli and nit_cli in clientes_db:
+        # ── Buscar nombre del receptor ─────────────────────────────────────────
+        id_busqueda = dui_cli if (tipo in TIPOS_CONSUMIDOR and dui_cli) else nit_cli
+        if id_busqueda and id_busqueda in clientes_db:
+            nom_cli  = safe_str(clientes_db[id_busqueda].get("nombre", "SIN NOMBRE"))
+            es_nuevo = False
+        elif nit_cli and nit_cli in clientes_db:
             nom_cli  = safe_str(clientes_db[nit_cli].get("nombre", "SIN NOMBRE"))
             es_nuevo = False
 
-        if es_nuevo and nit_cli:
+        if es_nuevo:
             pos_busqueda = pos_nit_rec if pos_nit_rec >= 0 else len(texto_completo) // 2
-
-            # Le pasamos el cliente_activo para que borre el nombre del emisor
             nombre_encontrado = extraer_nombre_receptor(
                 texto_completo, pos_busqueda, cliente_activo
             )
-
             if not nombre_encontrado and texto_visual.strip():
                 pos_vis = pos_nit_rec
                 if pos_vis < 0:
-                    m_crudo = re.search(re.escape(nit_cli[:8]), texto_visual)
+                    m_crudo = re.search(
+                        re.escape((dui_cli or nit_cli)[:8]) if (dui_cli or nit_cli) else "RECEPTOR",
+                        texto_visual
+                    )
                     pos_vis = m_crudo.start() if m_crudo else len(texto_visual) // 2
                 nombre_encontrado = extraer_nombre_receptor(
                     texto_visual, pos_vis, cliente_activo
                 )
-
             nom_cli = nombre_encontrado if nombre_encontrado else "SIN NOMBRE"
 
-        exentas     = 0.0
-        no_sujetas  = 0.0
-        gravadas    = 0.0
-        debito      = 0.0
-        terceros    = 0.0
-        deb_terc    = 0.0
-        total       = 0.0
-        iva_calc    = False
+        # ── Montos ────────────────────────────────────────────────────────────
+        exentas    = 0.0
+        no_sujetas = 0.0
+        gravadas   = 0.0
+        debito     = 0.0
+        terceros   = 0.0
+        deb_terc   = 0.0
+        total      = 0.0
+        iva_calc   = False
 
         m_exe = re.search(
             r"(?:Ventas?\s+Exentas?|Total\s+Exento|Exentas?)[^\d]{0,30}"
@@ -604,17 +645,13 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_ns:
             no_sujetas = limpiar_monto(m_ns.group(1))
 
+        # Total a pagar (varios patrones por orden de prioridad)
         for pat in [
-            r"(?:TOTAL\s+A\s+PAGAR)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:MONTO\s+TOTAL\s+DE\s+LA\s+OPERACI[OÓ]N)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:TOTAL\s+A\s+PAGAR|TOTAL\s+PAGAR|MONTO\s+TOTAL)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:TOTAL\s+OPERACI[OÓ]N|VENTA\s+TOTAL|TOTAL\s*\$)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:VALOR\s+TOTAL|TOTAL\s+FACTURA)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:TOTAL\s+A\s+PAGAR)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:MONTO\s+TOTAL\s+DE\s+LA\s+OPERACI[OÓ]N)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:TOTAL\s+A\s+PAGAR|TOTAL\s+PAGAR|MONTO\s+TOTAL)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:TOTAL\s+OPERACI[OÓ]N|VENTA\s+TOTAL|TOTAL\s*\$)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:VALOR\s+TOTAL|TOTAL\s+FACTURA)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
         ]:
             m_tot = re.search(pat, t_clean, re.I)
             if m_tot:
@@ -622,13 +659,11 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if total > 0:
                     break
 
+        # Débito fiscal / IVA
         for pat in [
-            r"(?:D[EÉ]BITO\s+FISCAL|Débito\s+Fiscal|Debito\s+Fiscal)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:Impuesto\s+al\s+Valor\s+Agregado\s*(?:13\s*%)?)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:IVA\s*13\s*%|13\s*%\s*IVA|I\.V\.A\.?)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:D[EÉ]BITO\s+FISCAL|Débito\s+Fiscal|Debito\s+Fiscal)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:Impuesto\s+al\s+Valor\s+Agregado\s*(?:13\s*%)?)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:IVA\s*13\s*%|13\s*%\s*IVA|I\.V\.A\.?)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
         ]:
             m_iva = re.search(pat, t_clean, re.I)
             if m_iva:
@@ -636,91 +671,105 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if debito > 0:
                     break
 
+        # Ventas gravadas
         m_grav = re.search(
-            r"(?:Ventas?\s+Gravadas?\s+Locales?|Subtotal\s+Gravado|"
-            r"Ventas?\s+Gravadas?)[^\d]{0,30}"
+            r"(?:Ventas?\s+Gravadas?\s+Locales?|Subtotal\s+Gravado|Ventas?\s+Gravadas?)[^\d]{0,30}"
             r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
             t_clean, re.I
         )
         if m_grav:
             gravadas = limpiar_monto(m_grav.group(1))
 
-        if gravadas == 0.0 and total > 0 and debito > 0:
-            gravadas = round(total - debito - exentas - no_sujetas, 2)
+        # Para DTE-01 (factura consumidor): gravadas incluyen IVA (campo N del anexo)
+        # El total incluye IVA, las gravadas se reportan CON IVA incluido
+        if tipo in TIPOS_CONSUMIDOR and gravadas == 0.0 and total > 0:
+            # Para facturas consumidor: total = gravadas (con IVA incluido)
+            gravadas = total
+            debito   = 0.0  # El anexo 2 no pide débito fiscal separado
 
-        if gravadas == 0.0:
-            m_sub = re.search(
-                r"Sub[\s\-]?Total\s*:\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-                t_clean, re.I
-            )
-            if m_sub:
-                gravadas = limpiar_monto(m_sub.group(1))
+        if tipo in TIPOS_CONTRIBUYENTES:
+            # Para CCF: calcular gravadas sin IVA si no se encontraron
+            if gravadas == 0.0 and total > 0 and debito > 0:
+                gravadas = round(total - debito - exentas - no_sujetas, 2)
 
-        encontrado = total > 0 and debito > 0 and gravadas > 0
+            if gravadas == 0.0:
+                m_sub = re.search(
+                    r"Sub[\s\-]?Total\s*:\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+                    t_clean, re.I
+                )
+                if m_sub:
+                    gravadas = limpiar_monto(m_sub.group(1))
 
-        if not encontrado:
-            montos_raw = re.findall(
-                r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-                t_clean
-            )
-            set_montos = set()
-            for rv in montos_raw:
-                v = limpiar_monto(rv)
-                if v > 0:
-                    set_montos.add(v)
-            valores = sorted(list(set_montos), reverse=True)[:MAX_VALORES_LOOP]
+            encontrado = total > 0 and debito > 0 and gravadas > 0
 
-            for vt in valores:
-                if encontrado:
-                    break
-                for vg in valores:
-                    if vg >= vt:
-                        continue
+            if not encontrado:
+                # Algoritmo de búsqueda por consistencia matemática
+                montos_raw = re.findall(
+                    r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+                    t_clean
+                )
+                set_montos = set()
+                for rv in montos_raw:
+                    v = limpiar_monto(rv)
+                    if v > 0:
+                        set_montos.add(v)
+                valores = sorted(list(set_montos), reverse=True)[:MAX_VALORES_LOOP]
+
+                for vt in valores:
                     if encontrado:
                         break
-                    for vi in valores:
-                        if vi >= vg:
+                    for vg in valores:
+                        if vg >= vt:
                             continue
-                        if abs(round(vg * 0.13, 2) - round(vi, 2)) <= 0.05:
-                            candidato_tot = round(vg + vi + exentas + no_sujetas, 2)
-                            if abs(candidato_tot - round(vt, 2)) <= 0.10:
-                                gravadas   = vg
-                                debito     = vi
-                                total      = vt
-                                encontrado = True
-                                break
+                        if encontrado:
+                            break
+                        for vi in valores:
+                            if vi >= vg:
+                                continue
+                            if abs(round(vg * 0.13, 2) - round(vi, 2)) <= 0.05:
+                                candidato_tot = round(vg + vi + exentas + no_sujetas, 2)
+                                if abs(candidato_tot - round(vt, 2)) <= 0.10:
+                                    gravadas   = vg
+                                    debito     = vi
+                                    total      = vt
+                                    encontrado = True
+                                    break
 
-        if not encontrado:
-            if total > 0 and debito > 0 and gravadas == 0.0:
-                gravadas   = round(total - debito - exentas - no_sujetas, 2)
-                encontrado = True
-            elif total > 0 and debito == 0.0 and gravadas == 0.0 and tipo == "03":
-                gravadas  = round((total - exentas - no_sujetas) / 1.13, 2)
-                debito    = round(total - exentas - no_sujetas - gravadas, 2)
-                iva_calc  = True
-                encontrado = True
-            elif total == 0.0 and gravadas > 0 and debito > 0:
-                total = round(gravadas + debito + exentas + no_sujetas, 2)
+            if not encontrado:
+                if total > 0 and debito > 0 and gravadas == 0.0:
+                    gravadas   = round(total - debito - exentas - no_sujetas, 2)
+                    encontrado = True
+                elif total > 0 and debito == 0.0 and gravadas == 0.0:
+                    # CCF sin IVA detectado: calcular
+                    gravadas  = round((total - exentas - no_sujetas) / 1.13, 2)
+                    debito    = round(total - exentas - no_sujetas - gravadas, 2)
+                    iva_calc  = True
+                    encontrado = True
+                elif total == 0.0 and gravadas > 0 and debito > 0:
+                    total = round(gravadas + debito + exentas + no_sujetas, 2)
 
         return {
-            "fecha"      : fecha,
-            "tipo"       : tipo,
-            "num_control": num_control,
-            "sello"      : sello,
-            "gen"        : gen,
-            "nit_cli"    : nit_cli,
-            "dui_cli"    : dui_cli,
-            "nom_cli"    : nom_cli,
-            "exentas"    : round(exentas, 2),
-            "no_sujetas" : round(no_sujetas, 2),
-            "gravadas"   : round(gravadas, 2),
-            "debito"     : round(debito, 2),
-            "terceros"   : round(terceros, 2),
-            "deb_terc"   : round(deb_terc, 2),
-            "total"      : round(total, 2),
-            "estado"     : "OK",
-            "iva_calc"   : iva_calc,
-            "es_nuevo"   : es_nuevo,
+            "fecha"         : fecha,
+            "tipo"          : tipo,
+            "anexo"         : anexo,
+            "num_control"   : num_control,   # Sin guiones
+            "num_control_raw": ctrl,          # Con guiones (para mostrar)
+            "sello"         : sello,
+            "gen"           : gen,            # Con guiones (UUID)
+            "gen_sin_guiones": gen_sin_guiones, # Sin guiones
+            "nit_cli"       : nit_cli,        # Vacío si consumidor con DUI
+            "dui_cli"       : dui_cli,
+            "nom_cli"       : nom_cli,
+            "exentas"       : round(exentas, 2),
+            "no_sujetas"    : round(no_sujetas, 2),
+            "gravadas"      : round(gravadas, 2),
+            "debito"        : round(debito, 2),
+            "terceros"      : round(terceros, 2),
+            "deb_terc"      : round(deb_terc, 2),
+            "total"         : round(total, 2),
+            "estado"        : "OK",
+            "iva_calc"      : iva_calc,
+            "es_nuevo"      : es_nuevo,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
@@ -729,66 +778,240 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         return {"error_extraccion": safe_str(err)}
 
 
-# ─────────────────────────────────────────────
-# EXPORTAR EXCEL F-07 VENTAS
-# ─────────────────────────────────────────────
-def to_excel_hacienda_ventas(df: pd.DataFrame) -> bytes:
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, header=False, sheet_name='Ventas_F07')
-        ws = writer.sheets['Ventas_F07']
-        anchos = [12, 3, 3, 40, 45, 35, 12, 16, 45, 12, 12, 12, 12, 12, 12, 14, 14, 3, 3, 4]
-        for idx_col, ancho in enumerate(anchos, start=1):
-            col_letter = ws.cell(1, idx_col).column_letter
-            ws.column_dimensions[col_letter].width = ancho
-        for fila in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=10, max_col=16):
-            for celda in fila:
-                if isinstance(celda.value, (int, float)):
-                    celda.number_format = '#,##0.00'
-    return output.getvalue()
+# ══════════════════════════════════════════════════════════════
+# CONSTRUCCIÓN DE DATAFRAMES F-07 SEGÚN MANUAL DGII
+# ══════════════════════════════════════════════════════════════
 
-
-def construir_df_f07_ventas(df_filtrado: pd.DataFrame) -> pd.DataFrame:
+def construir_df_f07_contribuyentes(df_in: pd.DataFrame) -> pd.DataFrame:
+    """
+    Anexo 1: Detalle de Ventas a Contribuyentes (DTE-03, 05, 06)
+    Columnas: A-T (20 columnas según manual F-07 V14 enero 2025)
+    
+    D. Número de Resolución = num_control SIN guiones
+    E. Número de Serie      = sello de recepción
+    F. Número de Documento  = código de generación SIN guiones
+    G. Control Interno      = en blanco (DTE)
+    H. NIT o NRC            = nit_cli
+    Q. DUI                  = dui_cli (si persona natural)
+    R. Tipo Operación       = 1 (Gravada) por defecto
+    S. Tipo Ingreso         = 1 (Profesiones/Servicios) por defecto — usuario ajusta
+    T. Número Anexo         = 1
+    """
     df_out = pd.DataFrame()
-    df_out["A. Fecha Emisión"]           = df_filtrado["fecha"]
-    df_out["B. Clase Doc"]               = "4"
-    df_out["C. Tipo Doc"]                = df_filtrado["tipo"]
-    # Se eliminan guiones del número de control para cumplir el Anexo
-    df_out["D. Num Resolución (Control)"]= df_filtrado["num_control"].astype(str).str.replace("-", "", regex=False)
-    # Se inserta el sello de recepción en la Serie
-    df_out["E. Serie"]                   = df_filtrado.get("sello", "")
-    # Se eliminan guiones del código de generación para cumplir el Anexo
-    df_out["F. Num Documento"]           = df_filtrado["gen"].astype(str).str.replace("-", "", regex=False)
-    df_out["G. Control Interno"]         = ""
-    df_out["H. NIT/NRC Cliente"]         = df_filtrado["nit_cli"]
-    df_out["I. Nombre Cliente"]          = df_filtrado["nom_cli"]
-    df_out["J. Ventas Exentas"]          = df_filtrado["exentas"]
-    df_out["K. Ventas No Sujetas"]       = df_filtrado["no_sujetas"]
-    df_out["L. Ventas Gravadas"]         = df_filtrado["gravadas"]
-    df_out["M. Débito Fiscal"]           = df_filtrado["debito"]
-    df_out["N. Vtas Cuenta Terceros"]    = df_filtrado["terceros"]
-    df_out["O. Déb. Fiscal Terceros"]    = df_filtrado["deb_terc"]
-    df_out["P. Total Ventas"]            = df_filtrado["total"]
-    df_out["Q. DUI Cliente"]             = df_filtrado["dui_cli"]
-    df_out["R. Tipo Operación"]          = "1"
-    df_out["S. Tipo Ingreso"]            = "1"
-    df_out["T. Num Anexo"]               = "2"
+    df_out["A. Fecha Emisión"]            = df_in["fecha"]
+    df_out["B. Clase Documento"]          = "4"          # DTE
+    df_out["C. Tipo Documento"]           = df_in["tipo"]
+    # D: Num Control SIN guiones (col D = resolución para DTE)
+    df_out["D. Num Resolución"]           = df_in["num_control"].astype(str)
+    # E: Sello de recepción
+    df_out["E. Serie (Sello)"]            = df_in.get("sello", pd.Series([""] * len(df_in), index=df_in.index))
+    # F: Código generación SIN guiones
+    df_out["F. Num Documento (UUID)"]     = df_in["gen_sin_guiones"].astype(str)
+    # G: Control interno en blanco para DTE
+    df_out["G. Control Interno"]          = ""
+    # H: NIT o NRC (vacío si solo hay DUI)
+    df_out["H. NIT/NRC Cliente"]          = df_in["nit_cli"].astype(str)
+    df_out["I. Nombre Cliente"]           = df_in["nom_cli"].astype(str)
+    df_out["J. Ventas Exentas"]           = df_in["exentas"]
+    df_out["K. Ventas No Sujetas"]        = df_in["no_sujetas"]
+    df_out["L. Ventas Gravadas"]          = df_in["gravadas"]
+    df_out["M. Débito Fiscal"]            = df_in["debito"]
+    df_out["N. Vtas Cuenta Terceros"]     = df_in["terceros"]
+    df_out["O. Déb. Fiscal Terceros"]     = df_in["deb_terc"]
+    df_out["P. Total Ventas"]             = df_in["total"]
+    # Q: DUI (solo persona natural; si hay NIT este va vacío)
+    df_out["Q. DUI Cliente"]              = df_in["dui_cli"].astype(str)
+    df_out["R. Tipo Operación (Renta)"]   = "1"  # 1=Gravada (ajustar según caso)
+    df_out["S. Tipo Ingreso (Renta)"]     = "1"  # 1=Profesiones (ajustar)
+    df_out["T. Num Anexo"]                = "1"
     return df_out
 
 
-@st.dialog("Seguro de Calidad de Ventas")
-def ventana_descarga_ventas(df_resultados: pd.DataFrame, nombre_archivo: str) -> None:
-    st.write(
-        "Asegurate de haber procesado únicamente los comprobantes que deseas "
-        "declarar en el anexo de Ventas antes de descargar."
+def construir_df_f07_consumidor(df_in: pd.DataFrame) -> pd.DataFrame:
+    """
+    Anexo 2: Detalle de Ventas a Consumidor Final (DTE-01, 02, 10, 11)
+    Columnas: A-W (23 columnas según manual F-07 V14 enero 2025)
+    
+    NOTA MANUAL: Los DTE se agrupan por DÍA.
+    D. Número de Resolución = N/A
+    E. Serie                = N/A
+    F. N° Control Interno DEL = N/A
+    G. N° Control Interno AL  = N/A
+    H. N° Documento DEL = UUID del PRIMER DTE del día
+    I. N° Documento AL  = UUID del ÚLTIMO DTE del día
+    J. N° Máquina Registradora = en blanco
+    N. Ventas Gravadas = CON IVA incluido
+    W. Número Anexo = 2
+    
+    IMPLEMENTACIÓN: agrupamos por fecha. Si ya vienen individuales,
+    cada fila es su propio grupo de un documento.
+    """
+    # Para el agrupado por día: agrupamos por fecha
+    df_in = df_in.copy()
+    
+    # Si el df tiene una sola fila por documento (no agrupado), crear vista individual
+    # El manual dice agrupar por día, pero para auditoría interna es mejor individual
+    # Exportamos individual (cada DTE) y el usuario puede agrupar manualmente si Hacienda lo pide
+
+    df_out = pd.DataFrame()
+    df_out["A. Fecha Emisión"]                  = df_in["fecha"]
+    df_out["B. Clase Documento"]                = "4"          # DTE
+    df_out["C. Tipo Documento"]                 = df_in["tipo"]
+    # D: N/A para DTE (se agrupa por día)
+    df_out["D. Num Resolución"]                 = "N/A"
+    # E: N/A para DTE agrupado por día
+    df_out["E. Serie Documento"]                = "N/A"
+    # F y G: N/A para DTE
+    df_out["F. N° Control Interno DEL"]         = "N/A"
+    df_out["G. N° Control Interno AL"]          = "N/A"
+    # H: Código generación SIN guiones del DTE (primer DTE del día)
+    df_out["H. N° Documento DEL (UUID)"]        = df_in["gen_sin_guiones"].astype(str)
+    # I: Mismo (documento individual)
+    df_out["I. N° Documento AL (UUID)"]         = df_in["gen_sin_guiones"].astype(str)
+    # J: Vacío para DTE
+    df_out["J. N° Máquina Registradora"]        = ""
+    df_out["K. Ventas Exentas"]                 = df_in["exentas"]
+    # L: Exentas no sujetas a proporcionalidad (normalmente 0)
+    df_out["L. Exentas No Prop."]               = 0.0
+    df_out["M. Ventas No Sujetas"]              = df_in["no_sujetas"]
+    # N: Ventas Gravadas CON IVA incluido (total para facturas consumidor)
+    df_out["N. Ventas Gravadas (c/IVA)"]        = df_in["gravadas"]
+    df_out["O. Export. dentro CA"]              = 0.0
+    df_out["P. Export. fuera CA"]               = 0.0
+    df_out["Q. Export. Servicios"]              = 0.0
+    df_out["R. Vtas Zonas Francas DPA"]         = 0.0
+    df_out["S. Vtas Cuenta Terceros"]           = df_in["terceros"]
+    df_out["T. Total Ventas"]                   = df_in["total"]
+    df_out["U. Tipo Operación (Renta)"]         = "1"
+    df_out["V. Tipo Ingreso (Renta)"]           = "1"
+    df_out["W. Num Anexo"]                      = "2"
+    return df_out
+
+
+def construir_df_f07_ventas_combinado(df_in: pd.DataFrame) -> pd.DataFrame:
+    """Vista combinada para auditoría interna (no para subir a Hacienda)."""
+    df_out = pd.DataFrame()
+    df_out["Fecha"]       = df_in["fecha"]
+    df_out["Tipo DTE"]    = df_in["tipo"]
+    df_out["Anexo"]       = df_in["anexo"]
+    df_out["Num Control"] = df_in.get("num_control_raw", df_in["num_control"])
+    df_out["Sello"]       = df_in.get("sello", "")
+    df_out["UUID"]        = df_in["gen"]
+    df_out["NIT/DUI CLI"] = df_in.apply(
+        lambda r: r["nit_cli"] if r["nit_cli"] else r["dui_cli"], axis=1
     )
-    st.download_button(
-        "📥 Confirmar y Descargar Anexo F-07",
-        data=to_excel_hacienda_ventas(df_resultados),
-        file_name=nombre_archivo,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary"
-    )
+    df_out["Nombre"]      = df_in["nom_cli"]
+    df_out["Exentas"]     = df_in["exentas"]
+    df_out["No Sujetas"]  = df_in["no_sujetas"]
+    df_out["Gravadas"]    = df_in["gravadas"]
+    df_out["Débito"]      = df_in["debito"]
+    df_out["Total"]       = df_in["total"]
+    df_out["Archivo"]     = df_in.get("archivo", "")
+    return df_out
+
+
+# ─────────────────────────────────────────────
+# EXPORTAR EXCEL F-07
+# ─────────────────────────────────────────────
+def _aplicar_formato_numerico(ws, col_inicio: int, col_fin: int):
+    """Aplica formato numérico #,##0.00 a columnas de montos."""
+    for fila in ws.iter_rows(min_row=1, max_row=ws.max_row,
+                              min_col=col_inicio, max_col=col_fin):
+        for celda in fila:
+            if isinstance(celda.value, (int, float)):
+                celda.number_format = '#,##0.00'
+
+
+def to_excel_hacienda_contribuyentes(df: pd.DataFrame) -> bytes:
+    """Genera Excel para Anexo 1 (Contribuyentes) listo para Hacienda."""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, header=False, sheet_name='Ventas_Contribuyentes')
+        ws = writer.sheets['Ventas_Contribuyentes']
+        # Anchos: A=12, B=3, C=3, D=35, E=45, F=35, G=12, H=16, I=45, J=12, K=12,
+        #         L=12, M=12, N=12, O=12, P=14, Q=14, R=4, S=4, T=3
+        anchos = [12,3,3,35,45,35,12,16,45,12,12,12,12,12,12,14,14,4,4,3]
+        for idx, ancho in enumerate(anchos, 1):
+            ws.column_dimensions[ws.cell(1, idx).column_letter].width = ancho
+        _aplicar_formato_numerico(ws, 10, 16)  # Columnas J a P
+    return output.getvalue()
+
+
+def to_excel_hacienda_consumidor(df: pd.DataFrame) -> bytes:
+    """Genera Excel para Anexo 2 (Consumidor Final) listo para Hacienda."""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, header=False, sheet_name='Ventas_Consumidor')
+        ws = writer.sheets['Ventas_Consumidor']
+        # Anchos: A=12, B=3, C=3, D=8, E=8, F=8, G=8, H=35, I=35, J=16,
+        #         K=12, L=12, M=12, N=14, O=12, P=12, Q=12, R=12, S=12, T=14, U=4, V=4, W=3
+        anchos = [12,3,3,8,8,8,8,35,35,16,12,12,12,14,12,12,12,12,12,14,4,4,3]
+        for idx, ancho in enumerate(anchos, 1):
+            ws.column_dimensions[ws.cell(1, idx).column_letter].width = ancho
+        _aplicar_formato_numerico(ws, 11, 20)  # Columnas K a T
+    return output.getvalue()
+
+
+def to_excel_auditoria(df: pd.DataFrame) -> bytes:
+    """Genera Excel de auditoría combinado."""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Auditoria')
+        ws = writer.sheets['Auditoria']
+        anchos = [12,8,5,35,42,38,18,45,12,12,12,10,14,35]
+        for idx, ancho in enumerate(anchos, 1):
+            try:
+                ws.column_dimensions[ws.cell(1, idx).column_letter].width = ancho
+            except Exception:
+                pass
+        _aplicar_formato_numerico(ws, 9, 13)
+    return output.getvalue()
+
+
+# ─────────────────────────────────────────────
+# DIÁLOGO DE DESCARGA
+# ─────────────────────────────────────────────
+@st.dialog("Confirmar Descarga de Anexos")
+def ventana_descarga_ventas(df_contribuyentes: pd.DataFrame,
+                             df_consumidor: pd.DataFrame,
+                             nombre_base: str) -> None:
+    st.write("Verifica los totales antes de descargar. Los archivos están listos para cargar en el portal de Hacienda.")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Anexo 1 — Contribuyentes (CCF/NC/ND)**")
+        if not df_contribuyentes.empty:
+            f07_contrib = construir_df_f07_contribuyentes(df_contribuyentes)
+            st.caption(f"📄 {len(f07_contrib)} documentos")
+            total_c = df_contribuyentes['total'].sum()
+            st.caption(f"💰 Total: ${total_c:,.2f}")
+            st.download_button(
+                "📥 Descargar Anexo 1 (Contribuyentes)",
+                data=to_excel_hacienda_contribuyentes(f07_contrib),
+                file_name=f"F07_Anexo1_Contribuyentes_{nombre_base}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary", use_container_width=True
+            )
+        else:
+            st.info("Sin documentos de contribuyentes.")
+
+    with col2:
+        st.markdown("**Anexo 2 — Consumidor Final (Facturas)**")
+        if not df_consumidor.empty:
+            f07_cons = construir_df_f07_consumidor(df_consumidor)
+            st.caption(f"📄 {len(f07_cons)} documentos")
+            total_cons = df_consumidor['total'].sum()
+            st.caption(f"💰 Total: ${total_cons:,.2f}")
+            st.download_button(
+                "📥 Descargar Anexo 2 (Consumidor Final)",
+                data=to_excel_hacienda_consumidor(f07_cons),
+                file_name=f"F07_Anexo2_Consumidor_{nombre_base}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary", use_container_width=True
+            )
+        else:
+            st.info("Sin facturas de consumidor final.")
 
 
 # ─────────────────────────────────────────────
@@ -800,36 +1023,47 @@ def alerta_con_lista(tipo_alerta: str, icono: str, titulo: str, archivos: list) 
         fn(f"{icono} **{len(archivos)} {titulo}**")
         with st.expander(f"Ver {len(archivos)} archivo(s)"):
             items_html = "".join(f"<div>📄 {safe_str(a)}</div>" for a in archivos)
-            st.markdown(
-                f'<div class="scroll-list">{items_html}</div>',
-                unsafe_allow_html=True
-            )
+            st.markdown(f'<div class="scroll-list">{items_html}</div>', unsafe_allow_html=True)
     else:
         st.success(f"✅ 0 {titulo}")
 
 
-def datos_revision_vacio_ventas(causa: str = "") -> dict:
+def datos_revision_vacio_ventas(causa: str = "", tipo: str = "03") -> dict:
     return {
-        "fecha"      : "",
-        "tipo"       : "03",
-        "num_control": "",
-        "sello"      : "",
-        "gen"        : "",
-        "nit_cli"    : "",
-        "dui_cli"    : "",
-        "nom_cli"    : "",
-        "exentas"    : 0.0,
-        "no_sujetas" : 0.0,
-        "gravadas"   : 0.0,
-        "debito"     : 0.0,
-        "terceros"   : 0.0,
-        "deb_terc"   : 0.0,
-        "total"      : 0.0,
-        "estado"     : "REVISION",
-        "iva_calc"   : False,
-        "es_nuevo"   : True,
-        "_error"     : safe_str(causa),
+        "fecha"          : "",
+        "tipo"           : tipo,
+        "anexo"          : "1" if tipo in TIPOS_CONTRIBUYENTES else "2",
+        "num_control"    : "",
+        "num_control_raw": "",
+        "sello"          : "",
+        "gen"            : "",
+        "gen_sin_guiones": "",
+        "nit_cli"        : "",
+        "dui_cli"        : "",
+        "nom_cli"        : "",
+        "exentas"        : 0.0,
+        "no_sujetas"     : 0.0,
+        "gravadas"       : 0.0,
+        "debito"         : 0.0,
+        "terceros"       : 0.0,
+        "deb_terc"       : 0.0,
+        "total"          : 0.0,
+        "estado"         : "REVISION",
+        "iva_calc"       : False,
+        "es_nuevo"       : True,
+        "_error"         : safe_str(causa),
     }
+
+
+def tipo_badge(tipo: str) -> str:
+    badges = {
+        "03": "🟢 CCF (03)",
+        "01": "🔵 Factura (01)",
+        "05": "🟠 Nota Crédito (05)",
+        "06": "🔴 Nota Débito (06)",
+        "02": "🔵 Fac. Simplif. (02)",
+    }
+    return badges.get(tipo, f"📄 DTE-{tipo}")
 
 
 # ─────────────────────────────────────────────
@@ -848,7 +1082,8 @@ with col_titulo:
 st.markdown(f"""
 <div class="card-emisor">
     <strong>EMISOR ACTIVO:</strong> {safe_str(cliente.get('nombre',''))}<br>
-    <strong>NIT:</strong> {safe_str(cliente.get('nit',''))}
+    <strong>NIT:</strong> {safe_str(cliente.get('nit',''))} &nbsp;|&nbsp;
+    <strong>NRC:</strong> {safe_str(cliente.get('nrc',''))}
 </div>
 """, unsafe_allow_html=True)
 
@@ -866,10 +1101,15 @@ if 'reporte_ventas'   not in st.session_state: st.session_state.reporte_ventas  
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 📂 Carga de Ventas")
+    st.markdown(
+        "<small style='color:#8A9A35'>Acepta: DTE-01 (Factura), DTE-03 (CCF), "
+        "DTE-05 (NC), DTE-06 (ND)</small>",
+        unsafe_allow_html=True
+    )
     st.divider()
 
     archivos = st.file_uploader(
-        "Arrastra CCF o Facturas (PDF)",
+        "Arrastra PDFs de ventas",
         type="pdf",
         accept_multiple_files=True,
         key=str(st.session_state.ventas_uploader)
@@ -883,19 +1123,19 @@ with st.sidebar:
     )
 
     if procesar and archivos:
-        ya_procesados  = set(st.session_state.archivos_ventas)
-        nuevos         = [f for f in archivos if f.name not in ya_procesados]
+        ya_procesados = set(st.session_state.archivos_ventas)
+        nuevos        = [f for f in archivos if f.name not in ya_procesados]
 
         if not nuevos:
             st.info("ℹ️ Todos los archivos ya fueron procesados.")
         else:
-            extracted, duplicados, iva_calc_files      = [], [], []
-            invalidos, corruptos, nuevos_clientes_d    = [], [], {}
+            extracted, duplicados, iva_calc_files   = [], [], []
+            invalidos, corruptos, nuevos_clientes_d = [], [], {}
 
             bar          = st.progress(0)
             txt_progreso = st.empty()
             t_inicio     = time.time()
-            total        = len(nuevos)
+            total_arch   = len(nuevos)
 
             for idx, f in enumerate(nuevos):
                 if idx > 0 and idx % 50 == 0:
@@ -903,27 +1143,25 @@ with st.sidebar:
 
                 if idx > 0:
                     elapsed   = time.time() - t_inicio
-                    remaining = int((elapsed / idx) * (total - idx))
+                    remaining = int((elapsed / idx) * (total_arch - idx))
                     m_t, s_t  = divmod(remaining, 60)
-                    txt_progreso.caption(
-                        f"⏳ {idx+1}/{total} — Restante: {m_t:02d}:{s_t:02d}"
-                    )
+                    txt_progreso.caption(f"⏳ {idx+1}/{total_arch} — Restante: {m_t:02d}:{s_t:02d}")
                 else:
-                    txt_progreso.caption(f"⏳ Procesando 1 de {total}...")
+                    txt_progreso.caption(f"⏳ Procesando 1 de {total_arch}...")
 
                 file_bytes = f.read()
 
                 if len(file_bytes) < 512:
                     corruptos.append(f.name)
                     st.session_state.archivos_ventas.append(f.name)
-                    bar.progress((idx + 1) / total)
+                    bar.progress((idx + 1) / total_arch)
                     continue
 
                 res = extraer_venta_nativo_pro(file_bytes, cliente)
 
-                cod_gen     = safe_str(res.get('gen', ''))
-                num_ctrl    = safe_str(res.get('num_control', ''))
-                dup_id      = cod_gen or num_ctrl
+                cod_gen  = safe_str(res.get('gen', ''))
+                num_ctrl = safe_str(res.get('num_control', ''))
+                dup_id   = cod_gen or num_ctrl
 
                 dup_memoria = (
                     not st.session_state.db_ventas.empty
@@ -960,11 +1198,16 @@ with st.sidebar:
 
                 else:
                     nom_res = safe_str(res.get('nom_cli', '')).strip()
+                    tipo_res = safe_str(res.get('tipo', ''))
+                    
+                    # Para consumidor final (01) no es crítico tener nombre
+                    requiere_nombre = tipo_res in TIPOS_CONTRIBUYENTES
+                    
                     va_revision = (
                         res.get('total', 0.0) == 0.0
                         or not res.get('num_control')
                         or not safe_str(res.get('fecha', '')).strip()
-                        or nom_res in ("SIN NOMBRE", "")
+                        or (requiere_nombre and nom_res in ("SIN NOMBRE", ""))
                     )
                     if va_revision:
                         st.session_state.cola_revision_v.append({
@@ -975,18 +1218,18 @@ with st.sidebar:
                     else:
                         if res.get('iva_calc'):
                             iva_calc_files.append(f.name)
-                        if res.get("es_nuevo") and res.get("nit_cli"):
-                            nit_n = res["nit_cli"]
-                            nom_n = res["nom_cli"]
-                            nuevos_clientes_d[nit_n] = nom_n
-                            guardar_cliente_rapido(nit_n, nom_n)
+                        if res.get("es_nuevo") and (res.get("nit_cli") or res.get("dui_cli")):
+                            id_clave = res.get("nit_cli") or res.get("dui_cli")
+                            nom_n    = res["nom_cli"]
+                            nuevos_clientes_d[id_clave] = nom_n
+                            guardar_cliente_rapido(id_clave, nom_n)
                         res["archivo"] = f.name
                         extracted.append(res)
 
                 st.session_state.archivos_ventas.append(f.name)
-                bar.progress((idx + 1) / total)
+                bar.progress((idx + 1) / total_arch)
 
-            txt_progreso.success(f"✅ {total} documentos escaneados.")
+            txt_progreso.success(f"✅ {total_arch} documentos escaneados.")
 
             st.session_state.reporte_ventas = {
                 "invalidos"       : invalidos,
@@ -998,6 +1241,11 @@ with st.sidebar:
 
             if extracted:
                 new_df = pd.DataFrame(extracted)
+                # Asegurar columnas necesarias existen
+                for col in ['gen_sin_guiones', 'num_control_raw', 'sello', 'anexo', 'dui_cli']:
+                    if col not in new_df.columns:
+                        new_df[col] = ""
+                
                 if st.session_state.db_ventas.empty:
                     st.session_state.db_ventas = new_df
                 else:
@@ -1007,16 +1255,23 @@ with st.sidebar:
 
     st.divider()
     if st.button("🧹 Limpiar Memoria Ventas", type="secondary", use_container_width=True):
-        for key in ('db_ventas','archivos_ventas','reporte_ventas','cola_revision_v'):
+        for key in ('db_ventas', 'archivos_ventas', 'reporte_ventas', 'cola_revision_v'):
             if key in st.session_state:
                 del st.session_state[key]
         st.session_state.ventas_uploader = st.session_state.get('ventas_uploader', 0) + 1
         st.rerun()
 
     if not st.session_state.db_ventas.empty:
+        df_sidebar = st.session_state.db_ventas
         st.divider()
-        st.markdown(f"**📄 Documentos:** `{len(st.session_state.db_ventas)}`")
-        st.markdown(f"**💰 Total:** `${st.session_state.db_ventas['total'].sum():,.2f}`")
+        total_docs = len(df_sidebar)
+        n_ccf  = len(df_sidebar[df_sidebar['tipo'] == '03']) if 'tipo' in df_sidebar.columns else 0
+        n_fac  = len(df_sidebar[df_sidebar['tipo'] == '01']) if 'tipo' in df_sidebar.columns else 0
+        n_otros = total_docs - n_ccf - n_fac
+        st.markdown(f"**📄 Total docs:** `{total_docs}`")
+        st.markdown(f"**🟢 CCF (03):** `{n_ccf}` | **🔵 Facturas (01):** `{n_fac}` | **Otros:** `{n_otros}`")
+        if 'total' in df_sidebar.columns:
+            st.markdown(f"**💰 Total:** `${df_sidebar['total'].sum():,.2f}`")
 
 # ─────────────────────────────────────────────
 # 10. BANDEJA DE REVISIÓN MANUAL
@@ -1029,7 +1284,7 @@ if st.session_state.cola_revision_v:
     </div>
     """, unsafe_allow_html=True)
 
-    total_cola  = len(st.session_state.cola_revision_v)
+    total_cola = len(st.session_state.cola_revision_v)
 
     col_nav1, col_nav2, col_nav3 = st.columns([1, 3, 1])
     with col_nav2:
@@ -1046,6 +1301,7 @@ if st.session_state.cola_revision_v:
 
     item_actual = st.session_state.cola_revision_v[0]
     datos_act   = item_actual["datos"]
+    tipo_actual = safe_str(datos_act.get("tipo", "03"))
 
     st.divider()
 
@@ -1063,12 +1319,14 @@ if st.session_state.cola_revision_v:
                 with st.expander("🔍 Datos extraídos automáticamente"):
                     col_d1, col_d2 = st.columns(2)
                     with col_d1:
-                        st.caption(f"**Num Control:** `{datos_act.get('num_control','—')}`")
+                        st.caption(f"**Tipo DTE:** `{tipo_badge(tipo_actual)}`")
+                        st.caption(f"**Num Control:** `{datos_act.get('num_control_raw', datos_act.get('num_control','—'))}`")
                         st.caption(f"**UUID:** `{datos_act.get('gen','—')}`")
                         st.caption(f"**Sello:** `{datos_act.get('sello','—')}`")
                         st.caption(f"**Fecha:** `{datos_act.get('fecha','—')}`")
-                        st.caption(f"**NIT receptor:** `{datos_act.get('nit_cli','—')}`")
                     with col_d2:
+                        st.caption(f"**NIT receptor:** `{datos_act.get('nit_cli','—')}`")
+                        st.caption(f"**DUI receptor:** `{datos_act.get('dui_cli','—')}`")
                         st.caption(f"**Nombre:** `{datos_act.get('nom_cli','—')}`")
                         st.caption(f"**Total:** `${datos_act.get('total',0):.2f}`")
                         st.caption(f"**Gravadas:** `${datos_act.get('gravadas',0):.2f}`")
@@ -1087,14 +1345,11 @@ if st.session_state.cola_revision_v:
         if error_causa:
             st.warning(f"⚠️ **Causa del fallo:** `{error_causa}`")
 
-        nit_actual = safe_str(datos_act.get("nit_cli", ""))
-        if nit_actual:
-            st.info(f"🆔 NIT receptor detectado: `{nit_actual}`")
-
         campos_faltantes = []
-        if not safe_str(datos_act.get("fecha","")).strip():      campos_faltantes.append("Fecha")
+        if not safe_str(datos_act.get("fecha","")).strip():       campos_faltantes.append("Fecha")
         if not safe_str(datos_act.get("num_control","")).strip(): campos_faltantes.append("Núm. Control")
-        if datos_act.get("nom_cli","") in ("SIN NOMBRE",""):     campos_faltantes.append("Nombre cliente")
+        if datos_act.get('tipo','') in TIPOS_CONTRIBUYENTES and datos_act.get("nom_cli","") in ("SIN NOMBRE",""):
+            campos_faltantes.append("Nombre cliente")
         if datos_act.get("total", 0.0) == 0.0:                   campos_faltantes.append("Total")
         if campos_faltantes:
             st.error(f"❌ Campos requeridos: **{', '.join(campos_faltantes)}**")
@@ -1108,16 +1363,13 @@ if st.session_state.cola_revision_v:
                     value=safe_str(datos_act.get("fecha", "")),
                     placeholder="13/03/2026"
                 )
-                f_tipo = st.selectbox(
-                    "📄 Tipo DTE",
-                    options=["03", "01", "05", "06"],
-                    index=["03","01","05","06"].index(safe_str(datos_act.get("tipo","03")))
-                          if safe_str(datos_act.get("tipo","03")) in ["03","01","05","06"] else 0
-                )
+                tipos_opciones = ["03", "01", "05", "06", "02"]
+                tipo_idx = tipos_opciones.index(tipo_actual) if tipo_actual in tipos_opciones else 0
+                f_tipo = st.selectbox("📄 Tipo DTE", options=tipos_opciones, index=tipo_idx)
             with col_f2:
                 f_ctrl = st.text_input(
                     "🔢 Número de Control DTE *",
-                    value=safe_str(datos_act.get("num_control", "")),
+                    value=safe_str(datos_act.get("num_control_raw", datos_act.get("num_control", ""))),
                     placeholder="DTE-03-M001P001-000000000000033"
                 )
                 f_gen = st.text_input(
@@ -1125,36 +1377,53 @@ if st.session_state.cola_revision_v:
                     value=safe_str(datos_act.get("gen", "")),
                     placeholder="25AA41EA-0412-40BC-803D-405272AC7891"
                 )
-                
+
             f_sello = st.text_input(
-                "🛡️ Sello de Recepción (Serie)",
+                "🛡️ Sello de Recepción",
                 value=safe_str(datos_act.get("sello", "")),
                 placeholder="20261A71A6D9E53A4BE59631B7BED69D231B6PHP"
             )
 
-            st.markdown("**🏢 Receptor / Cliente**")
-            col_r1, col_r2 = st.columns(2)
-            with col_r1:
-                f_nit = st.text_input(
-                    "🆔 NIT del Cliente",
-                    value=safe_str(datos_act.get("nit_cli", "")),
-                    placeholder="12172810871033"
-                )
-            with col_r2:
-                f_dui = st.text_input(
-                    "🪪 DUI del Cliente",
-                    value=safe_str(datos_act.get("dui_cli", "")),
-                    placeholder="Solo si es persona natural"
-                )
+            # Determinar si es contribuyente o consumidor según tipo seleccionado
+            es_contribuyente_form = f_tipo in TIPOS_CONTRIBUYENTES
 
-            nom_sug = safe_str(datos_act.get("nom_cli", ""))
-            if nom_sug in ("SIN NOMBRE", ""):
-                nom_sug = ""
-            f_nom = st.text_input(
-                "🏢 Nombre / Razón Social del Cliente *",
-                value=nom_sug,
-                placeholder="JONATHAN NEFTALI RIVAS HERRERA"
-            )
+            if es_contribuyente_form:
+                st.markdown("**🏢 Receptor (Contribuyente)**")
+                col_r1, col_r2 = st.columns(2)
+                with col_r1:
+                    f_nit = st.text_input(
+                        "🆔 NIT del Cliente",
+                        value=safe_str(datos_act.get("nit_cli", "")),
+                        placeholder="12172810871033"
+                    )
+                with col_r2:
+                    f_dui = st.text_input(
+                        "🪪 DUI (si persona natural)",
+                        value=safe_str(datos_act.get("dui_cli", "")),
+                        placeholder="opcional"
+                    )
+                nom_sug = safe_str(datos_act.get("nom_cli", ""))
+                if nom_sug in ("SIN NOMBRE", ""):
+                    nom_sug = ""
+                f_nom = st.text_input(
+                    "🏢 Nombre / Razón Social *",
+                    value=nom_sug,
+                    placeholder="JONATHAN NEFTALI RIVAS HERRERA"
+                )
+            else:
+                st.markdown("**👤 Receptor (Consumidor Final)**")
+                st.caption("ℹ️ Para facturas consumidor: ingresa DUI si está disponible. NIT se deja vacío.")
+                f_nit = ""  # Para consumidor: NIT vacío
+                f_dui = st.text_input(
+                    "🪪 DUI del Consumidor (opcional)",
+                    value=safe_str(datos_act.get("dui_cli", "")),
+                    placeholder="03125700-4 → 031257004"
+                )
+                f_nom = st.text_input(
+                    "👤 Nombre del Consumidor (opcional)",
+                    value=safe_str(datos_act.get("nom_cli", "")).replace("SIN NOMBRE", ""),
+                    placeholder="FRANCISCO ANTONIO HERNANDEZ"
+                )
 
             st.markdown("**💰 Montos**")
             col_m1, col_m2, col_m3 = st.columns(3)
@@ -1169,14 +1438,14 @@ if st.session_state.cola_revision_v:
                     "🧾 Ventas Gravadas ($)",
                     value=float(datos_act.get("gravadas", 0.0)),
                     format="%.2f", min_value=0.0,
-                    help="Dejar en 0 para calcular automáticamente"
+                    help="CCF: sin IVA. Factura consumidor: con IVA incluido. Dejar en 0 para calcular."
                 )
             with col_m3:
                 f_debito = st.number_input(
                     "🏦 Débito Fiscal ($)",
                     value=float(datos_act.get("debito", 0.0)),
                     format="%.2f", min_value=0.0,
-                    help="Dejar en 0 para calcular automáticamente"
+                    help="Solo aplica para CCF (DTE-03, 05, 06). Dejar en 0 para calcular."
                 )
 
             col_m4, col_m5 = st.columns(2)
@@ -1194,45 +1463,41 @@ if st.session_state.cola_revision_v:
                 )
 
             if f_total > 0:
-                grav_preview = f_gravadas if f_gravadas > 0 else round((f_total - f_exentas - f_no_sujetas) / 1.13, 2)
-                deb_preview  = f_debito if f_debito > 0 else round(grav_preview * 0.13, 2)
-                st.caption(
-                    f"📊 Preview: Gravadas `${grav_preview:.2f}` | "
-                    f"IVA `${deb_preview:.2f}` | "
-                    f"Total `${f_total:.2f}`"
-                )
+                if es_contribuyente_form:
+                    grav_preview = f_gravadas if f_gravadas > 0 else round(
+                        (f_total - f_exentas - f_no_sujetas) / 1.13, 2
+                    )
+                    deb_preview = f_debito if f_debito > 0 else round(grav_preview * 0.13, 2)
+                    st.caption(
+                        f"📊 Preview CCF: Gravadas `${grav_preview:.2f}` | "
+                        f"IVA `${deb_preview:.2f}` | Total `${f_total:.2f}`"
+                    )
+                else:
+                    st.caption(
+                        f"📊 Preview Factura: Gravadas c/IVA `${f_total:.2f}` | "
+                        f"Total `${f_total:.2f}`"
+                    )
 
             actualizar_otros = st.checkbox(
-                "🔄 Actualizar nombre en registros existentes con este NIT", value=True
+                "🔄 Actualizar nombre en registros existentes con este NIT/DUI", value=True
             )
 
             st.markdown("")
             b1, b2, b3 = st.columns([2, 1, 1])
             with b1:
-                submit_ok  = st.form_submit_button(
-                    "✅ Aprobar y Agregar al Libro",
-                    type="primary",
-                    use_container_width=True
-                )
+                submit_ok   = st.form_submit_button("✅ Aprobar y Agregar al Libro", type="primary", use_container_width=True)
             with b2:
-                submit_skip = st.form_submit_button(
-                    "⏭️ Saltar",
-                    use_container_width=True,
-                    help="Mover al final de la cola"
-                )
+                submit_skip = st.form_submit_button("⏭️ Saltar", use_container_width=True)
             with b3:
-                submit_del = st.form_submit_button(
-                    "🗑️ Descartar",
-                    use_container_width=True
-                )
+                submit_del  = st.form_submit_button("🗑️ Descartar", use_container_width=True)
 
             if submit_ok:
                 errores = []
                 if not f_fecha.strip():  errores.append("Fecha requerida.")
                 if not f_ctrl.strip():   errores.append("Número de Control requerido.")
-                if not f_nom.strip():    errores.append("Nombre del Cliente requerido.")
                 if f_total <= 0:         errores.append("Total debe ser mayor a 0.")
-
+                if es_contribuyente_form and not f_nom.strip():
+                    errores.append("Nombre del Cliente requerido para CCF.")
                 if f_fecha.strip() and not re.match(r'\d{2}/\d{2}/\d{4}', f_fecha.strip()):
                     errores.append("Formato de fecha inválido. Use DD/MM/YYYY.")
 
@@ -1240,50 +1505,73 @@ if st.session_state.cola_revision_v:
                     for e_msg in errores:
                         st.error(e_msg)
                 else:
-                    nombre_limpio = f_nom.strip().upper()
-                    nit_act       = f_nit.strip() or safe_str(datos_act.get("nit_cli", ""))
-                    dui_act       = f_dui.strip() or safe_str(datos_act.get("dui_cli", ""))
+                    nombre_limpio = f_nom.strip().upper() if f_nom.strip() else "SIN NOMBRE"
+                    nit_act = f_nit.strip() if es_contribuyente_form else ""
+                    dui_act = re.sub(r'[^0-9]', '', f_dui.strip()) if f_dui.strip() else ""
+                    
+                    # Número de control: guardar sin guiones y con guiones
+                    ctrl_raw  = f_ctrl.strip().upper()
+                    ctrl_limpio = ctrl_raw.replace("-", "")
 
-                    if nit_act:
-                        guardar_cliente_rapido(nit_act, nombre_limpio)
+                    # UUID sin guiones
+                    gen_raw      = f_gen.strip().upper()
+                    gen_sin_g    = gen_raw.replace("-", "")
+
+                    id_guardar = nit_act or dui_act
+                    if id_guardar and nombre_limpio != "SIN NOMBRE":
+                        guardar_cliente_rapido(id_guardar, nombre_limpio)
 
                     for item_pend in st.session_state.cola_revision_v[1:]:
-                        if item_pend["datos"].get("nit_cli") == nit_act:
+                        pend_nit = item_pend["datos"].get("nit_cli", "")
+                        pend_dui = item_pend["datos"].get("dui_cli", "")
+                        if (pend_nit and pend_nit == nit_act) or (pend_dui and pend_dui == dui_act):
                             item_pend["datos"]["nom_cli"] = nombre_limpio
                             item_pend["datos"]["es_nuevo"] = False
 
-                    if actualizar_otros and nit_act:
-                        actualizar_nombre_en_db_ventas(nit_act, nombre_limpio)
+                    if actualizar_otros and id_guardar:
+                        actualizar_nombre_en_db_ventas(id_guardar, nombre_limpio)
 
                     grav_f = f_gravadas
                     deb_f  = f_debito
                     ic     = datos_act.get("iva_calc", False)
 
-                    if f_total > 0 and grav_f == 0.0 and deb_f == 0.0:
-                        grav_f = round((f_total - f_exentas - f_no_sujetas) / 1.13, 2)
-                        deb_f  = round(f_total - f_exentas - f_no_sujetas - grav_f, 2)
-                        ic     = True
-                    elif f_total > 0 and deb_f == 0.0 and grav_f > 0.0:
-                        deb_f  = round(grav_f * 0.13, 2)
-                        ic     = True
+                    if es_contribuyente_form:
+                        if f_total > 0 and grav_f == 0.0 and deb_f == 0.0:
+                            grav_f = round((f_total - f_exentas - f_no_sujetas) / 1.13, 2)
+                            deb_f  = round(f_total - f_exentas - f_no_sujetas - grav_f, 2)
+                            ic     = True
+                        elif f_total > 0 and deb_f == 0.0 and grav_f > 0.0:
+                            deb_f  = round(grav_f * 0.13, 2)
+                            ic     = True
+                    else:
+                        # Consumidor final: gravadas = total (con IVA)
+                        if grav_f == 0.0:
+                            grav_f = f_total
+                        deb_f = 0.0
+
+                    tipo_final = f_tipo
+                    anexo_final = "1" if tipo_final in TIPOS_CONTRIBUYENTES else "2"
 
                     datos_act.update({
-                        "fecha"      : f_fecha.strip(),
-                        "tipo"       : f_tipo,
-                        "num_control": f_ctrl.strip().upper(),
-                        "sello"      : f_sello.strip().upper(),
-                        "gen"        : f_gen.strip().upper(),
-                        "nit_cli"    : nit_act,
-                        "dui_cli"    : dui_act,
-                        "nom_cli"    : nombre_limpio,
-                        "total"      : f_total,
-                        "exentas"    : f_exentas,
-                        "no_sujetas" : f_no_sujetas,
-                        "gravadas"   : grav_f,
-                        "debito"     : deb_f,
-                        "iva_calc"   : ic,
-                        "es_nuevo"   : False,
-                        "archivo"    : item_actual["archivo"],
+                        "fecha"          : f_fecha.strip(),
+                        "tipo"           : tipo_final,
+                        "anexo"          : anexo_final,
+                        "num_control"    : ctrl_limpio,
+                        "num_control_raw": ctrl_raw,
+                        "sello"          : f_sello.strip().upper(),
+                        "gen"            : gen_raw,
+                        "gen_sin_guiones": gen_sin_g,
+                        "nit_cli"        : nit_act,
+                        "dui_cli"        : dui_act,
+                        "nom_cli"        : nombre_limpio,
+                        "total"          : f_total,
+                        "exentas"        : f_exentas,
+                        "no_sujetas"     : f_no_sujetas,
+                        "gravadas"       : grav_f,
+                        "debito"         : deb_f,
+                        "iva_calc"       : ic,
+                        "es_nuevo"       : False,
+                        "archivo"        : item_actual["archivo"],
                     })
 
                     nuevo_df = pd.DataFrame([datos_act])
@@ -1294,10 +1582,10 @@ if st.session_state.cola_revision_v:
                             [st.session_state.db_ventas, nuevo_df], ignore_index=True
                         )
 
-                    if nit_act:
+                    if id_guardar:
                         rep_act = st.session_state.get("reporte_ventas") or {}
                         nc_dict = rep_act.get("nuevos_clientes", {})
-                        nc_dict[nit_act] = nombre_limpio
+                        nc_dict[id_guardar] = nombre_limpio
                         if st.session_state.reporte_ventas:
                             st.session_state.reporte_ventas["nuevos_clientes"] = nc_dict
 
@@ -1325,25 +1613,17 @@ if st.session_state.reporte_ventas:
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        alerta_con_lista(
-            "error" if rep.get("corruptos") else "success",
-            "💀", "Dañados", rep.get("corruptos", [])
-        )
+        alerta_con_lista("error" if rep.get("corruptos") else "success",
+                         "💀", "Dañados", rep.get("corruptos", []))
     with c2:
-        alerta_con_lista(
-            "warning" if rep.get("invalidos") else "success",
-            "⚠️", "Ignorados (tipo incorrecto)", rep.get("invalidos", [])
-        )
+        alerta_con_lista("warning" if rep.get("invalidos") else "success",
+                         "⚠️", "Ignorados (tipo incorrecto)", rep.get("invalidos", []))
     with c3:
-        alerta_con_lista(
-            "error" if rep.get("duplicados") else "success",
-            "🛑", "Duplicados", rep.get("duplicados", [])
-        )
+        alerta_con_lista("error" if rep.get("duplicados") else "success",
+                         "🛑", "Duplicados", rep.get("duplicados", []))
     with c4:
-        alerta_con_lista(
-            "info" if rep.get("iva_calc") else "success",
-            "🧮", "IVA Calculado", rep.get("iva_calc", [])
-        )
+        alerta_con_lista("info" if rep.get("iva_calc") else "success",
+                         "🧮", "IVA Calculado", rep.get("iva_calc", []))
 
     nc_dict = rep.get("nuevos_clientes", {})
     if nc_dict:
@@ -1360,108 +1640,143 @@ if st.session_state.reporte_ventas:
 if not st.session_state.db_ventas.empty:
     df = st.session_state.db_ventas.copy()
 
+    # Asegurar columnas críticas
+    for col in ['gen_sin_guiones', 'num_control_raw', 'sello', 'anexo', 'dui_cli', 'num_control']:
+        if col not in df.columns:
+            df[col] = ""
+
+    # Separar por anexo
+    df_contribuyentes = df[df['anexo'] == '1'].copy() if 'anexo' in df.columns else pd.DataFrame()
+    df_consumidor     = df[df['anexo'] == '2'].copy() if 'anexo' in df.columns else pd.DataFrame()
+
     st.markdown("### 🔍 Filtros de Auditoría")
-    col_f1, col_f2 = st.columns([2, 1])
+    col_f1, col_f2, col_f3 = st.columns([2, 1, 1])
     with col_f1:
-        busqueda = st.text_input("Buscar cliente 🔎",
-                                 placeholder="Nombre, NIT, Num. Control o UUID…")
+        busqueda = st.text_input("Buscar 🔎", placeholder="Nombre, NIT, DUI, Num. Control o UUID…")
     with col_f2:
-        filtro_tipo = st.multiselect(
-            "Tipo DTE 📄",
-            options=df['tipo'].unique().tolist(),
-            default=df['tipo'].unique().tolist()
-        )
+        tipos_disponibles = df['tipo'].unique().tolist() if 'tipo' in df.columns else []
+        filtro_tipo = st.multiselect("Tipo DTE 📄", options=tipos_disponibles, default=tipos_disponibles)
+    with col_f3:
+        filtro_anexo = st.multiselect("Anexo", options=["1 - Contribuyentes", "2 - Consumidor"],
+                                       default=["1 - Contribuyentes", "2 - Consumidor"])
 
     df_filtrado = df.copy()
     if busqueda:
         t_bus = busqueda.upper()
         mask = (
-            df_filtrado['nom_cli'].str.contains(t_bus, case=False, na=False)  |
-            df_filtrado['nit_cli'].str.contains(t_bus, na=False)              |
-            df_filtrado['num_control'].str.contains(t_bus, case=False, na=False) |
+            df_filtrado['nom_cli'].str.contains(t_bus, case=False, na=False)        |
+            df_filtrado['nit_cli'].str.contains(t_bus, na=False)                    |
+            df_filtrado['dui_cli'].str.contains(t_bus, na=False)                    |
+            df_filtrado['num_control'].str.contains(t_bus, case=False, na=False)    |
             df_filtrado['gen'].str.contains(t_bus, case=False, na=False)
         )
         df_filtrado = df_filtrado[mask]
     if filtro_tipo:
         df_filtrado = df_filtrado[df_filtrado['tipo'].isin(filtro_tipo)]
+    if filtro_anexo:
+        anexos_sel = [a[0] for a in filtro_anexo]  # '1' o '2'
+        df_filtrado = df_filtrado[df_filtrado['anexo'].isin(anexos_sel)]
 
     st.divider()
 
-    df_ccf = df_filtrado[df_filtrado['tipo'] == '03'].copy()
-    df_fac = df_filtrado[df_filtrado['tipo'] == '01'].copy()
-    df_otro= df_filtrado[~df_filtrado['tipo'].isin(['01','03'])].copy()
+    # Separar filtrados
+    df_fil_contrib = df_filtrado[df_filtrado['anexo'] == '1'].copy()
+    df_fil_cons    = df_filtrado[df_filtrado['anexo'] == '2'].copy()
 
-    tab1, tab2, tab3 = st.tabs([
-        "📊 Libro F-07 Ventas",
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🟢 Anexo 1 — Contribuyentes",
+        "🔵 Anexo 2 — Consumidor Final",
         "🔍 Auditoría Completa",
         "📈 Resumen por Tipo"
     ])
 
     with tab1:
-        if not df_ccf.empty:
-            st.markdown("#### 🧾 Ventas a Contribuyentes (CCF — DTE-03)")
-            df_f07_ccf = construir_df_f07_ventas(df_ccf)
-            COLS_NUM = [c for c in df_f07_ccf.columns if df_f07_ccf[c].dtype == float]
+        st.markdown("#### 🧾 Detalle de Ventas a Contribuyentes (CCF / NC / ND)")
+        if not df_fil_contrib.empty:
+            df_f07_c = construir_df_f07_contribuyentes(df_fil_contrib)
+            COLS_NUM_C = [c for c in df_f07_c.columns if df_f07_c[c].dtype == float]
             st.dataframe(
-                df_f07_ccf.style.format({c: "{:.2f}" for c in COLS_NUM}),
+                df_f07_c.style.format({c: "{:.2f}" for c in COLS_NUM_C}),
                 hide_index=True, use_container_width=True
             )
-
-        if not df_fac.empty:
-            st.markdown("#### 🧾 Ventas a Consumidor Final (Facturas — DTE-01)")
-            df_f07_fac = construir_df_f07_ventas(df_fac)
-            COLS_NUM = [c for c in df_f07_fac.columns if df_f07_fac[c].dtype == float]
-            st.dataframe(
-                df_f07_fac.style.format({c: "{:.2f}" for c in COLS_NUM}),
-                hide_index=True, use_container_width=True
-            )
-
-        if not df_otro.empty:
-            st.markdown("#### 📄 Otros Documentos (NC/ND)")
-            df_f07_otro = construir_df_f07_ventas(df_otro)
-            COLS_NUM = [c for c in df_f07_otro.columns if df_f07_otro[c].dtype == float]
-            st.dataframe(
-                df_f07_otro.style.format({c: "{:.2f}" for c in COLS_NUM}),
-                hide_index=True, use_container_width=True
-            )
-
-        df_f07_total = construir_df_f07_ventas(df_filtrado)
-        ETIQUETAS = {
-            "J. Ventas Exentas"      : "Exentas",
-            "K. Ventas No Sujetas"   : "No Sujetas",
-            "L. Ventas Gravadas"     : "Gravadas",
-            "M. Débito Fiscal"       : "Débito Fiscal",
-            "N. Vtas Cuenta Terceros": "Terceros",
-            "O. Déb. Fiscal Terceros": "Déb. Terceros",
-            "P. Total Ventas"        : "Total General",
-        }
-        partes = []
-        for col_key, etiqueta in ETIQUETAS.items():
-            if col_key in df_f07_total.columns:
-                suma = df_f07_total[col_key].sum()
-                if suma > 0:
-                    if col_key == "P. Total Ventas":
-                        partes.append(f"**🟢 {etiqueta}:** `${suma:,.2f}`")
-                    else:
-                        partes.append(f"**{etiqueta}:** `${suma:,.2f}`")
-
-        if partes:
-            st.markdown("> " + " &nbsp;|&nbsp; ".join(partes))
+            # Resumen
+            sumas = []
+            for lbl, col_key in [
+                ("Exentas", "J. Ventas Exentas"),
+                ("No Sujetas", "K. Ventas No Sujetas"),
+                ("Gravadas", "L. Ventas Gravadas"),
+                ("Débito Fiscal", "M. Débito Fiscal"),
+                ("Total", "P. Total Ventas"),
+            ]:
+                if col_key in df_f07_c.columns:
+                    v = df_f07_c[col_key].sum()
+                    if v > 0 or lbl == "Total":
+                        sumas.append(f"**{lbl}:** `${v:,.2f}`")
+            if sumas:
+                st.markdown("> " + " &nbsp;|&nbsp; ".join(sumas))
         else:
-            st.markdown("> *Sin montos registrados.*")
-
-        st.markdown("---")
-        if st.button("📥 Generar Excel para Hacienda", type="primary"):
-            ventana_descarga_ventas(
-                df_f07_total,
-                f"F07_Ventas_{safe_str(cliente.get('nombre','')).replace(' ','_')}.xlsx"
-            )
+            st.info("Sin documentos de contribuyentes en el filtro actual.")
 
     with tab2:
-        st.write(f"📊 Registros: **{len(df_filtrado)}** de **{len(df)}**")
-        st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
+        st.markdown("#### 🧾 Detalle de Ventas a Consumidor Final (Facturas)")
+        st.caption("ℹ️ Según manual F-07: los DTE de consumidor se agrupan por día. Aquí se muestran individuales para auditoría.")
+        if not df_fil_cons.empty:
+            df_f07_cons = construir_df_f07_consumidor(df_fil_cons)
+            COLS_NUM_CONS = [c for c in df_f07_cons.columns if df_f07_cons[c].dtype == float]
+            st.dataframe(
+                df_f07_cons.style.format({c: "{:.2f}" for c in COLS_NUM_CONS}),
+                hide_index=True, use_container_width=True
+            )
+            sumas_cons = []
+            for lbl, col_key in [
+                ("Exentas", "K. Ventas Exentas"),
+                ("No Sujetas", "M. Ventas No Sujetas"),
+                ("Gravadas c/IVA", "N. Ventas Gravadas (c/IVA)"),
+                ("Total", "T. Total Ventas"),
+            ]:
+                if col_key in df_f07_cons.columns:
+                    v = df_f07_cons[col_key].sum()
+                    if v > 0 or lbl == "Total":
+                        sumas_cons.append(f"**{lbl}:** `${v:,.2f}`")
+            if sumas_cons:
+                st.markdown("> " + " &nbsp;|&nbsp; ".join(sumas_cons))
+        else:
+            st.info("Sin facturas de consumidor final en el filtro actual.")
+
+        if not df_fil_cons.empty:
+            st.markdown("---")
+            st.markdown("##### 📅 Agrupado por Día (vista previa para Hacienda)")
+            st.caption("El portal de Hacienda requiere los DTE-01 agrupados por día con UUID del primero y último DTE.")
+            try:
+                df_agrup = df_fil_cons.groupby('fecha').agg(
+                    Documentos=('total', 'count'),
+                    UUID_primero=('gen_sin_guiones', 'first'),
+                    UUID_ultimo=('gen_sin_guiones', 'last'),
+                    Exentas=('exentas', 'sum'),
+                    No_Sujetas=('no_sujetas', 'sum'),
+                    Gravadas_con_IVA=('gravadas', 'sum'),
+                    Total=('total', 'sum'),
+                ).reset_index()
+                st.dataframe(df_agrup, hide_index=True, use_container_width=True)
+            except Exception:
+                st.info("No se pudo generar agrupado por día.")
 
     with tab3:
+        st.write(f"📊 Registros: **{len(df_filtrado)}** de **{len(df)}**")
+        df_auditoria = construir_df_f07_ventas_combinado(df_filtrado)
+        st.dataframe(df_auditoria, use_container_width=True, hide_index=True)
+
+        col_dl1, col_dl2 = st.columns(2)
+        with col_dl1:
+            st.download_button(
+                "📥 Descargar Auditoría Excel",
+                data=to_excel_auditoria(df_auditoria),
+                file_name=f"Auditoria_Ventas_{safe_str(cliente.get('nombre','')).replace(' ','_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="secondary", use_container_width=True
+            )
+
+    with tab4:
         if not df_filtrado.empty:
             resumen_tipo = df_filtrado.groupby('tipo').agg(
                 Documentos=('total', 'count'),
@@ -1471,24 +1786,59 @@ if not st.session_state.db_ventas.empty:
                 Debito_Fiscal=('debito', 'sum'),
                 Total=('total', 'sum'),
             ).reset_index()
-            resumen_tipo.columns = [
-                'Tipo DTE', 'Docs', 'Exentas', 'No Sujetas',
-                'Gravadas', 'Débito Fiscal', 'Total'
-            ]
-            COLS_NUM_R = ['Exentas','No Sujetas','Gravadas','Débito Fiscal','Total']
+            
+            # Agregar descripción
+            desc_tipo = {
+                "01": "Factura Consumidor Final",
+                "03": "Comprobante Crédito Fiscal",
+                "05": "Nota de Crédito",
+                "06": "Nota de Débito",
+                "02": "Factura Simplificada",
+            }
+            resumen_tipo['Descripción'] = resumen_tipo['tipo'].map(lambda x: desc_tipo.get(x, f"DTE-{x}"))
+            resumen_tipo['Anexo']       = resumen_tipo['tipo'].map(
+                lambda x: "Anexo 1 (Contrib.)" if x in TIPOS_CONTRIBUYENTES else "Anexo 2 (Consumidor)"
+            )
+            resumen_tipo = resumen_tipo[['tipo', 'Descripción', 'Anexo', 'Documentos',
+                                          'Exentas', 'No_Sujetas', 'Gravadas', 'Debito_Fiscal', 'Total']]
+            resumen_tipo.columns = ['Tipo', 'Descripción', 'Anexo', 'Docs',
+                                     'Exentas', 'No Sujetas', 'Gravadas', 'Débito Fiscal', 'Total']
+            COLS_NUM_R = ['Exentas', 'No Sujetas', 'Gravadas', 'Débito Fiscal', 'Total']
             st.dataframe(
                 resumen_tipo.style.format({c: "${:,.2f}" for c in COLS_NUM_R}),
                 hide_index=True, use_container_width=True
             )
+
+            # Total general
+            st.markdown("---")
+            col_tot1, col_tot2 = st.columns(2)
+            with col_tot1:
+                total_contrib = df_filtrado[df_filtrado['anexo'] == '1']['total'].sum()
+                st.metric("Anexo 1 — Total Contribuyentes", f"${total_contrib:,.2f}")
+            with col_tot2:
+                total_cons = df_filtrado[df_filtrado['anexo'] == '2']['total'].sum()
+                st.metric("Anexo 2 — Total Consumidor Final", f"${total_cons:,.2f}")
         else:
             st.info("Sin datos para mostrar.")
+
+    # ── Botón de descarga principal ────────────────────────────────────────────
+    st.markdown("---")
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+    with col_btn2:
+        if st.button("📥 Generar Archivos para Hacienda", type="primary", use_container_width=True):
+            ventana_descarga_ventas(
+                df_contribuyentes if not df_contribuyentes.empty else df_fil_contrib,
+                df_consumidor     if not df_consumidor.empty else df_fil_cons,
+                safe_str(cliente.get('nombre', '')).replace(' ', '_')
+            )
 
 else:
     st.markdown("""
     <div style="text-align:center; padding:60px 20px;">
         <h3 style="color:#8A9A35 !important;">📂 Sin documentos cargados</h3>
         <p style="color:#4A5520 !important;">
-            Usa el panel lateral para cargar y procesar PDFs de ventas.
+            Usa el panel lateral para cargar y procesar PDFs de ventas.<br>
+            Acepta: DTE-01 (Factura), DTE-03 (CCF), DTE-05 (NC), DTE-06 (ND)
         </p>
     </div>
     """, unsafe_allow_html=True)
