@@ -155,19 +155,15 @@ CORTE_NOMBRE = re.compile(
     re.I | re.S
 )
 
-
 # ─────────────────────────────────────────────
 # 5. UTILIDADES SEGURAS
 # ─────────────────────────────────────────────
 def safe_str(val) -> str:
-    """Convierte cualquier valor a string seguro, nunca retorna None."""
     if val is None:
         return ""
     return str(val)
 
-
 def safe_extract_text(page, layout: bool = False) -> str:
-    """Extrae texto de una página PDF sin lanzar excepción si falla."""
     try:
         if layout:
             txt = page.extract_text(layout=True)
@@ -180,15 +176,10 @@ def safe_extract_text(page, layout: bool = False) -> str:
         except Exception:
             return ""
 
-
 def es_linea_direccion(texto: str) -> bool:
     L = safe_str(texto).upper().strip()
     return any(L.startswith(p) or (f" {p}" in L[:50]) for p in PREFIJOS_DIRECCION)
 
-
-# ─────────────────────────────────────────────
-# 6. FUNCIONES AUXILIARES
-# ─────────────────────────────────────────────
 def cargar_proveedores_json() -> dict:
     archivo = "data/proveedores.json"
     if not os.path.exists(archivo):
@@ -203,7 +194,6 @@ def cargar_proveedores_json() -> dict:
     except Exception:
         return {}
 
-
 def guardar_proveedor_rapido(nit: str, nombre: str) -> None:
     if not nit or not safe_str(nombre).strip():
         return
@@ -216,7 +206,6 @@ def guardar_proveedor_rapido(nit: str, nombre: str) -> None:
     with open(archivo, "w", encoding="utf-8") as f:
         json.dump(db, f, indent=4, ensure_ascii=False)
 
-
 def actualizar_nombre_en_db(nit: str, nombre: str) -> None:
     if not nit or not safe_str(nombre).strip():
         return
@@ -227,9 +216,7 @@ def actualizar_nombre_en_db(nit: str, nombre: str) -> None:
     if mask.any():
         st.session_state.db_compras.loc[mask, "nom_prov"] = safe_str(nombre).strip().upper()
 
-
 def limpiar_monto(monto_str) -> float:
-    """Limpia y convierte un string de monto a float, nunca lanza excepción."""
     try:
         s = re.sub(r'[^\d.,]', '', safe_str(monto_str).strip())
         if not s:
@@ -246,76 +233,72 @@ def limpiar_monto(monto_str) -> float:
     except Exception:
         return 0.0
 
-
+# ─────────────────────────────────────────────
+# 6. CAZA-FECHAS INMUNE A LEO / VENCIMIENTOS
+# ─────────────────────────────────────────────
 def extraer_y_formatear_fecha(texto: str) -> str:
-    """Extrae y normaliza fecha a DD/MM/YYYY. Inmune a horas y formatos mixtos."""
     try:
         texto = safe_str(texto)
         # Limpiar horas pegadas (ej. 14/04/2026-16:38 o 2026-04-20 11:15:43)
         texto = re.sub(r'-\s*\d{1,2}:\d{2}(?::\d{2})?', '', texto)
         texto = re.sub(r'\s+\d{1,2}:\d{2}(?::\d{2})?', '', texto)
 
-        # 1. Formato ISO: YYYY-MM-DD o YYYY/MM/DD
-        m_f = re.search(
-            r"\b(20[2-3]\d)\s*[-\/]\s*(0[1-9]|1[0-2])\s*[-\/]\s*([0-2]\d|3[01])\b",
-            texto
-        )
-        if m_f:
-            return f"{int(m_f.group(3)):02d}/{int(m_f.group(2)):02d}/{m_f.group(1)}"
-
-        # 2. Con etiqueta FECHA DE EMISION / GENERACION (Universal)
-        m_f = re.search(
-            r"(?:FECHA\s*(?:DE\s*)?(?:EMISI[OÓ]N|GENERACI[OÓ]N|EMISION|GENERACION)?)"
-            r"[^\d]{0,20}(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})",
-            texto, re.I
-        )
-        if m_f:
-            d, mo, y = int(m_f.group(1)), int(m_f.group(2)), int(m_f.group(3))
-            if d <= 12 and mo > 12:
-                d, mo = mo, d
-            if mo <= 12:
-                return f"{d:02d}/{mo:02d}/{y}"
-
-        # 3. DD-MM-YYYY o DD/MM/YYYY libre
-        m_f = re.search(
-            r"\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b",
-            texto
-        )
-        if m_f:
-            p1, p2, y = int(m_f.group(1)), int(m_f.group(2)), m_f.group(3)
+        candidatas = []
+        
+        # 1. Formato ISO: YYYY-MM-DD
+        for m in re.finditer(r"\b(20[2-3]\d)\s*[-\/]\s*(0[1-9]|1[0-2])\s*[-\/]\s*([0-2]\d|3[01])\b", texto):
+            candidatas.append((m.start(), f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/{m.group(1)}"))
+            
+        # 2. Formato Alfanumérico (ej. 14/abr/2026 o 25/abr. 2026)
+        meses = {
+            "ene": "01", "feb": "02", "mar": "03", "abr": "04", 
+            "may": "05", "jun": "06", "jul": "07", "ago": "08", 
+            "sep": "09", "oct": "10", "nov": "11", "dic": "12"
+        }
+        for m in re.finditer(r"\b(\d{1,2})\s*[\/\-\.,\s]\s*([a-zA-Z]{3})[a-zA-Z]*[\.]?\s*[\/\-\.,\s]?\s*(20[2-3]\d)\b", texto.lower()):
+            m_str = m.group(2)
+            if m_str in meses:
+                candidatas.append((m.start(), f"{int(m.group(1)):02d}/{meses[m_str]}/{m.group(3)}"))
+                
+        # 3. Formato Normal DD/MM/YYYY
+        for m in re.finditer(r"\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b", texto):
+            p1, p2, y = int(m.group(1)), int(m.group(2)), m.group(3)
             if p1 <= 12 and p2 > 12:
-                return f"{p2:02d}/{p1:02d}/{y}"
+                candidatas.append((m.start(), f"{p2:02d}/{p1:02d}/{y}"))
             elif p2 <= 12 and p1 > 12:
-                return f"{p1:02d}/{p2:02d}/{y}"
+                candidatas.append((m.start(), f"{p1:02d}/{p2:02d}/{y}"))
             elif p2 <= 12 and p1 <= 31:
-                return f"{p1:02d}/{p2:02d}/{y}"
+                candidatas.append((m.start(), f"{p1:02d}/{p2:02d}/{y}"))
+                
+        # Ordenamos por aparición en el documento
+        candidatas.sort(key=lambda x: x[0])
+        
+        # Filtro de Exclusión (Escudo Farmacéutico)
+        for pos, fecha in candidatas:
+            contexto = texto[max(0, pos-25):pos].upper()
+            if any(w in contexto for w in ["V:", "VENCE", "LOTE", "V.", "V :"]):
+                continue
+            return fecha
+
     except Exception:
         pass
     return ""
 
-
-# ══════════════════════════════════════════════════════════════
-# EXTRACCIÓN DE NOMBRE DEL PROVEEDOR (Con Filtro Inverso)
-# ══════════════════════════════════════════════════════════════
-def extraer_nombre_proveedor(
-    texto_completo: str,
-    pos_nit: int,
-    cliente_activo: dict,
-) -> str:
+# ─────────────────────────────────────────────
+# 7. EXTRACCIÓN DE NOMBRE DEL PROVEEDOR
+# ─────────────────────────────────────────────
+def extraer_nombre_proveedor(texto_completo: str, nit_prov: str, pos_nit: int, cliente_activo: dict) -> str:
     texto_completo = safe_str(texto_completo)
-    
-    # INVERSIÓN DE FILTRO: Obtenemos el nombre de nuestro cliente para ignorarlo radicalmente
     nombre_receptor = safe_str(cliente_activo.get('nombre', '')).strip().upper()
 
     def limpiar(s: str) -> str:
         try:
             s = safe_str(s)
-            
-            # Borrar activamente a nuestro cliente de la linea (Evita fusiones)
+            # Borrar activamente a nuestro cliente de la linea
             if nombre_receptor and len(nombre_receptor) > 3:
                 s = re.compile(re.escape(nombre_receptor), re.I).sub("", s)
             
-            # Si quedaron etiquetas pegadas (ej. NOMBRE O RAZON:), cortar por la derecha
+            # Cortar si quedaron etiquetas del receptor pegadas
             s = re.split(r"(?i)(?:NOMBRE\s+O\s+RAZ[OÓ]N\s+SOCIAL|RAZ[OÓ]N\s+SOCIAL|CLIENTE)\s*[:\-]*\s*", s)[0]
 
             s = re.sub(
@@ -337,7 +320,7 @@ def extraer_nombre_proveedor(
             T = safe_str(s).strip().upper()
             if len(T) < 4 or len(T) > 90:
                 return False
-            # Bloqueo estricto
+            # Bloqueo anti-espejo
             if nombre_receptor and (T == nombre_receptor or T.startswith(nombre_receptor[:15])):
                 return False
             if any(b in T for b in BASURA_ESTRICTA):
@@ -359,13 +342,24 @@ def extraer_nombre_proveedor(
             return False
 
     try:
+        # Estrategia 1: Ancla Geométrica (Línea inmediatamente arriba del NIT)
+        lineas_todas = [ln.strip() for ln in texto_completo.split('\n') if ln.strip()]
+        for i, linea in enumerate(lineas_todas):
+            if nit_prov in re.sub(r'[^0-9]', '', linea) and nit_prov != "":
+                if i > 0:
+                    candidato = limpiar(lineas_todas[i-1])
+                    if valido(candidato): return candidato
+                if i > 1:
+                    candidato = limpiar(lineas_todas[i-2])
+                    if valido(candidato): return candidato
+
+        # Estrategia 2: Etiquetas Explícitas
         inicio  = max(0, pos_nit - 1500)
         fin     = min(len(texto_completo), pos_nit + 600)
         ventana = texto_completo[inicio:fin]
 
-        # Estrategia A: etiqueta explicita
         patron_etq = re.compile(
-            r"(?:Nombre(?:\s+[Oo]\s+[Rr]az[oó]n\s+[Ss]ocial)?|"
+            r"(?:Nombre(?:[\s/]+[Oo]?[\s/]*[Rr]az[oó]n\s+[Ss]ocial)?|"
             r"[Rr]az[oó]n\s+[Ss]ocial|Nombre\s+[Cc]omercial|"
             r"[Rr]az[oó]n\s*[Ss]ocial\s*del\s*[Ee]misor|"
             r"Nombre\s+del\s+[Ee]misor)"
@@ -378,56 +372,16 @@ def extraer_nombre_proveedor(
             candidato  = limpiar(lineas_cap[0])
             if len(candidato) < 6 and len(lineas_cap) > 1:
                 candidato = limpiar(lineas_cap[0] + " " + lineas_cap[1])
-            if valido(candidato):
-                return candidato
+            if valido(candidato): return candidato
 
-        # Estrategia B: lineas antes del NIT
-        ventana_antes = texto_completo[inicio:pos_nit]
-        lineas_antes  = [ln.strip() for ln in ventana_antes.split('\n') if ln.strip()]
-        for linea in reversed(lineas_antes[-22:]):
-            candidato = limpiar(linea)
-            if valido(candidato):
-                return candidato
-
-        # Estrategia C: lineas despues del NIT
-        ventana_despues = texto_completo[pos_nit:fin]
-        lineas_despues  = [ln.strip() for ln in ventana_despues.split('\n') if ln.strip()]
-        for linea in lineas_despues[:10]:
-            candidato = limpiar(linea)
-            if valido(candidato):
-                return candidato
-
-        # Estrategia D: palabras comerciales
+        # Estrategia 3: Palabras Comerciales
         for linea in ventana.split('\n'):
             L = safe_str(linea).strip().upper()
             if not any(w in L for w in PALABRAS_COMERCIALES):
                 continue
-            clean     = re.split(r'\s{4,}|(?:NIT|NRC|N\.I\.T|N\.R\.C)\s', L)[0].strip()
+            clean = re.split(r'\s{4,}|(?:NIT|NRC|N\.I\.T|N\.R\.C)\s', L)[0].strip()
             candidato = limpiar(clean)
-            if valido(candidato):
-                return candidato
-
-        # Estrategia E: seccion EMISOR delimitada
-        m_sec = re.search(
-            r"(?i)(?:DATOS\s+DEL\s+EMISOR|EMISOR\s*[:\-]|CONTRIBUYENTE\s+EMISOR)"
-            r"(.{10,600}?)"
-            r"(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR|ADQUIRIENTE|CLIENTE\s*:)",
-            texto_completo, re.S
-        )
-        if m_sec:
-            seccion = safe_str(m_sec.group(1))
-            m_n = re.search(
-                r"(?:Nombre|Raz[oó]n\s+[Ss]ocial)[:\s]+([^\n]{4,80})",
-                seccion, re.I
-            )
-            if m_n:
-                candidato = limpiar(safe_str(m_n.group(1)))
-                if valido(candidato):
-                    return candidato
-            for linea in seccion.split('\n'):
-                candidato = limpiar(linea.strip())
-                if valido(candidato):
-                    return candidato
+            if valido(candidato): return candidato
 
     except Exception:
         pass
@@ -436,11 +390,10 @@ def extraer_nombre_proveedor(
 
 
 # ══════════════════════════════════════════════════════════════
-# EXTRACTOR PRINCIPAL — COMPRAS (Robustecido)
+# EXTRACTOR PRINCIPAL — COMPRAS (Motor Refactorizado)
 # ══════════════════════════════════════════════════════════════
 def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
-    # ── Validación física ─────────────────────────────────────
     if not file_bytes or len(file_bytes) < 512:
         return {"error_fatal": "Archivo vacio o demasiado pequeño."}
 
@@ -453,7 +406,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 return {"error_fatal": "PDF sin paginas."}
             for page in pdf.pages:
                 texto_lineal += safe_extract_text(page, layout=False) + "\n"
-                texto_visual  += safe_extract_text(page, layout=True)  + "\n"
+                texto_visual += safe_extract_text(page, layout=True)  + "\n"
 
         texto_lineal   = safe_str(texto_lineal)
         texto_visual   = safe_str(texto_visual)
@@ -462,11 +415,10 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if len(texto_completo.strip()) < 50:
             return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
 
-        # ── Normalización segura ──────────────────────────────
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
         t_no_sp = re.sub(r'\s+', '', t_clean).upper()
 
-        # ── Tipo DTE ──────────────────────────────────────────
+        # ── Tipo DTE (DTE-01 Habilitado) ──────────────────────
         m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_sp)
         tipo   = "01"
         ctrl   = ""
@@ -478,45 +430,32 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         if not ctrl:
             return {"error_tipo": "No se detecto un Numero de Control DTE valido."}
-        if tipo not in ("03", "05", "06"):
-            return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten 03, 05 y 06."}
+        if tipo not in ("01", "03", "05", "06", "11", "14"):
+            return {"error_tipo": f"Documento DTE-{tipo}. Solo admitidos: 01, 03, 05, 06, 11 y 14."}
 
         nit_receptor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
         dui_receptor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('dui', '')))
         excluir_nits = {nit_receptor, dui_receptor} - {""}
 
-        # ── UUID / Código de Generación ───────────────────────
+        # ── Reparador de UUID (S->5, O->0) ────────────────────
         gen   = ""
         m_url = re.search(r"CODGEN=([A-F0-9\-]{36})", t_no_sp)
         if m_url:
             gen = safe_str(m_url.group(1)).upper()
         else:
             m_uuid = re.search(
-                r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
+                r"([A-Z0-9]{8}-?[A-Z0-9]{4}-?[A-Z0-9]{4}-?[A-Z0-9]{4}-?[A-Z0-9]{12})",
                 t_no_sp
             )
             if m_uuid:
-                raw = safe_str(m_uuid.group(1)).replace("-", "")
+                raw = re.sub(r'[^A-Z0-9]', '', m_uuid.group(1).upper())
                 if len(raw) == 32:
+                    map_ocr = {"S": "5", "O": "0", "I": "1", "Z": "2", "G": "6", "Q": "0", "T": "7"}
+                    for k, v in map_ocr.items():
+                        raw = raw.replace(k, v)
                     gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
 
-        if not gen:
-            m_uuid2 = re.search(
-                r"([0-9A-Fa-f]{8}[- ]?[0-9A-Fa-f]{4}[- ]?"
-                r"[0-9A-Fa-f]{4}[- ]?[0-9A-Fa-f]{4}[- ]?[0-9A-Fa-f]{12})",
-                texto_completo
-            )
-            if m_uuid2:
-                raw2 = re.sub(r'[^0-9A-Fa-f]', '', safe_str(m_uuid2.group(1)))
-                if len(raw2) == 32:
-                    gen = f"{raw2[:8]}-{raw2[8:12]}-{raw2[12:16]}-{raw2[16:20]}-{raw2[20:]}".upper()
-
-        # ── Zona segura para Fechas (Header Cropping) ─────────
-        # Cortamos ANTES de la tabla de detalles para no atrapar fechas de vencimiento de productos
-        corte_detalles = re.search(r"(?i)\b(CANTIDAD|CANT\.|DESCRIPCI[OÓ]N|DOCUMENTOS RELACIONADOS|CÓDIGO)\b", texto_completo)
-        texto_encabezado = texto_completo[:corte_detalles.start()] if corte_detalles else texto_completo[:1500]
-        
-        fecha = extraer_y_formatear_fecha(texto_encabezado)
+        fecha = extraer_y_formatear_fecha(texto_completo)
 
         # ── Datos del proveedor ───────────────────────────────
         nit_prov       = ""
@@ -528,9 +467,7 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         patron_etq_nit = re.compile(
             r"N\.?\s*I\.?\s*T\.?\s*[:\s]\s*"
-            r"((?:\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d)"
-            r"|(?:\d{14})"
-            r"|(?:\d{8}[\s\-]?\d))",
+            r"((?:\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d)|(?:\d{14})|(?:\d{8}[\s\-]?\d))",
             re.I
         )
 
@@ -542,34 +479,8 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 break
 
         if not nit_prov:
-            partes_doc = re.split(
-                r"(?i)\b(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR\s*[:\-]|"
-                r"DATOS\s+DEL\s+ADQUIRIENTE|ADQUIRIENTE\s*[:\-]|"
-                r"RECEPTOR\b|CLIENTE\s*:|COMPRADOR\b)\b",
-                texto_completo, maxsplit=1
-            )
-            texto_emisor   = partes_doc[0] if len(partes_doc[0]) > 80 else texto_completo[:2500]
-            patron_nit_raw = re.compile(
-                r"\b(\d{4})[\s\-]?\d{3,6}[\s\-]?\d{2,6}[\s\-]?\d\b|\b(\d{14})\b"
-            )
-            for m_raw_nit in patron_nit_raw.finditer(texto_emisor):
-                nit_cand = re.sub(r'[^0-9]', '', safe_str(m_raw_nit.group(0)))
-                if nit_cand not in excluir_nits and len(nit_cand) == 14:
-                    nit_prov       = nit_cand
-                    pos_nit_emisor = m_raw_nit.start()
-                    break
-
-        if not nit_prov:
-            m_url_nit = re.search(r"NIT[=\s]?(\d{14})", t_no_sp)
-            if m_url_nit:
-                nit_cand = safe_str(m_url_nit.group(1))
-                if nit_cand not in excluir_nits:
-                    nit_prov = nit_cand
-
-        if not nit_prov:
             patron_todos = re.compile(
-                r"\b\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d\b"
-                r"|\b\d{14}\b|\b\d{8}[\s\-]?\d\b|\b\d{9}\b"
+                r"\b\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d\b|\b\d{14}\b|\b\d{8}[\s\-]?\d\b|\b\d{9}\b"
             )
             for m_any_nit in patron_todos.finditer(texto_completo):
                 nit_cand = re.sub(r'[^0-9]', '', safe_str(m_any_nit.group(0)))
@@ -581,142 +492,111 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         if len(nit_prov) == 9:
             dui_prov = nit_prov
 
-        # ── BD de proveedores (Filtro Directo) ────────────────
         if nit_prov and nit_prov in proveedores_db:
             nom_prov = safe_str(proveedores_db[nit_prov].get("nombre", ""))
             es_nuevo = False
 
-        # ── Nombre del proveedor ──────────────────────────────
         if es_nuevo and nit_prov:
-            pos_busqueda = pos_nit_emisor if pos_nit_emisor >= 0 else len(texto_completo) // 4
-
-            # Le pasamos el cliente_activo para aislar y borrar su nombre
-            nombre_encontrado = extraer_nombre_proveedor(
-                texto_completo, pos_busqueda, cliente_activo
-            )
-
+            nombre_encontrado = extraer_nombre_proveedor(texto_completo, nit_prov, pos_nit_emisor, cliente_activo)
+            
             if not nombre_encontrado and texto_visual.strip():
-                pos_vis = -1
-                for m_vis_nit in patron_etq_nit.finditer(texto_visual):
-                    nc = re.sub(r'[^0-9]', '', safe_str(m_vis_nit.group(1)))
-                    if nc == nit_prov:
-                        pos_vis = m_vis_nit.start()
-                        break
-                if pos_vis < 0:
-                    m_crudo = re.search(re.escape(nit_prov[:8]), texto_visual)
-                    pos_vis = m_crudo.start() if m_crudo else len(texto_visual) // 4
-
-                nombre_encontrado = extraer_nombre_proveedor(
-                    texto_visual, pos_vis, cliente_activo
-                )
+                nombre_encontrado = extraer_nombre_proveedor(texto_visual, nit_prov, -1, cliente_activo)
 
             nom_prov = nombre_encontrado if nombre_encontrado else "ESCRIBE EL NOMBRE AQUI"
 
-        # ── Extracción de montos ──────────────────────────────
+        # ── Extracción de montos (FOV/COT Reparado) ───────────
         e, g, i, ret, perc, t = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         iva_calculado = False
 
-        # FIX GASOLINERAS: Exentos -> FOVIAL y COTRANS
         for impuesto in ["FOVIAL", "COTRANS"]:
-            m_imp = re.search(fr"{impuesto}[^\d]{{0,30}}(\d{{1,3}}(?:[.,]\d{{3}})*[.,]\d{{1,2}})", t_clean, re.I)
-            if m_imp:
-                e += limpiar_monto(safe_str(m_imp.group(1)))
+            for linea in texto_completo.split('\n'):
+                if impuesto in linea.upper():
+                    nums = re.findall(r"\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2}", linea)
+                    if nums:
+                        e += max(limpiar_monto(n) for n in nums)
 
         m_exe = re.search(
             r"(?:Ventas?\s+Exentas?|Total\s+Exento|Exentas?)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            t_clean, re.I
+            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})", t_clean, re.I
         )
         if m_exe:
             val_exe = limpiar_monto(safe_str(m_exe.group(1)))
-            # Priorizamos el valor explicito Exento si es mayor que la suma manual de fovial
             if val_exe > e:
                 e = val_exe
         e = round(e, 2)
 
         m_ret = re.search(
             r"(?:Retenido|Retenci[oó]n\s+IVA|IVA\s+Retenido)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            t_clean, re.I
+            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})", t_clean, re.I
         )
         if m_ret:
             ret = limpiar_monto(safe_str(m_ret.group(1)))
 
         patrones_total = [
-            r"(?:TOTAL\s+A\s+PAGAR|TOTAL\s+PAGAR)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:MONTO\s+TOTAL|TOTAL\s+OPERACI[OÓ]N)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:VENTA\s+TOTAL|TOTAL\s*\$)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:VALOR\s+TOTAL\s+A\s+PAGAR|TOTAL\s+FACTURA)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:TOTAL\s+(?:EN\s+)?LETRAS?)[^\d]{0,60}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:TOTAL\s+A\s+PAGAR|TOTAL\s+PAGAR)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:MONTO\s+TOTAL|TOTAL\s+OPERACI[OÓ]N)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:VENTA\s+TOTAL|TOTAL\s*\$|TOTAL[:\s]*)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:VALOR\s+TOTAL\s+A\s+PAGAR|TOTAL\s+FACTURA)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
         ]
         for pat_tot in patrones_total:
             m_tot = re.search(pat_tot, t_clean, re.I)
             if m_tot:
                 t = limpiar_monto(safe_str(m_tot.group(1)))
-                if t > 0:
-                    break
+                if t > 0: break
 
         patrones_iva = [
-            r"(?:Impuesto\s+al\s+Valor\s+Agregado|IVA\s*13\s*%|13\s*%\s*IVA)"
-            r"[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:I\.V\.A\.?|DÉBITO\s+FISCAL|DEBITO\s+FISCAL)"
-            r"[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            r"(?:Impuesto\s+IVA|IVA\s+Débito|IVA\s+Debito)"
-            r"[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:Impuesto\s+al\s+Valor\s+Agregado|IVA\s*13\s*%|13\s*%\s*IVA)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:I\.V\.A\.?|DÉBITO\s+FISCAL|DEBITO\s+FISCAL)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"(?:Impuesto\s+IVA|IVA\s+Débito|IVA\s+Debito)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
         ]
         for pat_iva in patrones_iva:
             m_iva = re.search(pat_iva, t_clean, re.I)
             if m_iva:
                 i = limpiar_monto(safe_str(m_iva.group(1)))
-                if i > 0:
-                    break
+                if i > 0: break
 
-        # ── Reconciliación ──────────────────────────────
-        encontrado = False
-        if not (t > 0 and i > 0):
-            montos_raw = re.findall(
-                r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-                t_clean
-            )
-            set_montos = set()
-            for raw_val in montos_raw:
-                val_limpio = limpiar_monto(raw_val)
-                if val_limpio > 0:
-                    set_montos.add(val_limpio)
+        m_grav = re.search(
+            r"(?:Ventas?\s+Gravadas?\s+Locales?|Subtotal\s+Gravado|Ventas?\s+Gravadas?|VENTAS\s+AFECTAS)[^\d]{0,30}"
+            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})", t_clean, re.I
+        )
+        if m_grav:
+            g = limpiar_monto(safe_str(m_grav.group(1)))
 
-            valores = sorted(list(set_montos), reverse=True)[:MAX_VALORES_LOOP]
+        # ── Lógica de Reconciliación DTE-01 vs DTE-03 ─────────
+        if tipo == "01":
+            # Consumidor Final no genera Crédito Fiscal
+            i = 0.0
+            g = t
+            encontrado = True
+        else:
+            encontrado = False
+            if not (t > 0 and i > 0 and g > 0):
+                montos_raw = re.findall(r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})", t_clean)
+                set_montos = {limpiar_monto(val) for val in montos_raw if limpiar_monto(val) > 0}
+                valores = sorted(list(set_montos), reverse=True)[:MAX_VALORES_LOOP]
 
-            for vt in valores:
-                if encontrado:
-                    break
-                for vg in valores:
-                    if vg >= vt:
-                        continue
-                    if encontrado:
-                        break
-                    for vi in valores:
-                        if vi >= vg:
-                            continue
-                        if abs(round(vg * 0.13, 2) - round(vi, 2)) <= 0.05:
-                            if abs(round(vg + vi + e - ret, 2) - round(vt, 2)) <= 0.05:
-                                g, i, t    = vg, vi, vt
-                                encontrado = True
-                                break
+                for vt in valores:
+                    if encontrado: break
+                    for vg in valores:
+                        if vg >= vt: continue
+                        if encontrado: break
+                        for vi in valores:
+                            if vi >= vg: continue
+                            if abs(round(vg * 0.13, 2) - round(vi, 2)) <= 0.05:
+                                if abs(round(vg + vi + e - ret, 2) - round(vt, 2)) <= 0.05:
+                                    g, i, t = vg, vi, vt
+                                    encontrado = True
+                                    break
 
-        if not encontrado:
-            if t > 0 and i > 0:
-                g          = round(t - i - e + ret, 2)
-                encontrado = True
-            elif t > 0 and i == 0.0 and tipo == "03":
-                g             = round((t + ret - e) / 1.13, 2)
-                i             = round(t + ret - e - g, 2)
-                iva_calculado = True
-                encontrado    = True
+            if not encontrado:
+                if t > 0 and i > 0:
+                    g = round(t - i - e + ret, 2)
+                    encontrado = True
+                elif t > 0 and i == 0.0 and tipo == "03":
+                    g = round((t + ret - e) / 1.13, 2)
+                    i = round(t + ret - e - g, 2)
+                    iva_calculado = True
+                    encontrado = True
 
         return {
             "fecha"    : fecha,
@@ -742,7 +622,6 @@ def extraer_compras_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
     except Exception as err:
         return {"error_extraccion": safe_str(err)}
 
-
 # ─────────────────────────────────────────────
 # EXPORTAR EXCEL
 # ─────────────────────────────────────────────
@@ -760,7 +639,6 @@ def to_excel_hacienda_compras(df: pd.DataFrame) -> bytes:
                     celda.number_format = '#,##0.00'
     return output.getvalue()
 
-
 @st.dialog("Seguro de Calidad de Compras")
 def ventana_descarga_compras(df_resultados: pd.DataFrame, nombre_archivo: str) -> None:
     st.write(
@@ -773,7 +651,6 @@ def ventana_descarga_compras(df_resultados: pd.DataFrame, nombre_archivo: str) -
         file_name=nombre_archivo,
         type="primary"
     )
-
 
 # ─────────────────────────────────────────────
 # HELPER: alerta + lista expandible
@@ -790,7 +667,6 @@ def alerta_con_lista(tipo_alerta: str, icono: str, titulo: str, archivos: list) 
             )
     else:
         st.success(f"✅ 0 {titulo}")
-
 
 # ─────────────────────────────────────────────
 # HELPER: datos vacíos para revisión manual
@@ -815,7 +691,6 @@ def datos_revision_vacio(causa: str = "") -> dict:
         "nit_nuevo": "",
         "_error"   : safe_str(causa),
     }
-
 
 # ─────────────────────────────────────────────
 # 7. ENCABEZADO
