@@ -93,7 +93,6 @@ def cargar_proveedores_json() -> dict:
     try:
         with open(archivo, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Migración formato antiguo (valor string → dict)
         for k, v in data.items():
             if isinstance(v, str):
                 data[k] = {"nombre": v, "nrc": ""}
@@ -134,6 +133,13 @@ def extraer_y_formatear_fecha(texto: str) -> str:
         if p2 <= 12 and p1 > 12:  return f"{p1:02d}/{p2:02d}/{y}"
         if p2 <= 12 and p1 <= 31: return f"{p1:02d}/{p2:02d}/{y}"
     return ""
+
+
+def extraer_codigo_corto(gen: str) -> str:
+    """Extrae los primeros 8 chars del UUID como código corto (sin guiones)."""
+    if not gen:
+        return ""
+    return gen.replace("-", "")[:8].upper()
 
 
 def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
@@ -204,7 +210,6 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         # ── Montos: Base Sujeta y Retención 1% ──
         base, ret = 0.0, 0.0
 
-        # Intento 1: buscar el par base/retención por relación matemática
         montos_raw = re.findall(
             r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
             t_clean
@@ -220,7 +225,6 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 ret  = ret_calc
                 break
 
-        # Intento 2: etiquetas explícitas
         if base == 0.0:
             m_base = re.search(
                 r"(?:Monto\s+Sujeto|Sujeto\s+a\s+Retenci[oó]n|Base\s+Imponible)"
@@ -238,25 +242,113 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             if m_ret:
                 ret = limpiar_monto(m_ret.group(1))
 
-            # Si solo tenemos base, calcular retención
             if base > 0 and ret == 0:
                 ret = round(base * 0.01, 2)
 
+        # Código corto = primeros 8 chars del UUID sin guiones
+        codigo_corto = extraer_codigo_corto(gen)
+
         return {
-            "fecha"   : fecha,
-            "nit_prov": nit_prov,
-            "nom_prov": nom_prov,
-            "tipo"    : tipo,
-            "gen"     : gen,
-            "base"    : base,
-            "ret"     : ret,
-            "estado"  : "✅ OK",
+            "nit_prov"    : nit_prov,
+            "fecha"       : fecha,
+            "tipo"        : tipo,
+            "codigo_corto": codigo_corto,
+            "gen"         : gen,
+            "base"        : base,
+            "ret"         : ret,
+            "estado"      : 7,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
         return {"error": "PDF inválido o corrupto."}
     except Exception as err:
         return {"error": str(err)}
+
+
+def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
+    """Genera Excel con openpyxl, formato igual al screenshot."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Retenciones"
+
+    # Columnas en el orden del Excel mostrado
+    columnas = [
+        ("NIT Proveedor",  "nit_prov",     18),
+        ("Fecha",          "fecha",        14),
+        ("Tipo",           "tipo",          6),
+        ("Código Corto",   "codigo_corto", 22),
+        ("UUID",           "gen",          38),
+        ("Base ($)",       "base",         14),
+        ("Retención ($)",  "ret",          14),
+        ("Estado",         "estado",        8),
+    ]
+
+    # Estilos
+    header_fill = PatternFill("solid", fgColor="4A5520")
+    header_font = Font(bold=True, color="FFFFFF", size=10)
+    border_side = Side(style="thin", color="CCCCCC")
+    cell_border  = Border(
+        left=border_side, right=border_side,
+        top=border_side,  bottom=border_side
+    )
+    num_fmt  = '#,##0.00'
+    alt_fill = PatternFill("solid", fgColor="F5F5F0")
+
+    # Cabecera
+    for col_idx, (header, _, width) in enumerate(columnas, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font      = header_font
+        cell.fill      = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border    = cell_border
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    ws.row_dimensions[1].height = 18
+
+    # Filas de datos
+    for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
+        fill = alt_fill if row_idx % 2 == 0 else PatternFill()
+        for col_idx, (_, field, _) in enumerate(columnas, start=1):
+            valor = row.get(field, "")
+            cell  = ws.cell(row=row_idx, column=col_idx, value=valor)
+            cell.border    = cell_border
+            cell.alignment = Alignment(vertical="center")
+            if fill.fill_type:
+                cell.fill = fill
+            # Formato numérico para base y ret
+            if field in ("base", "ret"):
+                cell.number_format = num_fmt
+                cell.alignment     = Alignment(horizontal="right", vertical="center")
+            elif field == "estado":
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            elif field in ("tipo", "fecha", "codigo_corto"):
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    # Fila de totales
+    total_row = len(df) + 2
+    ws.cell(row=total_row, column=5, value="TOTALES").font = Font(bold=True)
+    ws.cell(row=total_row, column=5).alignment = Alignment(horizontal="right")
+
+    base_col = [c[1] for c in columnas].index("base") + 1
+    ret_col  = [c[1] for c in columnas].index("ret")  + 1
+
+    tot_base = ws.cell(row=total_row, column=base_col, value=df["base"].sum())
+    tot_ret  = ws.cell(row=total_row, column=ret_col,  value=df["ret"].sum())
+    for cell in (tot_base, tot_ret):
+        cell.font          = Font(bold=True)
+        cell.number_format = num_fmt
+        cell.alignment     = Alignment(horizontal="right", vertical="center")
+        cell.fill          = PatternFill("solid", fgColor="C8D87A")
+        cell.border        = cell_border
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
 
 # ─────────────────────────────────────────────
 # 5. ENCABEZADO
@@ -376,13 +468,30 @@ if not st.session_state.db_ret.empty:
 
     st.markdown("#### 📋 Libro de Retenciones — Base para F-14")
 
-    COLS_MOSTRAR = [c for c in ["archivo","fecha","tipo","gen","nit_prov","nom_prov","base","ret","estado"] if c in df.columns]
-    COLS_NUM     = [c for c in ["base", "ret"] if c in df.columns]
+    # Columnas en el orden del Excel (igual al screenshot)
+    COLS_DISPLAY = {
+        "nit_prov"    : "NIT Proveedor",
+        "fecha"       : "Fecha",
+        "tipo"        : "Tipo",
+        "codigo_corto": "Código Corto",
+        "gen"         : "UUID",
+        "base"        : "Base ($)",
+        "ret"         : "Retención ($)",
+        "estado"      : "Estado",
+    }
+
+    # Solo mostrar columnas que existen
+    cols_existentes = {k: v for k, v in COLS_DISPLAY.items() if k in df.columns}
+    df_vista = df[list(cols_existentes.keys())].rename(columns=cols_existentes)
 
     st.dataframe(
-        df[COLS_MOSTRAR].style.format({c: "${:,.2f}" for c in COLS_NUM}),
+        df_vista.style.format({
+            "Base ($)"      : "${:,.2f}",
+            "Retención ($)" : "${:,.2f}",
+        }),
         hide_index=True,
-        use_container_width=True
+        use_container_width=True,
+        height=min(40 + len(df_vista) * 35, 600),
     )
 
     st.markdown(
@@ -392,21 +501,11 @@ if not st.session_state.db_ret.empty:
 
     st.markdown("---")
 
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_export = df[COLS_MOSTRAR].copy()
-        df_export.to_excel(writer, index=False, sheet_name='F14_Retenciones')
-        wb = writer.book
-        ws = writer.sheets['F14_Retenciones']
-        fmt_num = wb.add_format({'num_format': '#,##0.00', 'align': 'right'})
-        # Formato numérico para columnas base y ret
-        for col_idx, col_name in enumerate(COLS_MOSTRAR):
-            if col_name in ('base', 'ret'):
-                ws.set_column(col_idx, col_idx, 14, fmt_num)
+    excel_bytes = generar_excel(df, cliente['nombre'])
 
     st.download_button(
         "📥 Descargar Base para F-14 (Excel)",
-        data=output.getvalue(),
+        data=excel_bytes,
         file_name=f"Retenciones_F14_{cliente['nombre'].replace(' ','_')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary"
