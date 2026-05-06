@@ -102,14 +102,20 @@ def cargar_proveedores_json() -> dict:
 
 
 def limpiar_monto(monto_str: str) -> float:
+    """
+    Convierte strings de montos a float.
+    Soporta: 7,745.00 | 1.079,00 | 870.0 | 1079 | $639.00
+    """
     s = re.sub(r'[^\d.,]', '', str(monto_str).strip())
     if not s:
         return 0.0
     ultimo_coma  = s.rfind(',')
     ultimo_punto = s.rfind('.')
     if ultimo_coma > ultimo_punto:
+        # Formato europeo: 1.079,00
         s = s.replace('.', '').replace(',', '.')
     elif ultimo_punto > ultimo_coma:
+        # Formato anglosajón: 7,745.00 o 870.0
         s = s.replace(',', '')
     else:
         s = s.replace(',', '').replace('.', '')
@@ -137,18 +143,20 @@ def extraer_y_formatear_fecha(texto: str) -> str:
 
 def extraer_sello(texto_original: str) -> str:
     """
-    Extrae el Sello de Recepción del DTE-07.
-    3 estrategias para cubrir distintos formatos de emisor:
+    Extrae el Sello de Recepción cubriendo 3 formatos de emisor:
 
-    1. Etiqueta explícita en texto original (con espacios).
-       Acepta letras, dígitos y algunos sufijos (MERCOSAL termina en ZB, RVIT, etc.)
-    2. Etiqueta en texto sin espacios (PDFs comprimidos).
-    3. Heurística: línea completa que empieza con '202' y tiene ≥ 30 chars
-       alfanuméricos, que NO sea el UUID ni el número de control.
+    Formato A (MERCOSAL, QUICO, KIMBERLY):
+      Etiqueta explícita "Sello de Recepción:" seguida del sello en la misma línea.
+
+    Formato B (CUSCATLAN):
+      El sello aparece en la MISMA línea que "Transmisión normal" sin etiqueta propia:
+        "Transmisión normal 2026BAAE34687D1348AD99407A49EC02B17DG0SW"
+
+    Formato C (fallback):
+      Línea completa que empieza con 202x y tiene ≥ 30 chars alfanuméricos sin guiones.
     """
 
-    # ── Paso 1: etiqueta explícita — texto con espacios ──
-    # El sello puede tener letras al final (ZB, RVIT, DAD, etc.)
+    # ── Formato A: etiqueta explícita con espacios ──
     m = re.search(
         r"[Ss]ello\s+de\s+[Rr]ecepci[oó]n\s*[:\-]?\s*([A-Z0-9]{20,})",
         texto_original, re.I
@@ -156,7 +164,7 @@ def extraer_sello(texto_original: str) -> str:
     if m:
         return m.group(1).strip()
 
-    # ── Paso 2: etiqueta en texto sin espacios ──
+    # ── Formato A en texto sin espacios (PDF comprimido) ──
     t_ns = re.sub(r'\s+', '', texto_original).upper()
     m2 = re.search(
         r"SELLODERECE[PC]CI[O0]N[:\-]?([A-Z0-9]{20,})",
@@ -165,16 +173,21 @@ def extraer_sello(texto_original: str) -> str:
     if m2:
         return m2.group(1).strip()
 
-    # ── Paso 3: heurística — cadena que empieza con el año (202x)
-    # y tiene >= 30 chars alfanuméricos, sin guiones (para no confundir con UUID)
-    # Se busca en cada línea del texto para mayor precisión
+    # ── Formato B: "Transmisión normal XXXX..." (CUSCATLAN y similares) ──
+    # El sello va pegado al texto de transmisión en la misma línea
+    m3 = re.search(
+        r"[Tt]ransmisi[oó]n\s+normal\s+([A-Z0-9]{20,})",
+        texto_original, re.I
+    )
+    if m3:
+        return m3.group(1).strip()
+
+    # ── Formato C: heurística — línea completa que empieza con 202x ──
     for linea in texto_original.splitlines():
         linea_s = linea.strip()
-        # Línea que empieza (o casi) con 202 y es puramente alfanumérica ≥ 30 chars
-        m3 = re.match(r'^(202[0-9][A-Z0-9]{26,})$', linea_s, re.I)
-        if m3:
-            candidato = m3.group(1).upper()
-            # Excluir si tiene guiones (UUID) o coincide con el número de control
+        mc = re.match(r'^(202[0-9][A-Z0-9]{26,})$', linea_s, re.I)
+        if mc:
+            candidato = mc.group(1).upper()
             if '-' not in candidato:
                 return candidato
 
@@ -229,7 +242,6 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         # ── NIT del proveedor retenido ──
         nit_prov = ""
-
         patron_ids = (
             r"\b\d{4}\s*-?\s*\d{6}\s*-?\s*\d{3}\s*-?\s*\d\b"
             r"|\b\d{14}\b"
@@ -248,49 +260,62 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             nit_prov = candidatos[0]
 
         # ── Montos: Base Sujeta y Retención 1% ──
+        # PATRÓN AMPLIADO: acepta 1 o 2 decimales (870.0, 639.00, 7745.00)
+        # y también enteros sin decimal (en caso extremo)
         base, ret = 0.0, 0.0
 
-        montos_raw = re.findall(
-            r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            t_clean
+        # Primero intentar extracción contextual (más confiable)
+        m_base = re.search(
+            r"(?:Monto\s+[Ss]ujeto|[Ss]ujeto\s+a\s+[Rr]etenci[oó]n|"
+            r"[Tt]otal\s+[Mm]onto\s+[Ss]ujeto(?:\s+a\s+[Rr]etener?)?)"
+            r"[^\d$]{0,30}\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+)",
+            t_clean, re.I
         )
-        valores = sorted(
-            list({limpiar_monto(m) for m in montos_raw if limpiar_monto(m) > 0}),
-            reverse=True
+        m_ret = re.search(
+            r"(?:[Tt]otal\s+IVA\s+[Rr]etenido|[Tt]otal\s+IVA\s+[Rr]eteni"
+            r"|[Ii]mpuesto\s+[Rr]etenido|[Rr]etenci[oó]n\s+1%|[Mm]onto\s+[Rr]etenci[oó]n)"
+            r"[^\d$]{0,30}\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+)",
+            t_clean, re.I
         )
-        for v in valores:
-            ret_calc = round(v * 0.01, 2)
-            if any(abs(r - ret_calc) <= 0.02 for r in valores if r < v):
-                base = v
-                ret  = ret_calc
-                break
 
+        if m_base:
+            base = limpiar_monto(m_base.group(1))
+        if m_ret:
+            ret = limpiar_monto(m_ret.group(1))
+
+        # Si la extracción contextual no funcionó, usar heurística de montos
         if base == 0.0:
-            m_base = re.search(
-                r"(?:Monto\s+Sujeto|Sujeto\s+a\s+Retenci[oó]n|Base\s+Imponible)"
-                r"[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-                t_clean, re.I
+            # Patrón ampliado: 1-2 decimales opcionales
+            montos_raw = re.findall(
+                r"(?:US\$?|\$)\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d{2,}(?:[.,]\d{1,2})?)",
+                t_clean
             )
-            if m_base:
-                base = limpiar_monto(m_base.group(1))
-
-            m_ret = re.search(
-                r"(?:Impuesto\s+Retenido|Retenci[oó]n\s+1%|Monto\s+Retenci[oó]n)"
-                r"[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-                t_clean, re.I
+            valores = sorted(
+                list({limpiar_monto(m) for m in montos_raw if limpiar_monto(m) > 0}),
+                reverse=True
             )
-            if m_ret:
-                ret = limpiar_monto(m_ret.group(1))
+            for v in valores:
+                ret_calc = round(v * 0.01, 2)
+                if any(abs(r - ret_calc) <= 0.05 for r in valores if r < v):
+                    base = v
+                    ret  = ret_calc
+                    break
 
-            if base > 0 and ret == 0:
-                ret = round(base * 0.01, 2)
+        # Si tenemos base pero no ret, calcular
+        if base > 0 and ret == 0:
+            ret = round(base * 0.01, 2)
+
+        # Verificación cruzada: si ret parece correcta pero base no,
+        # intentar reconstruir base desde ret
+        if ret > 0 and base == 0:
+            base = round(ret * 100, 2)
 
         return {
             "nit_prov" : nit_prov,
             "fecha"    : fecha,
             "tipo"     : tipo,
-            "sello"    : sello,  # ← Sello de Recepción
-            "gen"      : gen,    # ← UUID / Código de Generación completo
+            "sello"    : sello,
+            "gen"      : gen,
             "base"     : base,
             "ret"      : ret,
             "estado"   : 7,
@@ -312,13 +337,12 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     ws = wb.active
     ws.title = "Retenciones"
 
-    # Sin "Código Corto" — Sello antes del UUID
     columnas = [
         ("NIT Proveedor",      "nit_prov", 18),
         ("Fecha",              "fecha",    14),
         ("Tipo",               "tipo",      6),
-        ("Sello de Recepción", "sello",    44),  # ← ANTES del código
-        ("Código de Gen.",     "gen",      38),  # ← UUID completo
+        ("Sello de Recepción", "sello",    44),
+        ("Código de Gen.",     "gen",      38),
         ("Base ($)",           "base",     14),
         ("Retención ($)",      "ret",      14),
         ("Estado",             "estado",    8),
@@ -334,7 +358,6 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     num_fmt  = '#,##0.00'
     alt_fill = PatternFill("solid", fgColor="F5F5F0")
 
-    # Cabecera
     for col_idx, (header, _, width) in enumerate(columnas, start=1):
         cell = ws.cell(row=1, column=col_idx, value=header)
         cell.font      = header_font
@@ -345,7 +368,6 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
 
     ws.row_dimensions[1].height = 18
 
-    # Filas de datos
     for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
         fill = alt_fill if row_idx % 2 == 0 else PatternFill()
         for col_idx, (_, field, _) in enumerate(columnas, start=1):
@@ -363,7 +385,6 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
             elif field in ("tipo", "fecha"):
                 cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Fila de totales
     total_row = len(df) + 2
     ws.cell(row=total_row, column=5, value="TOTALES").font = Font(bold=True)
     ws.cell(row=total_row, column=5).alignment = Alignment(horizontal="right")
@@ -503,13 +524,12 @@ if not st.session_state.db_ret.empty:
 
     st.markdown("#### 📋 Libro de Retenciones — Base para F-14")
 
-    # Sin "Código Corto" — Sello ANTES de Código de Generación
     COLS_DISPLAY = {
         "nit_prov" : "NIT Proveedor",
         "fecha"    : "Fecha",
         "tipo"     : "Tipo",
-        "sello"    : "Sello de Recepción",    # ← ANTES
-        "gen"      : "Código de Generación",  # ← UUID completo
+        "sello"    : "Sello de Recepción",
+        "gen"      : "Código de Generación",
         "base"     : "Base ($)",
         "ret"      : "Retención ($)",
         "estado"   : "Estado",
