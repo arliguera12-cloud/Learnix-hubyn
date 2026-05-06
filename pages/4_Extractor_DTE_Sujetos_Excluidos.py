@@ -121,8 +121,84 @@ def extraer_y_formatear_fecha(texto: str) -> str:
 
 
 def limpiar_nit(raw: str) -> str:
-    """Devuelve solo dígitos del NIT/DUI."""
     return re.sub(r'[^0-9]', '', raw)
+
+
+def extraer_nombre_receptor(texto: str) -> str:
+    """
+    Los DTE-14 de FULLCHEM tienen EMISOR y RECEPTOR en la misma línea:
+      "Nombre o razón social: INDUSTRIAS FULLCHEM... Nombre o razón social: CARLOS ENRIQUE SASSO LEMUS"
+    
+    La clave es tomar la SEGUNDA ocurrencia de "Nombre o razón social:" en la línea.
+    También manejamos el caso donde están en líneas separadas (otros emisores).
+    """
+    # ── Estrategia 1: misma línea — buscar segunda ocurrencia del patrón en una sola línea ──
+    # Patrón: dos "Nombre o razón social:" en la misma línea
+    m = re.search(
+        r"[Nn]ombre\s+o\s+raz[oó]n\s+social\s*:\s*.+?"   # primera (emisor)
+        r"[Nn]ombre\s+o\s+raz[oó]n\s+social\s*:\s*"       # segunda etiqueta (receptor)
+        r"([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑa-záéíóúüñ ,.\-]+)",   # nombre del receptor
+        texto, re.I
+    )
+    if m:
+        nombre = re.sub(r'\s+', ' ', m.group(1)).strip()
+        # Cortar si llega a NIT: o DUI: u otro campo
+        nombre = re.split(r'\s+(?:NIT|DUI|N[úu]mero|Direcci[oó]n|Correo|Tel[eé]fono)\s*[:\-]', nombre, flags=re.I)[0]
+        nombre = nombre.strip()
+        if 3 < len(nombre) <= 65:
+            return nombre.upper()
+
+    # ── Estrategia 2: líneas separadas — tomar el último "Nombre o razón social:" ──
+    todas = re.findall(
+        r"[Nn]ombre\s+o\s+raz[oó]n\s+social\s*[:\-]?\s*([^\n]+)",
+        texto, re.I
+    )
+    if len(todas) >= 2:
+        nombre = re.sub(r'\s+', ' ', todas[-1]).strip()
+        nombre = re.split(r'\s+(?:NIT|DUI|N[úu]mero|Direcci[oó]n|Correo|Tel[eé]fono)\s*[:\-]', nombre, flags=re.I)[0]
+        nombre = nombre.strip()
+        if 3 < len(nombre) <= 65:
+            return nombre.upper()
+    elif len(todas) == 1:
+        nombre = re.sub(r'\s+', ' ', todas[0]).strip()
+        if 3 < len(nombre) <= 65:
+            return nombre.upper()
+
+    return "⚠️ REVISAR NOMBRE"
+
+
+def extraer_nit_receptor(texto: str, nit_cliente: str) -> str:
+    """
+    Similar al nombre: en DTE-14 FULLCHEM el NIT del receptor está en la MISMA línea
+    que el NIT del emisor: "NIT: 0614-270815-107-7  NIT: 07515732-7"
+    Tomamos el último NIT que NO sea el del cliente/emisor.
+    """
+    # Buscar todos los NITs/DUIs del texto
+    patron = (
+        r"\b\d{4}\s*-\s*\d{6}\s*-\s*\d{3}\s*-\s*\d\b"   # NIT empresa 0614-270815-107-7
+        r"|\b\d{8}\s*-\s*\d\b"                              # DUI 07515732-7
+        r"|\b\d{14}\b"                                       # NIT sin guiones
+        r"|\b\d{9}\b"                                        # DUI sin guión
+    )
+    ids_raw   = re.findall(patron, texto)
+    ids_limp  = list(dict.fromkeys(limpiar_nit(n) for n in ids_raw))
+    candidatos = [n for n in ids_limp if n != nit_cliente and len(n) >= 8]
+
+    # El receptor suele ser el ÚLTIMO NIT distinto al emisor (que va primero)
+    if candidatos:
+        return candidatos[-1]
+    return ""
+
+
+def extraer_sello_dte14(texto: str) -> str:
+    """Extrae el Sello de Recepción del DTE-14."""
+    m = re.search(
+        r"[Ss]ello\s+de\s+[Rr]ecepci[oó]n\s*[:\-]?\s*([A-Z0-9]{20,})",
+        texto, re.I
+    )
+    if m:
+        return m.group(1).strip()
+    return ""
 
 
 def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
@@ -172,65 +248,22 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_nc:
             num_control = m_nc.group(1)
 
+        # ── Sello de Recepción ──
+        sello = extraer_sello_dte14(t_clean)
+
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        # ── Nombre del receptor (sujeto excluido) ──
-        # Busca la línea que sigue a "RECEPTOR" o "Nombre o razón social:" en la sección receptor
-        nom_sujeto = ""
-        # Intento 1: sección RECEPTOR explícita
-        m_rec = re.search(
-            r"RECEPTOR\s*\n.*?[Nn]ombre\s+o\s+raz[oó]n\s+social\s*[:\-]?\s*(.+?)(?:\n|NIT|DUI|N[úu]mero)",
-            texto_completo, re.S | re.I
-        )
-        if m_rec:
-            nom_sujeto = re.sub(r'\s+', ' ', m_rec.group(1)).strip()
-
-        # Intento 2: buscar "Nombre o razón social:" que aparezca DESPUÉS de la mitad del texto
-        # (la segunda ocurrencia suele ser el receptor)
-        if not nom_sujeto or len(nom_sujeto) < 4:
-            nombres = re.findall(
-                r"[Nn]ombre\s+o\s+raz[oó]n\s+social\s*[:\-]?\s*(.+?)(?:\n|NIT|DUI|N[úu]mero|\d{2}[\/\-])",
-                texto_completo, re.I
-            )
-            if len(nombres) >= 2:
-                nom_sujeto = re.sub(r'\s+', ' ', nombres[-1]).strip()
-            elif len(nombres) == 1:
-                nom_sujeto = re.sub(r'\s+', ' ', nombres[0]).strip()
-
-        # Limpiar nombre
-        nom_sujeto = nom_sujeto.strip()
-        if len(nom_sujeto) > 65 or not nom_sujeto:
-            nom_sujeto = "⚠️ REVISAR NOMBRE"
+        # ── Nombre del receptor ──
+        nom_sujeto = extraer_nombre_receptor(t_clean)
 
         # ── NIT/DUI del receptor ──
-        id_sujeto = ""
+        id_sujeto = extraer_nit_receptor(t_clean, nit_cliente)
 
-        # Buscar específicamente en la sección RECEPTOR el NIT
-        m_nit_rec = re.search(
-            r"RECEPTOR.*?NIT\s*[:\-]?\s*([\d\-]{7,20})",
-            texto_completo, re.S | re.I
-        )
-        if m_nit_rec:
-            id_sujeto = limpiar_nit(m_nit_rec.group(1))
-
-        # Fallback: buscar todos los IDs numéricos y excluir los del emisor
-        if not id_sujeto or id_sujeto == nit_cliente:
-            patron_ids = (
-                r"\b\d{4}\s*-?\s*\d{6}\s*-?\s*\d{3}\s*-?\s*\d\b"   # NIT empresa
-                r"|\b\d{8}\s*-?\s*\d\b"                               # DUI persona natural
-                r"|\b\d{9}\b"                                          # DUI sin guión
-            )
-            ids_raw   = re.findall(patron_ids, texto_completo)
-            ids_limp  = list(dict.fromkeys(limpiar_nit(n) for n in ids_raw))
-            candidatos = [n for n in ids_limp if n != nit_cliente and len(n) >= 8]
-            if candidatos:
-                id_sujeto = candidatos[0]
-
-        # ── Montos: Ventas (base), Retención Renta 10%, IVA Retenido ──
+        # ── Montos: Base (Sumatoria ventas / Sub-Total) y Retención Renta 10% ──
         base = 0.0
         ret  = 0.0
 
-        # Retención Renta — etiqueta explícita (más confiable)
+        # Retención Renta — etiqueta explícita
         m_ret_renta = re.search(
             r"[Rr]etenci[oó]n\s+[Rr]enta\s*[:\-]?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)",
             t_clean
@@ -238,7 +271,7 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_ret_renta:
             ret = limpiar_monto(m_ret_renta.group(1))
 
-        # Sub-Total o Sumatoria de ventas — etiqueta explícita
+        # Sub-Total o Sumatoria de ventas
         m_base = re.search(
             r"(?:[Ss]umatoria\s+de\s+[Vv]entas|[Ss]ub[-\s]?[Tt]otal)\s*[:\-]?\s*"
             r"(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)",
@@ -247,11 +280,10 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_base:
             base = limpiar_monto(m_base.group(1))
 
-        # Si no encontramos base con etiqueta, intentar por relación matemática 10%
+        # Fallback: relación matemática 10%
         if base == 0.0 and ret > 0:
             base = round(ret * 10, 2)
 
-        # Si aún no tenemos base, heurística
         if base == 0.0:
             montos_raw = re.findall(
                 r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -277,7 +309,8 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             "id_sujeto"  : id_sujeto,
             "nom_sujeto" : nom_sujeto,
             "tipo"       : tipo,
-            "gen"        : gen,
+            "sello"      : sello,        # ← Sello de Recepción (para mostrar y exportar)
+            "gen"        : gen,          # ← UUID (guardado internamente)
             "num_control": num_control,
             "base"       : base,
             "ret"        : ret,
@@ -295,10 +328,8 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
 
 def generar_excel_libro(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     """
-    LIBRO SUJETO EXCLUIDO — columnas:
-    A  B(tipo=2)  C(id_sujeto)  D(nom_sujeto)  E(fecha)  F(gen/sello_largo)
-    G(num_control)  H(base)  I(0.00)  J K L M (1 1 4 5 5)
-    Replica la imagen 3.
+    LIBRO SUJETO EXCLUIDO — replica imagen 3:
+    A(vacío) B(2) C(DUI/NIT) D(Nombre) E(Fecha) F(Sello) G(Núm.Control) H(Base) I(0.00) J...(1 1 4 5 5)
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -309,15 +340,15 @@ def generar_excel_libro(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     ws.title = "LIBRO SUJETO EXCLUIDO"
 
     columnas = [
-        ("",    "const_a",    4),   # A — vacío o "2" según imagen
-        ("",    "const_b",    5),   # B — "2" fijo
-        ("DUI/NIT",   "id_sujeto",  14),
-        ("Nombre",    "nom_sujeto", 32),
-        ("Fecha",     "fecha",      13),
-        ("Cód. Gen.", "gen",        38),
-        ("Núm. Control","num_control",38),
-        ("Base ($)",  "base",       13),
-        ("0.00",      "cero",        9),
+        ("",             "const_a",    4),
+        ("",             "const_b",    5),
+        ("DUI/NIT",      "id_sujeto", 14),
+        ("Nombre",       "nom_sujeto",32),
+        ("Fecha",        "fecha",     13),
+        ("Sello Recep.", "sello",     44),   # ← SELLO en vez de código gen.
+        ("Núm. Control", "num_control",38),
+        ("Base ($)",     "base",      13),
+        ("0.00",         "cero",       9),
         ("1","c1",4),("1","c2",4),("4","c3",4),("5","c4",4),("5","c5",4),
     ]
 
@@ -336,7 +367,6 @@ def generar_excel_libro(df: pd.DataFrame, nombre_cliente: str) -> bytes:
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border    = cell_border
         ws.column_dimensions[get_column_letter(col_idx)].width = width
-
     ws.row_dimensions[1].height = 16
 
     for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
@@ -360,7 +390,10 @@ def generar_excel_libro(df: pd.DataFrame, nombre_cliente: str) -> bytes:
             if field == "base":
                 cell.number_format = num_fmt
                 cell.alignment = Alignment(horizontal="right", vertical="center")
-            elif field in ("fecha",):
+            elif field == "cero":
+                cell.number_format = num_fmt
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+            elif field == "fecha":
                 cell.alignment = Alignment(horizontal="center", vertical="center")
 
     # Totales
@@ -380,9 +413,8 @@ def generar_excel_libro(df: pd.DataFrame, nombre_cliente: str) -> bytes:
 
 def generar_excel_retencion(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     """
-    RETENCIÓN HONORARIOS — columnas:
-    A(1) B(9300) C(nom_sujeto) D(id_sujeto) E(11) F(base) G(ret) H(0.00)...
-    Replica la imagen 2.
+    RETENCIÓN HONORARIOS — replica imagen 2:
+    A(1) B(9300) C(Nombre) D(DUI/NIT) E(11) F(Base) G(Ret.) H...(ceros) ... Mes/Año
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -393,20 +425,15 @@ def generar_excel_retencion(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     ws.title = "RETENCIÓN HONORARIOS"
 
     columnas = [
-        ("",    "c1",        4),   # A — "1"
-        ("Cód", "c9300",     6),   # B — "9300"
-        ("Nombre",    "nom_sujeto", 32),
-        ("DUI/NIT",   "id_sujeto",  13),
-        ("",    "c11",       4),   # E — "11"
-        ("Base ($)",  "base",       13),
-        ("Ret. ($)",  "ret",        12),
-        ("0.00", "cero",     8),
-        ("0.00", "cero2",    8),
-        ("0.00", "cero3",    8),
-        ("0.00", "cero4",    8),
-        ("0.00", "cero5",    8),
-        ("0.00", "cero6",    8),
-        ("0.00", "cero7",    8),
+        ("",         "c1",        4),
+        ("Cód",      "c9300",     6),
+        ("Nombre",   "nom_sujeto",32),
+        ("DUI/NIT",  "id_sujeto", 13),
+        ("",         "c11",        4),
+        ("Base ($)", "base",      13),
+        ("Ret. ($)", "ret",       12),
+        ("0.00","cero1",8),("0.00","cero2",8),("0.00","cero3",8),
+        ("0.00","cero4",8),("0.00","cero5",8),("0.00","cero6",8),("0.00","cero7",8),
         ("1","d1",4),("1","d2",4),("4","d3",4),("5","d4",4),
         ("Mes/Año","mesanio",10),
     ]
@@ -426,15 +453,13 @@ def generar_excel_retencion(df: pd.DataFrame, nombre_cliente: str) -> bytes:
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border    = cell_border
         ws.column_dimensions[get_column_letter(col_idx)].width = width
-
     ws.row_dimensions[1].height = 16
 
     for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
         fill = alt_fill if row_idx % 2 == 0 else PatternFill()
 
-        # Extraer mes/año de la fecha dd/mm/yyyy
         fecha_str = row.get("fecha", "")
-        mesanio = ""
+        mesanio   = ""
         mf = re.match(r"\d{2}\/(\d{2})\/(\d{4})", str(fecha_str))
         if mf:
             mesanio = f"{mf.group(1)}{mf.group(2)}"
@@ -463,14 +488,13 @@ def generar_excel_retencion(df: pd.DataFrame, nombre_cliente: str) -> bytes:
             if field in ("base", "ret") or field.startswith("cero"):
                 cell.number_format = num_fmt
                 cell.alignment = Alignment(horizontal="right", vertical="center")
-            elif field in ("c1", "c9300", "c11", "d1", "d2", "d3", "d4"):
+            elif field in ("c1","c9300","c11","d1","d2","d3","d4"):
                 cell.alignment = Alignment(horizontal="center", vertical="center")
 
     # Totales
     total_row = len(df) + 2
     base_col = [c[1] for c in columnas].index("base") + 1
     ret_col  = [c[1] for c in columnas].index("ret")  + 1
-
     for col_i, val in [(base_col, df["base"].sum()), (ret_col, df["ret"].sum())]:
         tot = ws.cell(row=total_row, column=col_i, value=val)
         tot.font = Font(bold=True)
@@ -602,12 +626,13 @@ if not st.session_state.db_sujetos.empty:
 
     st.markdown("#### 📋 Casilla 66 — Sujetos Excluidos (Base para F-14)")
 
+    # Mostrar Sello en vez de Código de Generación
     COLS_DISPLAY = {
         "fecha"      : "Fecha",
         "id_sujeto"  : "DUI/NIT",
         "nom_sujeto" : "Nombre",
         "tipo"       : "Tipo",
-        "gen"        : "Código de Gen.",
+        "sello"      : "Sello de Recepción",   # ← SELLO
         "num_control": "Núm. Control",
         "base"       : "Base ($)",
         "ret"        : "Ret. Renta ($)",
@@ -632,7 +657,6 @@ if not st.session_state.db_sujetos.empty:
 
     st.markdown("---")
 
-    # ── Dos botones de descarga ──
     col1, col2 = st.columns(2)
 
     with col1:
