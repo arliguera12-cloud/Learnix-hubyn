@@ -4,74 +4,24 @@ import pandas as pd
 import re
 import json
 import os
+import sys
 from io import BytesIO
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from styles import DARK_PRO_CSS
+
 # ─────────────────────────────────────────────
-# 1. PAGE CONFIG — SIEMPRE PRIMERO
+# 1. PAGE CONFIG
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="Extractor DTE · Retenciones", layout="wide", page_icon="✂️")
 
 # ─────────────────────────────────────────────
-# 2. ESTILOS — VERDE OLIVA UNIFICADO
+# 2. ESTILOS
 # ─────────────────────────────────────────────
-ESTILO = """
-<style>
-  [data-testid="stAppViewContainer"],
-  [data-testid="stHeader"]          { background-color: #0D0F07 !important; }
-  [data-testid="stSidebar"]         { background-color: #141A08 !important;
-                                      border-right: 1px solid #4A5520 !important; }
-
-  h1, h2, h3, h4, h5, h6           { color: #C8D87A !important; letter-spacing: 0.5px; }
-  p, label, span, li                { color: #F0EDD8 !important; }
-  [data-testid="stDataFrame"] span  { color: inherit !important; }
-
-  div.stButton > button[kind="primary"],
-  div.stDownloadButton > button[kind="primary"] {
-    background-color : #6B7A2A !important;
-    border           : 1px solid #8A9A35 !important;
-    border-radius    : 6px !important;
-    transition       : background-color 0.25s ease, transform 0.1s ease;
-  }
-  div.stButton > button[kind="primary"]:hover,
-  div.stDownloadButton > button[kind="primary"]:hover {
-    background-color : #8A9A35 !important;
-    transform        : scale(1.02);
-  }
-  div.stButton > button[kind="primary"] *,
-  div.stDownloadButton > button[kind="primary"] * {
-    color: #FFFFFF !important; font-weight: bold !important;
-  }
-
-  div.stButton > button[kind="secondary"] {
-    background-color : transparent !important;
-    border           : 1px solid #4A5520 !important;
-    border-radius    : 6px !important;
-    transition       : 0.25s;
-  }
-  div.stButton > button[kind="secondary"]:hover { background-color: #1A2008 !important; }
-  div.stButton > button[kind="secondary"] *     { color: #C8D87A !important; }
-
-  div[data-testid="stAlert"] { display: flex; align-items: center; min-height: 56px; }
-  hr                         { border-color: #4A5520 !important; opacity: 0.4; }
-
-  .card-emisor {
-    padding          : 12px 16px;
-    border-radius    : 8px;
-    border           : 1px solid #2A3010;
-    border-left      : 4px solid #8A9A35;
-    background-color : #1A2008;
-    color            : #F0EDD8 !important;
-    margin-bottom    : 18px;
-    font-size        : 14px;
-    line-height      : 1.6;
-  }
-  .card-emisor strong { color: #C8D87A !important; }
-</style>
-"""
-st.markdown(ESTILO, unsafe_allow_html=True)
+st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 3. VERIFICACIÓN DE SEGURIDAD
+# 3. SEGURIDAD
 # ─────────────────────────────────────────────
 if not st.session_state.get("autenticado"):
     st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
@@ -102,20 +52,14 @@ def cargar_proveedores_json() -> dict:
 
 
 def limpiar_monto(monto_str: str) -> float:
-    """
-    Convierte strings de montos a float.
-    Soporta: 7,745.00 | 1.079,00 | 870.0 | 1079 | $639.00
-    """
     s = re.sub(r'[^\d.,]', '', str(monto_str).strip())
     if not s:
         return 0.0
     ultimo_coma  = s.rfind(',')
     ultimo_punto = s.rfind('.')
     if ultimo_coma > ultimo_punto:
-        # Formato europeo: 1.079,00
         s = s.replace('.', '').replace(',', '.')
     elif ultimo_punto > ultimo_coma:
-        # Formato anglosajón: 7,745.00 o 870.0
         s = s.replace(',', '')
     else:
         s = s.replace(',', '').replace('.', '')
@@ -142,21 +86,6 @@ def extraer_y_formatear_fecha(texto: str) -> str:
 
 
 def extraer_sello(texto_original: str) -> str:
-    """
-    Extrae el Sello de Recepción cubriendo 3 formatos de emisor:
-
-    Formato A (MERCOSAL, QUICO, KIMBERLY):
-      Etiqueta explícita "Sello de Recepción:" seguida del sello en la misma línea.
-
-    Formato B (CUSCATLAN):
-      El sello aparece en la MISMA línea que "Transmisión normal" sin etiqueta propia:
-        "Transmisión normal 2026BAAE34687D1348AD99407A49EC02B17DG0SW"
-
-    Formato C (fallback):
-      Línea completa que empieza con 202x y tiene ≥ 30 chars alfanuméricos sin guiones.
-    """
-
-    # ── Formato A: etiqueta explícita con espacios ──
     m = re.search(
         r"[Ss]ello\s+de\s+[Rr]ecepci[oó]n\s*[:\-]?\s*([A-Z0-9]{20,})",
         texto_original, re.I
@@ -164,17 +93,11 @@ def extraer_sello(texto_original: str) -> str:
     if m:
         return m.group(1).strip()
 
-    # ── Formato A en texto sin espacios (PDF comprimido) ──
     t_ns = re.sub(r'\s+', '', texto_original).upper()
-    m2 = re.search(
-        r"SELLODERECE[PC]CI[O0]N[:\-]?([A-Z0-9]{20,})",
-        t_ns
-    )
+    m2 = re.search(r"SELLODERECE[PC]CI[O0]N[:\-]?([A-Z0-9]{20,})", t_ns)
     if m2:
         return m2.group(1).strip()
 
-    # ── Formato B: "Transmisión normal XXXX..." (CUSCATLAN y similares) ──
-    # El sello va pegado al texto de transmisión en la misma línea
     m3 = re.search(
         r"[Tt]ransmisi[oó]n\s+normal\s+([A-Z0-9]{20,})",
         texto_original, re.I
@@ -182,7 +105,6 @@ def extraer_sello(texto_original: str) -> str:
     if m3:
         return m3.group(1).strip()
 
-    # ── Formato C: heurística — línea completa que empieza con 202x ──
     for linea in texto_original.splitlines():
         linea_s = linea.strip()
         mc = re.match(r'^(202[0-9][A-Z0-9]{26,})$', linea_s, re.I)
@@ -211,7 +133,6 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
         t_no_sp = re.sub(r'\s+', '', t_clean).upper()
 
-        # ── Tipo DTE ──
         m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_sp)
         tipo   = "07"
         if m_ctrl:
@@ -225,7 +146,6 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         nit_cliente = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
 
-        # ── UUID / Código de Generación ──
         gen = ""
         m_uuid = re.search(
             r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
@@ -235,12 +155,9 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             raw = m_uuid.group(1).replace("-", "")
             gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
 
-        # ── Sello de Recepción ──
         sello = extraer_sello(t_clean)
-
         fecha = extraer_y_formatear_fecha(t_clean)
 
-        # ── NIT del proveedor retenido ──
         nit_prov = ""
         patron_ids = (
             r"\b\d{4}\s*-?\s*\d{6}\s*-?\s*\d{3}\s*-?\s*\d\b"
@@ -259,12 +176,8 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         if not nit_prov and candidatos:
             nit_prov = candidatos[0]
 
-        # ── Montos: Base Sujeta y Retención 1% ──
-        # PATRÓN AMPLIADO: acepta 1 o 2 decimales (870.0, 639.00, 7745.00)
-        # y también enteros sin decimal (en caso extremo)
         base, ret = 0.0, 0.0
 
-        # Primero intentar extracción contextual (más confiable)
         m_base = re.search(
             r"(?:Monto\s+[Ss]ujeto|[Ss]ujeto\s+a\s+[Rr]etenci[oó]n|"
             r"[Tt]otal\s+[Mm]onto\s+[Ss]ujeto(?:\s+a\s+[Rr]etener?)?)"
@@ -283,9 +196,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_ret:
             ret = limpiar_monto(m_ret.group(1))
 
-        # Si la extracción contextual no funcionó, usar heurística de montos
         if base == 0.0:
-            # Patrón ampliado: 1-2 decimales opcionales
             montos_raw = re.findall(
                 r"(?:US\$?|\$)\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d{2,}(?:[.,]\d{1,2})?)",
                 t_clean
@@ -301,12 +212,9 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                     ret  = ret_calc
                     break
 
-        # Si tenemos base pero no ret, calcular
         if base > 0 and ret == 0:
             ret = round(base * 0.01, 2)
 
-        # Verificación cruzada: si ret parece correcta pero base no,
-        # intentar reconstruir base desde ret
         if ret > 0 and base == 0:
             base = round(ret * 100, 2)
 
@@ -328,14 +236,13 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
 
 
 def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
-    """Genera Excel: Sello de Recepción ANTES de Código de Generación. Sin Código Corto."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Retenciones"
+    ws.title = "Retenciones F-14"
 
     columnas = [
         ("NIT Proveedor",      "nit_prov", 18),
@@ -348,15 +255,15 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
         ("Estado",             "estado",    8),
     ]
 
-    header_fill = PatternFill("solid", fgColor="4A5520")
-    header_font = Font(bold=True, color="FFFFFF", size=10)
-    border_side = Side(style="thin", color="CCCCCC")
+    header_fill = PatternFill("solid", fgColor="1A2C18")
+    header_font = Font(bold=True, color="A8E870", size=10)
+    border_side  = Side(style="thin", color="2E4828")
     cell_border  = Border(
         left=border_side, right=border_side,
         top=border_side,  bottom=border_side
     )
     num_fmt  = '#,##0.00'
-    alt_fill = PatternFill("solid", fgColor="F5F5F0")
+    alt_fill = PatternFill("solid", fgColor="F2F7EF")
 
     for col_idx, (header, _, width) in enumerate(columnas, start=1):
         cell = ws.cell(row=1, column=col_idx, value=header)
@@ -366,7 +273,7 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
         cell.border    = cell_border
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
-    ws.row_dimensions[1].height = 18
+    ws.row_dimensions[1].height = 20
 
     for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
         fill = alt_fill if row_idx % 2 == 0 else PatternFill()
@@ -395,10 +302,10 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     tot_base = ws.cell(row=total_row, column=base_col, value=df["base"].sum())
     tot_ret  = ws.cell(row=total_row, column=ret_col,  value=df["ret"].sum())
     for cell in (tot_base, tot_ret):
-        cell.font          = Font(bold=True)
+        cell.font          = Font(bold=True, color="111E12")
         cell.number_format = num_fmt
         cell.alignment     = Alignment(horizontal="right", vertical="center")
-        cell.fill          = PatternFill("solid", fgColor="C8D87A")
+        cell.fill          = PatternFill("solid", fgColor="A8E870")
         cell.border        = cell_border
 
     buf = BytesIO()
@@ -412,7 +319,7 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
 col_logo, col_titulo = st.columns([1, 8])
 with col_logo:
     st.markdown(
-        "<h2 style='font-family: Courier New, monospace; color: #8A9A35;"
+        "<h2 style='font-family: Courier New, monospace; color: #A8E870;"
         " letter-spacing: 3px; margin-top:8px;'>YN</h2>",
         unsafe_allow_html=True
     )
@@ -421,8 +328,9 @@ with col_titulo:
 
 st.markdown(f"""
 <div class="card-emisor">
-    <strong>AGENTE DE RETENCIÓN:</strong> {cliente['nombre']}<br>
-    <strong>NIT:</strong> {cliente['nit']}
+    <div class="label">Agente de Retención</div>
+    <div class="nombre">{cliente['nombre']}</div>
+    <div class="nit">NIT: {cliente['nit']}</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -433,14 +341,15 @@ if 'db_ret'       not in st.session_state: st.session_state.db_ret       = pd.Da
 if 'archivos_ret' not in st.session_state: st.session_state.archivos_ret = []
 
 # ─────────────────────────────────────────────
-# 7. SIDEBAR
+# 7. SIDEBAR — CARGA Y PROCESAMIENTO
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 📂 Carga DTE-07")
+    st.caption("Comprobantes de Retención 1% — Formulario F-14")
     st.divider()
 
     archivos = st.file_uploader(
-        "Arrastra Comprobantes de Retención (PDF)",
+        "Arrastra los PDFs aquí",
         type="pdf",
         accept_multiple_files=True
     )
@@ -517,12 +426,82 @@ with st.sidebar:
         st.markdown(f"**✂️ Ret. Total:** `${total_ret:,.2f}`")
 
 # ─────────────────────────────────────────────
-# 8. TABLA Y EXPORT
+# 8. TABLA, FILTROS Y EXPORT
 # ─────────────────────────────────────────────
 if not st.session_state.db_ret.empty:
     df = st.session_state.db_ret.copy()
 
-    st.markdown("#### 📋 Libro de Retenciones — Base para F-14")
+    # ── Panel de Filtros ────────────────────────────────────────────────────
+    st.markdown('<div class="filter-panel">', unsafe_allow_html=True)
+    st.markdown('<span class="filter-title">🔍 Filtros — Libro de Retenciones F-14</span>', unsafe_allow_html=True)
+
+    ff1, ff2, ff3, ff4, ff5 = st.columns([2, 1, 1, 1, 1])
+    with ff1:
+        busqueda_ret = st.text_input(
+            "busqueda_ret", label_visibility="collapsed",
+            placeholder="Buscar NIT proveedor o Sello/UUID…"
+        )
+    with ff2:
+        fd_desde = st.date_input("Desde", value=None, format="DD/MM/YYYY", key="ret_fd")
+    with ff3:
+        fd_hasta = st.date_input("Hasta", value=None, format="DD/MM/YYYY", key="ret_fh")
+    with ff4:
+        base_min = st.number_input("Base mín. ($)", min_value=0.0, value=0.0, step=10.0, key="ret_bm")
+    with ff5:
+        base_max = st.number_input("Base máx. ($)", min_value=0.0, value=0.0, step=100.0,
+                                    key="ret_bx", help="0 = sin límite")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Aplicar filtros ──────────────────────────────────────────────────────
+    df_fil = df.copy()
+
+    if busqueda_ret:
+        t = busqueda_ret.strip()
+        mask = (
+            df_fil['nit_prov'].str.contains(t, case=False, na=False) |
+            df_fil['sello'].str.contains(t, case=False, na=False)    |
+            df_fil['gen'].str.contains(t, case=False, na=False)
+        )
+        df_fil = df_fil[mask]
+
+    def _dmy_ts(fecha_str: str):
+        try:
+            p = str(fecha_str).strip().split('/')
+            if len(p) == 3:
+                return pd.Timestamp(int(p[2]), int(p[1]), int(p[0]))
+        except Exception:
+            pass
+        return pd.NaT
+
+    if (fd_desde or fd_hasta) and 'fecha' in df_fil.columns:
+        df_fil['_fts'] = df_fil['fecha'].apply(_dmy_ts)
+        if fd_desde:
+            df_fil = df_fil[df_fil['_fts'] >= pd.Timestamp(fd_desde)]
+        if fd_hasta:
+            df_fil = df_fil[df_fil['_fts'] <= pd.Timestamp(fd_hasta)]
+        df_fil = df_fil.drop(columns=['_fts'], errors='ignore')
+
+    if base_min > 0:
+        df_fil = df_fil[df_fil['base'] >= base_min]
+    if base_max > 0:
+        df_fil = df_fil[df_fil['base'] <= base_max]
+
+    # Badge de resultados
+    n_tot = len(df)
+    n_fil = len(df_fil)
+    filtros_activos = sum([
+        bool(busqueda_ret), bool(fd_desde), bool(fd_hasta),
+        bool(base_min > 0), bool(base_max > 0),
+    ])
+    badge_extra = (f'<span class="active-filters"> · {filtros_activos} filtro(s) activo(s)</span>'
+                   if filtros_activos else "")
+    st.markdown(
+        f'<div class="results-badge"><span class="cnt">{n_fil}</span> de {n_tot} registros{badge_extra}</div>',
+        unsafe_allow_html=True
+    )
+
+    # ── Tabla principal ──────────────────────────────────────────────────────
+    st.markdown("#### 📋 Libro de Retenciones — Base para Formulario F-14")
 
     COLS_DISPLAY = {
         "nit_prov" : "NIT Proveedor",
@@ -535,8 +514,8 @@ if not st.session_state.db_ret.empty:
         "estado"   : "Estado",
     }
 
-    cols_existentes = {k: v for k, v in COLS_DISPLAY.items() if k in df.columns}
-    df_vista = df[list(cols_existentes.keys())].rename(columns=cols_existentes)
+    cols_existentes = {k: v for k, v in COLS_DISPLAY.items() if k in df_fil.columns}
+    df_vista = df_fil[list(cols_existentes.keys())].rename(columns=cols_existentes)
 
     st.dataframe(
         df_vista.style.format({
@@ -548,27 +527,47 @@ if not st.session_state.db_ret.empty:
         height=min(40 + len(df_vista) * 35, 600),
     )
 
+    # Resumen de totales
+    base_tot = df_fil['base'].sum() if 'base' in df_fil.columns else 0.0
+    ret_tot  = df_fil['ret'].sum()  if 'ret'  in df_fil.columns else 0.0
     st.markdown(
-        f"> **Base Total:** `${df['base'].sum():,.2f}` &nbsp;|&nbsp;"
-        f"**Retención Total 1%:** `${df['ret'].sum():,.2f}`"
+        f"> **Base Total:** `${base_tot:,.2f}` &nbsp;|&nbsp;"
+        f"**Retención Total 1%:** `${ret_tot:,.2f}`"
     )
 
     st.markdown("---")
 
-    excel_bytes = generar_excel(df, cliente['nombre'])
-
-    st.download_button(
-        "📥 Descargar Base para F-14 (Excel)",
-        data=excel_bytes,
-        file_name=f"Retenciones_F14_{cliente['nombre'].replace(' ','_')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary"
-    )
+    # ── Descarga Excel ───────────────────────────────────────────────────────
+    col_dl1, col_dl2, _ = st.columns([2, 2, 2])
+    with col_dl1:
+        excel_bytes = generar_excel(df_fil, cliente['nombre'])
+        st.download_button(
+            "📥 Descargar Base para F-14 (Excel)",
+            data=excel_bytes,
+            file_name=f"Retenciones_F14_{cliente['nombre'].replace(' ','_')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True,
+        )
+    with col_dl2:
+        csv_bytes = df_fil[list(cols_existentes.keys())].to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📄 Descargar CSV",
+            data=csv_bytes,
+            file_name=f"Retenciones_F14_{cliente['nombre'].replace(' ','_')}.csv",
+            mime="text/csv",
+            type="secondary",
+            use_container_width=True,
+        )
 
 else:
     st.markdown("""
-    <div style="text-align:center; padding: 60px 20px; color: #6B7A2A;">
-        <h3 style="color:#8A9A35 !important;">📂 Sin documentos cargados</h3>
-        <p style="color:#4A5520 !important;">Usa el panel lateral para cargar y procesar DTE-07 de retenciones.</p>
+    <div style="text-align:center; padding: 60px 20px;">
+        <p style="font-size:2.5rem; margin-bottom:8px;">📂</p>
+        <h3 style="color:#6AB040 !important;">Sin documentos cargados</h3>
+        <p style="color:#3A5830 !important;">
+            Usa el panel lateral para cargar y procesar DTE-07 de retenciones.<br>
+            El sistema extrae automáticamente base gravable y retención 1%.
+        </p>
     </div>
     """, unsafe_allow_html=True)
