@@ -135,11 +135,50 @@ def extraer_y_formatear_fecha(texto: str) -> str:
     return ""
 
 
-def extraer_codigo_corto(gen: str) -> str:
-    """Extrae los primeros 8 chars del UUID como código corto (sin guiones)."""
-    if not gen:
-        return ""
-    return gen.replace("-", "")[:8].upper()
+def extraer_sello(texto_original: str) -> str:
+    """
+    Extrae el Sello de Recepción del DTE-07.
+    3 estrategias para cubrir distintos formatos de emisor:
+
+    1. Etiqueta explícita en texto original (con espacios).
+       Acepta letras, dígitos y algunos sufijos (MERCOSAL termina en ZB, RVIT, etc.)
+    2. Etiqueta en texto sin espacios (PDFs comprimidos).
+    3. Heurística: línea completa que empieza con '202' y tiene ≥ 30 chars
+       alfanuméricos, que NO sea el UUID ni el número de control.
+    """
+
+    # ── Paso 1: etiqueta explícita — texto con espacios ──
+    # El sello puede tener letras al final (ZB, RVIT, DAD, etc.)
+    m = re.search(
+        r"[Ss]ello\s+de\s+[Rr]ecepci[oó]n\s*[:\-]?\s*([A-Z0-9]{20,})",
+        texto_original, re.I
+    )
+    if m:
+        return m.group(1).strip()
+
+    # ── Paso 2: etiqueta en texto sin espacios ──
+    t_ns = re.sub(r'\s+', '', texto_original).upper()
+    m2 = re.search(
+        r"SELLODERECE[PC]CI[O0]N[:\-]?([A-Z0-9]{20,})",
+        t_ns
+    )
+    if m2:
+        return m2.group(1).strip()
+
+    # ── Paso 3: heurística — cadena que empieza con el año (202x)
+    # y tiene >= 30 chars alfanuméricos, sin guiones (para no confundir con UUID)
+    # Se busca en cada línea del texto para mayor precisión
+    for linea in texto_original.splitlines():
+        linea_s = linea.strip()
+        # Línea que empieza (o casi) con 202 y es puramente alfanumérica ≥ 30 chars
+        m3 = re.match(r'^(202[0-9][A-Z0-9]{26,})$', linea_s, re.I)
+        if m3:
+            candidato = m3.group(1).upper()
+            # Excluir si tiene guiones (UUID) o coincide con el número de control
+            if '-' not in candidato:
+                return candidato
+
+    return ""
 
 
 def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
@@ -184,42 +223,25 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
 
         # ── Sello de Recepción ──
-        # Busca la cadena alfanumérica larga que sigue a "Sello de Recepción"
-        sello = ""
-        m_sello = re.search(
-            r"[Ss]ello\s+de\s+[Rr]ecepci[oó]n\s*[:\-]?\s*([A-Z0-9]{20,})",
-            t_clean, re.I
-        )
-        if m_sello:
-            sello = m_sello.group(1).strip()
-        else:
-            # Fallback: buscar en texto sin espacios
-            m_sello2 = re.search(
-                r"SELLODERECE[PC]CION[:\-]?([A-Z0-9]{20,})",
-                t_no_sp
-            )
-            if m_sello2:
-                sello = m_sello2.group(1).strip()
+        sello = extraer_sello(t_clean)
 
         fecha = extraer_y_formatear_fecha(t_clean)
 
         # ── NIT del proveedor retenido ──
         nit_prov = ""
-        nom_prov = "⚠️ RECEPTOR DESCONOCIDO"
 
         patron_ids = (
             r"\b\d{4}\s*-?\s*\d{6}\s*-?\s*\d{3}\s*-?\s*\d\b"
             r"|\b\d{14}\b"
         )
-        ids_raw   = re.findall(patron_ids, texto_completo)
-        ids_limp  = list(dict.fromkeys(re.sub(r'[^0-9]', '', n) for n in ids_raw))
+        ids_raw    = re.findall(patron_ids, texto_completo)
+        ids_limp   = list(dict.fromkeys(re.sub(r'[^0-9]', '', n) for n in ids_raw))
         candidatos = [n for n in ids_limp if n != nit_cliente]
 
         proveedores_db = cargar_proveedores_json()
         for n in candidatos:
             if n in proveedores_db:
                 nit_prov = n
-                nom_prov = proveedores_db[n].get("nombre", "")
                 break
 
         if not nit_prov and candidatos:
@@ -263,19 +285,15 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             if base > 0 and ret == 0:
                 ret = round(base * 0.01, 2)
 
-        # Código corto = primeros 8 chars del UUID sin guiones
-        codigo_corto = extraer_codigo_corto(gen)
-
         return {
-            "nit_prov"    : nit_prov,
-            "fecha"       : fecha,
-            "tipo"        : tipo,
-            "sello"       : sello,        # ← Sello de Recepción (antes del código)
-            "codigo_corto": codigo_corto,
-            "gen"         : gen,
-            "base"        : base,
-            "ret"         : ret,
-            "estado"      : 7,
+            "nit_prov" : nit_prov,
+            "fecha"    : fecha,
+            "tipo"     : tipo,
+            "sello"    : sello,  # ← Sello de Recepción
+            "gen"      : gen,    # ← UUID / Código de Generación completo
+            "base"     : base,
+            "ret"      : ret,
+            "estado"   : 7,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
@@ -285,7 +303,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
 
 
 def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
-    """Genera Excel con openpyxl — Sello de Recepción antes de Código de Generación."""
+    """Genera Excel: Sello de Recepción ANTES de Código de Generación. Sin Código Corto."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
@@ -294,20 +312,18 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     ws = wb.active
     ws.title = "Retenciones"
 
-    # Columnas en orden: Sello de Recepción ANTES de Código de Generación
+    # Sin "Código Corto" — Sello antes del UUID
     columnas = [
-        ("NIT Proveedor",      "nit_prov",     18),
-        ("Fecha",              "fecha",        14),
-        ("Tipo",               "tipo",          6),
-        ("Sello de Recepción", "sello",        44),  # ← ANTES del código
-        ("Código de Gen.",     "codigo_corto", 22),
-        ("UUID",               "gen",          38),
-        ("Base ($)",           "base",         14),
-        ("Retención ($)",      "ret",          14),
-        ("Estado",             "estado",        8),
+        ("NIT Proveedor",      "nit_prov", 18),
+        ("Fecha",              "fecha",    14),
+        ("Tipo",               "tipo",      6),
+        ("Sello de Recepción", "sello",    44),  # ← ANTES del código
+        ("Código de Gen.",     "gen",      38),  # ← UUID completo
+        ("Base ($)",           "base",     14),
+        ("Retención ($)",      "ret",      14),
+        ("Estado",             "estado",    8),
     ]
 
-    # Estilos
     header_fill = PatternFill("solid", fgColor="4A5520")
     header_font = Font(bold=True, color="FFFFFF", size=10)
     border_side = Side(style="thin", color="CCCCCC")
@@ -339,19 +355,18 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
             cell.alignment = Alignment(vertical="center")
             if fill.fill_type:
                 cell.fill = fill
-            # Formato numérico para base y ret
             if field in ("base", "ret"):
                 cell.number_format = num_fmt
                 cell.alignment     = Alignment(horizontal="right", vertical="center")
             elif field == "estado":
                 cell.alignment = Alignment(horizontal="center", vertical="center")
-            elif field in ("tipo", "fecha", "codigo_corto"):
+            elif field in ("tipo", "fecha"):
                 cell.alignment = Alignment(horizontal="center", vertical="center")
 
     # Fila de totales
     total_row = len(df) + 2
-    ws.cell(row=total_row, column=6, value="TOTALES").font = Font(bold=True)
-    ws.cell(row=total_row, column=6).alignment = Alignment(horizontal="right")
+    ws.cell(row=total_row, column=5, value="TOTALES").font = Font(bold=True)
+    ws.cell(row=total_row, column=5).alignment = Alignment(horizontal="right")
 
     base_col = [c[1] for c in columnas].index("base") + 1
     ret_col  = [c[1] for c in columnas].index("ret")  + 1
@@ -488,20 +503,18 @@ if not st.session_state.db_ret.empty:
 
     st.markdown("#### 📋 Libro de Retenciones — Base para F-14")
 
-    # Columnas en orden: Sello de Recepción ANTES de Código de Generación
+    # Sin "Código Corto" — Sello ANTES de Código de Generación
     COLS_DISPLAY = {
-        "nit_prov"    : "NIT Proveedor",
-        "fecha"       : "Fecha",
-        "tipo"        : "Tipo",
-        "sello"       : "Sello de Recepción",   # ← ANTES del código
-        "codigo_corto": "Código de Generación",
-        "gen"         : "UUID",
-        "base"        : "Base ($)",
-        "ret"         : "Retención ($)",
-        "estado"      : "Estado",
+        "nit_prov" : "NIT Proveedor",
+        "fecha"    : "Fecha",
+        "tipo"     : "Tipo",
+        "sello"    : "Sello de Recepción",    # ← ANTES
+        "gen"      : "Código de Generación",  # ← UUID completo
+        "base"     : "Base ($)",
+        "ret"      : "Retención ($)",
+        "estado"   : "Estado",
     }
 
-    # Solo mostrar columnas que existen en el df
     cols_existentes = {k: v for k, v in COLS_DISPLAY.items() if k in df.columns}
     df_vista = df[list(cols_existentes.keys())].rename(columns=cols_existentes)
 
