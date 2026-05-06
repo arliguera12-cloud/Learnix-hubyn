@@ -173,7 +173,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         nit_cliente = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
 
-        # ── UUID ──
+        # ── UUID / Código de Generación ──
         gen = ""
         m_uuid = re.search(
             r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
@@ -182,6 +182,24 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         if m_uuid:
             raw = m_uuid.group(1).replace("-", "")
             gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
+
+        # ── Sello de Recepción ──
+        # Busca la cadena alfanumérica larga que sigue a "Sello de Recepción"
+        sello = ""
+        m_sello = re.search(
+            r"[Ss]ello\s+de\s+[Rr]ecepci[oó]n\s*[:\-]?\s*([A-Z0-9]{20,})",
+            t_clean, re.I
+        )
+        if m_sello:
+            sello = m_sello.group(1).strip()
+        else:
+            # Fallback: buscar en texto sin espacios
+            m_sello2 = re.search(
+                r"SELLODERECE[PC]CION[:\-]?([A-Z0-9]{20,})",
+                t_no_sp
+            )
+            if m_sello2:
+                sello = m_sello2.group(1).strip()
 
         fecha = extraer_y_formatear_fecha(t_clean)
 
@@ -252,6 +270,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             "nit_prov"    : nit_prov,
             "fecha"       : fecha,
             "tipo"        : tipo,
+            "sello"       : sello,        # ← Sello de Recepción (antes del código)
             "codigo_corto": codigo_corto,
             "gen"         : gen,
             "base"        : base,
@@ -266,7 +285,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
 
 
 def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
-    """Genera Excel con openpyxl, formato igual al screenshot."""
+    """Genera Excel con openpyxl — Sello de Recepción antes de Código de Generación."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
@@ -275,16 +294,17 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     ws = wb.active
     ws.title = "Retenciones"
 
-    # Columnas en el orden del Excel mostrado
+    # Columnas en orden: Sello de Recepción ANTES de Código de Generación
     columnas = [
-        ("NIT Proveedor",  "nit_prov",     18),
-        ("Fecha",          "fecha",        14),
-        ("Tipo",           "tipo",          6),
-        ("Código Corto",   "codigo_corto", 22),
-        ("UUID",           "gen",          38),
-        ("Base ($)",       "base",         14),
-        ("Retención ($)",  "ret",          14),
-        ("Estado",         "estado",        8),
+        ("NIT Proveedor",      "nit_prov",     18),
+        ("Fecha",              "fecha",        14),
+        ("Tipo",               "tipo",          6),
+        ("Sello de Recepción", "sello",        44),  # ← ANTES del código
+        ("Código de Gen.",     "codigo_corto", 22),
+        ("UUID",               "gen",          38),
+        ("Base ($)",           "base",         14),
+        ("Retención ($)",      "ret",          14),
+        ("Estado",             "estado",        8),
     ]
 
     # Estilos
@@ -330,8 +350,8 @@ def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
 
     # Fila de totales
     total_row = len(df) + 2
-    ws.cell(row=total_row, column=5, value="TOTALES").font = Font(bold=True)
-    ws.cell(row=total_row, column=5).alignment = Alignment(horizontal="right")
+    ws.cell(row=total_row, column=6, value="TOTALES").font = Font(bold=True)
+    ws.cell(row=total_row, column=6).alignment = Alignment(horizontal="right")
 
     base_col = [c[1] for c in columnas].index("base") + 1
     ret_col  = [c[1] for c in columnas].index("ret")  + 1
@@ -468,19 +488,20 @@ if not st.session_state.db_ret.empty:
 
     st.markdown("#### 📋 Libro de Retenciones — Base para F-14")
 
-    # Columnas en el orden del Excel (igual al screenshot)
+    # Columnas en orden: Sello de Recepción ANTES de Código de Generación
     COLS_DISPLAY = {
         "nit_prov"    : "NIT Proveedor",
         "fecha"       : "Fecha",
         "tipo"        : "Tipo",
-        "codigo_corto": "Código Corto",
+        "sello"       : "Sello de Recepción",   # ← ANTES del código
+        "codigo_corto": "Código de Generación",
         "gen"         : "UUID",
         "base"        : "Base ($)",
         "ret"         : "Retención ($)",
         "estado"      : "Estado",
     }
 
-    # Solo mostrar columnas que existen
+    # Solo mostrar columnas que existen en el df
     cols_existentes = {k: v for k, v in COLS_DISPLAY.items() if k in df.columns}
     df_vista = df[list(cols_existentes.keys())].rename(columns=cols_existentes)
 
