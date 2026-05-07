@@ -191,6 +191,29 @@ with st.sidebar:
             unsafe_allow_html=True
         )
 
+    # ── Gemini API Key (fallback de extracción) ───────────────────────────────
+    try:
+        _gemini_secret = st.secrets.get("gemini", {}).get("api_key", "")
+    except Exception:
+        _gemini_secret = ""
+    if not _gemini_secret:
+        with st.expander("⚡ IA · Gemini", expanded=False):
+            gemini_key = st.text_input(
+                "API Key Gemini 1.5 Flash",
+                type="password",
+                value=st.session_state.get("gemini_api_key", ""),
+                placeholder="AIza...",
+                help="Mejora la extracción de nombres cuando el PDF tiene formato inusual.",
+                label_visibility="collapsed",
+            )
+            if gemini_key != st.session_state.get("gemini_api_key", ""):
+                st.session_state["gemini_api_key"] = gemini_key
+                st.rerun()
+            if st.session_state.get("gemini_api_key"):
+                st.success("Gemini activo", icon="⚡")
+            else:
+                st.caption("Sin clave — extracción solo con regex.")
+
 # ─────────────────────────────────────────────
 # EJECUTAR NAVEGACIÓN
 # ─────────────────────────────────────────────
