@@ -1,87 +1,29 @@
 # ═══════════════════════════════════════════════════════════════
 #  .streamlit/config.toml
 #  Learnix DTE Hub — Configuración Global
-#  Tema: Verde Oliva · Modo Oscuro
+#  Tema: Midnight Forest Professional · Modo Oscuro
 # ═══════════════════════════════════════════════════════════════
 
-# ───────────────────────────────────────────
-# TEMA VISUAL — VERDE OLIVA UNIFICADO
-# ───────────────────────────────────────────
 [theme]
+base                   = "dark"
+primaryColor           = "#5EA830"
+backgroundColor        = "#080C09"
+secondaryBackgroundColor = "#0D1410"
+textColor              = "#E0EED8"
+font                   = "sans serif"
 
-# Modo base oscuro
-base = "dark"
-
-# ✅ Color primario: Verde oliva medio
-# Afecta: botones nativos, sliders, checkboxes,
-#         radio buttons, progress bars, selectbox focus
-primaryColor = "#8A9A35"
-
-# ✅ Fondo principal: Negro verdoso (no negro puro)
-# Consistente con #0D0F07 del CSS inline
-backgroundColor = "#0D0F07"
-
-# ✅ Fondo secundario: Sidebar y tarjetas
-# Consistente con #141A08 del CSS inline
-secondaryBackgroundColor = "#141A08"
-
-# ✅ Color de texto: Crema cálido
-# Consistente con #F0EDD8 del CSS inline
-textColor = "#F0EDD8"
-
-# ✅ Fuente: valor válido para Streamlit
-font = "sans serif"
-
-
-# ───────────────────────────────────────────
-# SERVIDOR
-# ✅ Sección [server] UNIFICADA (era duplicada)
-# ───────────────────────────────────────────
 [server]
-
-# Tamaño máximo de carga (PDFs de Hacienda pueden ser grandes)
-maxUploadSize = 500
-
-# Protección CSRF activada
+maxUploadSize      = 500
 enableXsrfProtection = true
+enableCORS         = false
+maxMessageSize     = 200
 
-# CORS: false para uso local/Cloud sin CDN externo
-enableCORS = false
-
-# Tiempo máximo de espera para mensajes websocket (ms)
-# Necesario para procesar lotes grandes de PDFs
-maxMessageSize = 200
-
-
-# ───────────────────────────────────────────
-# RUNNER — Rendimiento
-# ───────────────────────────────────────────
 [runner]
-
-# ✅ Reruns rápidos — mejora respuesta al procesar PDFs
 fastReruns = true
 
-# Manejo de errores sin detener la app completa
-# magicEnabled = false  # Descomentar si se desea deshabilitar st.write() mágico
-
-
-# ───────────────────────────────────────────
-# BROWSER — Privacidad
-# ───────────────────────────────────────────
 [browser]
-
-# ✅ Desactivar telemetría de uso a Streamlit
 gatherUsageStats = false
+serverAddress    = "localhost"
 
-# Abrir automáticamente el navegador al iniciar en local
-serverAddress = "localhost"
-
-
-# ───────────────────────────────────────────
-# UI — Interfaz
-# ───────────────────────────────────────────
 [ui]
-
-# ✅ Ocultar menú hamburguesa de Streamlit para usuarios finales
-# (El comentario original lo indicaba pero no estaba implementado)
 hideTopBar = true
