@@ -11,6 +11,14 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
+from utils.pdf_utils import (
+    safe_str as _safe_str,
+    safe_extract_text as _safe_extract_text,
+    normalizar_unicode,
+    limpiar_monto as _limpiar_monto,
+    extraer_y_formatear_fecha as _extraer_fecha,
+    extraer_texto_pdf,
+)
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -88,30 +96,11 @@ CORTE_NOMBRE = re.compile(
 # ─────────────────────────────────────────────
 # 5. UTILIDADES SEGURAS
 # ─────────────────────────────────────────────
-def safe_str(val) -> str:
-    return "" if val is None else str(val)
-
-def safe_extract_text(page, layout: bool = False) -> str:
-    try:
-        return safe_str(page.extract_text(layout=layout))
-    except Exception:
-        try:
-            return safe_str(page.extract_text())
-        except Exception:
-            return ""
-
-def _normalizar_unicode(texto: str) -> str:
-    """Normaliza caracteres unicode problemáticos para mejorar el matching de regex."""
-    reemplazos = {
-        '–': '-', '—': '-', '‒': '-',  # dashes → hyphen
-        ' ': ' ', ' ': ' ', ' ': ' ',  # non-breaking spaces → space
-        '‘': "'", '’': "'",                   # smart quotes → apostrophe
-        '“': '"', '”': '"',                   # smart double quotes
-        'ﬁ': 'fi', 'ﬂ': 'fl',                # ligatures
-    }
-    for orig, repl in reemplazos.items():
-        texto = texto.replace(orig, repl)
-    return texto
+# Delegadas a utils.pdf_utils
+safe_str                  = _safe_str
+safe_extract_text         = _safe_extract_text
+limpiar_monto             = _limpiar_monto
+extraer_y_formatear_fecha = _extraer_fecha
 
 def es_linea_direccion(texto: str) -> bool:
     L = safe_str(texto).upper().strip()
@@ -157,98 +146,6 @@ def actualizar_nombre_en_db_ventas(nit: str, nombre: str) -> None:
     if mask.any():
         st.session_state.db_ventas.loc[mask, "nom_cli"] = safe_str(nombre).strip().upper()
 
-def limpiar_monto(monto_str) -> float:
-    """Soporta: 1,234.56 | 1.234,56 | 1234.56 | 1234,56 | 1234"""
-    try:
-        s = re.sub(r'[^\d.,]', '', safe_str(monto_str).strip())
-        if not s:
-            return 0.0
-
-        n_comas  = s.count(',')
-        n_puntos = s.count('.')
-
-        if n_comas == 0 and n_puntos == 0:
-            return float(s)
-
-        # Solo una coma
-        if n_comas == 1 and n_puntos == 0:
-            partes = s.split(',')
-            if len(partes[1]) <= 2:
-                return float(s.replace(',', '.'))
-            return float(s.replace(',', ''))
-
-        # Solo un punto
-        if n_puntos == 1 and n_comas == 0:
-            partes = s.split('.')
-            if len(partes[1]) == 3:
-                return float(s.replace('.', ''))
-            return float(s)
-
-        # Múltiples separadores: el último indica el decimal
-        uc = s.rfind(',')
-        up = s.rfind('.')
-        if uc > up:
-            s = s.replace('.', '').replace(',', '.')
-        else:
-            s = s.replace(',', '')
-        return float(s)
-    except Exception:
-        return 0.0
-
-def extraer_y_formatear_fecha(texto: str) -> str:
-    """Extrae la fecha de EMISIÓN del DTE. Inmune a fechas de vencimiento."""
-    try:
-        texto       = safe_str(texto)
-        texto_clean = re.sub(
-            r'[-\s]\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?', ' ', texto, flags=re.I
-        )
-        candidatas: list = []
-
-        # Paso 1: etiqueta explícita de emisión (mayor prioridad)
-        for m in re.finditer(
-            r'(?:[Ff]echa\s+y\s+[Hh]ora\s+de\s+(?:[Gg]eneraci[oó]n|[Ee]misi[oó]n)|'
-            r'[Ff]echa\s+(?:de\s+)?[Ee]misi[oó]n|[Ff]echa\s+[Gg]eneraci[oó]n|'
-            r'(?<!\w)[Ff]echa(?!\s+[Vv]enc))'
-            r'\s*:?\s*'
-            r'(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]20[2-3]\d|20[2-3]\d[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})',
-            texto_clean, re.I,
-        ):
-            candidatas.append((m.start(), m.group(1)))
-
-        # Paso 2: ISO YYYY-MM-DD sin etiqueta
-        for m in re.finditer(
-            r'\b(20[2-3]\d)[-\/](0[1-9]|1[0-2])[-\/]([0-2]\d|3[01])\b', texto_clean
-        ):
-            ctx = texto_clean[max(0, m.start() - 30):m.start()].upper()
-            if not any(w in ctx for w in ['VENCE', 'LOTE', 'V:', 'EXPIRA', 'CADUCIDAD']):
-                candidatas.append((m.start(), f"{m.group(3)}/{m.group(2)}/{m.group(1)}"))
-
-        # Paso 3: DD/MM/YYYY sin etiqueta
-        for m in re.finditer(
-            r'\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](20[2-3]\d)\b', texto_clean
-        ):
-            ctx = texto_clean[max(0, m.start() - 30):m.start()].upper()
-            if any(w in ctx for w in ['VENCE', 'LOTE', 'V:', 'EXPIRA', 'CADUCIDAD']):
-                continue
-            p1, p2, y = int(m.group(1)), int(m.group(2)), m.group(3)
-            if p1 > 31 or p2 > 12:
-                continue
-            candidatas.append((m.start(), f"{p1:02d}/{p2:02d}/{y}"))
-
-        candidatas.sort(key=lambda x: x[0])
-
-        for _, fecha_str in candidatas:
-            m_iso = re.match(r'(20[2-3]\d)[-\/](\d{1,2})[-\/](\d{1,2})', fecha_str)
-            if m_iso:
-                return f"{int(m_iso.group(3)):02d}/{int(m_iso.group(2)):02d}/{m_iso.group(1)}"
-            m_dmy = re.match(r'(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](20[2-3]\d)', fecha_str)
-            if m_dmy:
-                return f"{int(m_dmy.group(1)):02d}/{int(m_dmy.group(2)):02d}/{m_dmy.group(3)}"
-            if re.match(r'\d{2}\/\d{2}\/20\d{2}', fecha_str):
-                return fecha_str
-    except Exception:
-        pass
-    return ""
 
 
 # ══════════════════════════════════════════════════════════════
@@ -367,7 +264,7 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, cliente_activo: d
 # EXTRACTOR PRINCIPAL DE VENTAS
 # Maneja DTE-01 (Factura), DTE-03 (CCF), DTE-05 (NC), DTE-06 (ND)
 # ══════════════════════════════════════════════════════════════
-def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
+def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_db: dict = None) -> dict:
     """
     Extrae datos de un DTE PDF de ventas.
     
@@ -384,17 +281,15 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         return {"error_fatal": "Archivo vacio o demasiado pequeño."}
 
     try:
-        texto_lineal = ""
-        texto_visual = ""
-        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
-            if not pdf.pages:
-                return {"error_fatal": "PDF sin paginas."}
-            for page in pdf.pages:
-                texto_lineal += safe_extract_text(page, layout=False) + "\n"
-                texto_visual  += safe_extract_text(page, layout=True)  + "\n"
+        try:
+            texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
+        except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
+            return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+        except Exception as e:
+            if "password" in str(e).lower() or "encrypt" in str(e).lower():
+                return {"error_fatal": "PDF protegido con contraseña. Desbloquéalo antes de subir."}
+            raise
 
-        texto_lineal   = _normalizar_unicode(safe_str(texto_lineal))
-        texto_visual   = _normalizar_unicode(safe_str(texto_visual))
         texto_completo = texto_lineal + "\n" + texto_visual
 
         if len(texto_completo.strip()) < 50:
@@ -496,7 +391,8 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         nom_cli     = "SIN NOMBRE"
         es_nuevo    = True
         pos_nit_rec = -1
-        clientes_db = cargar_clientes_json()
+        if clientes_db is None:
+            clientes_db = cargar_clientes_json()
 
         # Separar sección del receptor del texto
         partes_doc = re.split(
@@ -675,37 +571,37 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
             encontrado = total > 0 and debito > 0 and gravadas > 0
 
             if not encontrado:
-                # Algoritmo de búsqueda por consistencia matemática
+                # Algoritmo O(n²) con índice de IVA (igual que Compras)
                 montos_raw = re.findall(
-                    r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-                    t_clean
+                    r'(?<![A-Z\-])(\d{1,3}(?:[,\.]\d{3})*[,\.]\d{2}|\d+\.\d{2}|\d+,\d{2})',
+                    t_clean,
                 )
-                set_montos = set()
+                set_montos: set = set()
                 for rv in montos_raw:
                     v = limpiar_monto(rv)
-                    if v > 0:
-                        set_montos.add(v)
+                    if 0.01 < v < 1_000_000:
+                        set_montos.add(round(v, 2))
                 valores = sorted(list(set_montos), reverse=True)[:MAX_VALORES_LOOP]
+                set_valores = set(valores)
 
-                for vt in valores:
-                    if encontrado:
-                        break
-                    for vg in valores:
-                        if vg >= vt:
+                for vg in valores:
+                    vi_esperado = round(vg * 0.13, 2)
+                    for delta in [0, 0.01, -0.01, 0.02, -0.02]:
+                        vi_cand = round(vi_esperado + delta, 2)
+                        if vi_cand not in set_valores:
                             continue
+                        vt_cand = round(vg + vi_cand + exentas + no_sujetas, 2)
+                        for vt in valores:
+                            if abs(vt - vt_cand) <= 0.10 and vt > vg:
+                                gravadas   = vg
+                                debito     = vi_cand
+                                total      = vt
+                                encontrado = True
+                                break
                         if encontrado:
                             break
-                        for vi in valores:
-                            if vi >= vg:
-                                continue
-                            if abs(round(vg * 0.13, 2) - round(vi, 2)) <= 0.05:
-                                candidato_tot = round(vg + vi + exentas + no_sujetas, 2)
-                                if abs(candidato_tot - round(vt, 2)) <= 0.10:
-                                    gravadas   = vg
-                                    debito     = vi
-                                    total      = vt
-                                    encontrado = True
-                                    break
+                    if encontrado:
+                        break
 
             if not encontrado:
                 if total > 0 and debito > 0 and gravadas == 0.0:
@@ -943,21 +839,54 @@ def to_excel_auditoria(df: pd.DataFrame) -> bytes:
 # ─────────────────────────────────────────────
 # DIÁLOGO DE DESCARGA
 # ─────────────────────────────────────────────
+def _validar_matematica_ventas(df: pd.DataFrame) -> list:
+    """Devuelve lista de filas con inconsistencias matemáticas (gravadas+debito≠total)."""
+    alertas = []
+    for _, row in df.iterrows():
+        if row.get('tipo', '') not in TIPOS_CONTRIBUYENTES:
+            continue
+        esperado = round(row.get('gravadas', 0) + row.get('debito', 0)
+                         + row.get('exentas', 0) + row.get('no_sujetas', 0), 2)
+        real     = round(row.get('total', 0), 2)
+        if real > 0 and abs(esperado - real) > 0.50:
+            alertas.append({
+                "ctrl": row.get('num_control_raw', '—'),
+                "esperado": esperado,
+                "real": real,
+                "diff": abs(esperado - real),
+            })
+    return alertas
+
+
 @st.dialog("Confirmar Descarga de Anexos")
 def ventana_descarga_ventas(df_contribuyentes: pd.DataFrame,
                              df_consumidor: pd.DataFrame,
                              nombre_base: str) -> None:
     st.write("Verifica los totales antes de descargar. Los archivos están listos para cargar en el portal de Hacienda.")
-    
+
+    # Validación matemática Anexo 1
+    if not df_contribuyentes.empty:
+        alertas = _validar_matematica_ventas(df_contribuyentes)
+        if alertas:
+            with st.expander(f"⚠️ {len(alertas)} documento(s) con posible inconsistencia matemática"):
+                for a in alertas[:10]:
+                    st.markdown(
+                        f'<div class="math-warn">📄 <code>{a["ctrl"]}</code> — '
+                        f'Gravadas+IVA+Exentas = <strong>${a["esperado"]:,.2f}</strong> '
+                        f'vs Total = <strong>${a["real"]:,.2f}</strong> '
+                        f'(diferencia: ${a["diff"]:,.2f})</div>',
+                        unsafe_allow_html=True
+                    )
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.markdown("**Anexo 1 — Contribuyentes (CCF/NC/ND)**")
         if not df_contribuyentes.empty:
             f07_contrib = construir_df_f07_contribuyentes(df_contribuyentes)
             st.caption(f"📄 {len(f07_contrib)} documentos")
             total_c = df_contribuyentes['total'].sum()
-            st.caption(f"💰 Total: ${total_c:,.2f}")
+            st.caption(f"Total: ${total_c:,.2f}")
             st.download_button(
                 "📥 Descargar Anexo 1 (Contribuyentes)",
                 data=to_excel_hacienda_contribuyentes(f07_contrib),
@@ -1104,6 +1033,9 @@ with st.sidebar:
             extracted, duplicados, iva_calc_files   = [], [], []
             invalidos, corruptos, nuevos_clientes_d = [], [], {}
 
+            # Carga única de BD (evita leer el JSON en disco por cada PDF)
+            _clientes_db_cache = cargar_clientes_json()
+
             bar          = st.progress(0)
             txt_progreso = st.empty()
             t_inicio     = time.time()
@@ -1129,7 +1061,7 @@ with st.sidebar:
                     bar.progress((idx + 1) / total_arch)
                     continue
 
-                res = extraer_venta_nativo_pro(file_bytes, cliente)
+                res = extraer_venta_nativo_pro(file_bytes, cliente, clientes_db=_clientes_db_cache)
 
                 cod_gen  = safe_str(res.get('gen', ''))
                 num_ctrl = safe_str(res.get('num_control', ''))
