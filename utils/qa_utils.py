@@ -239,16 +239,23 @@ def mostrar_indicador_vision(
     campos_vision: dict,
     alertas_vision: list,
     audit_vision: dict,
+    error_vision: str = "",
     container=None,
 ) -> None:
     """
-    Replaces the simple Gemini indicator text with a rich Vision status block.
-    Call this inside the "🔍 Datos extraídos automáticamente" expander.
+    Renders the Vision status indicator inside a Streamlit container.
+    Displays the actual API error when Vision fails, so users can diagnose it.
     """
     target = container or st
 
     if not audit_vision:
-        target.caption("🔌 Gemini Vision no disponible — extracción solo por regex")
+        if error_vision:
+            target.warning(
+                f"⚠️ **Gemini Vision falló** — se usó regex como respaldo.\n\n"
+                f"Error exacto: `{error_vision}`"
+            )
+        else:
+            target.caption("🔌 Gemini Vision no disponible — extracción solo por regex")
         return
 
     confianza = audit_vision.get("confianza", 0)

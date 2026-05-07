@@ -24,6 +24,7 @@ from utils.gemini_utils import (
 from utils.gemini_vision import (
     extraer_dte_con_vision,
     vision_disponible,
+    vision_ultimo_error,
 )
 from utils.qa_utils import (
     mostrar_banner_qa,

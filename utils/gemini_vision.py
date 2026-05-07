@@ -1,15 +1,14 @@
 """
-Learnix Hub — Gemini Vision v1.0 (multimodal PDF → DTE extraction).
+Learnix Hub — Gemini Vision v1.1 (multimodal PDF → DTE extraction).
 
 Sends raw PDF bytes as base64 inlineData directly to gemini-2.5-flash Vision.
-Primary extraction path — eliminates the need to extract text with pdfplumber
-before calling Gemini. Falls back gracefully if the API is unavailable.
+Primary extraction path — eliminates the need for pdfplumber text extraction.
 
-Roles per DTE type:
-  ventas          → EMISOR = cliente activo; extraer datos del RECEPTOR (comprador)
-  compras         → RECEPTOR = cliente activo; extraer datos del EMISOR (proveedor)
-  retenciones     → AGENTE RETENEDOR = cliente activo; extraer datos del SUJETO RETENIDO
-  sujetos_excluidos → COMPRADOR = cliente activo; extraer datos del SUJETO EXCLUIDO
+Fix v1.1:
+  • Removed all `nullable: True` and `BOOLEAN` fields from responseSchema
+    (these cause HTTP 400 on multimodal inlineData requests).
+  • Two-phase call: try with schema; auto-retry without schema on 400/schema errors.
+  • Error surfaced via vision_ultimo_error() so the UI can display it.
 """
 import base64
 import json
@@ -27,7 +26,7 @@ _GEMINI_URL   = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{_GEMINI_MODEL}:generateContent"
 )
-_TIMEOUT = 60  # Vision requests take longer than text-only calls
+_TIMEOUT = 60
 
 _ultimo_error: str = ""
 
@@ -53,7 +52,11 @@ def vision_ultimo_error() -> str:
     return _ultimo_error
 
 
-# ─── Sub-schemas compartidos ──────────────────────────────────────────────────
+# ─── Sub-schemas (sin nullable, sin BOOLEAN) ──────────────────────────────────
+#
+# IMPORTANT: nullable:True and BOOLEAN type cause HTTP 400 when combined with
+# inlineData multimodal requests in gemini-2.5-flash. Use plain STRING/NUMBER
+# types only. Fields not listed in "required" can be absent or null in output.
 
 def _sub_razonamiento() -> dict:
     return {
@@ -64,7 +67,6 @@ def _sub_razonamiento() -> dict:
             "bloque_receptor" : {"type": "STRING"},
             "autovalidacion"  : {"type": "STRING"},
         },
-        "required": ["autovalidacion"],
     }
 
 
@@ -76,96 +78,92 @@ def _sub_auditoria() -> dict:
             "confianza_extraccion": {"type": "INTEGER"},
             "notas"               : {"type": "STRING"},
         },
-        "required": ["modelo_utilizado", "confianza_extraccion", "notas"],
+        "required": ["confianza_extraccion"],
     }
 
 
-# ─── Schemas por tipo de DTE ──────────────────────────────────────────────────
+# ─── Schemas por tipo de DTE (sin nullable, sin BOOLEAN) ─────────────────────
 
 _SCHEMAS: dict[str, dict] = {
     "ventas": {
         "type": "OBJECT",
         "properties": {
-            "tipo_documento"   : {"type": "STRING",  "nullable": True},
-            "fecha"            : {"type": "STRING",  "nullable": True},
-            "num_control"      : {"type": "STRING",  "nullable": True},
-            "codigo_generacion": {"type": "STRING",  "nullable": True},
-            "sello_recepcion"  : {"type": "STRING",  "nullable": True},
-            "nom_receptor"     : {"type": "STRING",  "nullable": True},
-            "nit_receptor"     : {"type": "STRING",  "nullable": True},
-            "dui_receptor"     : {"type": "STRING",  "nullable": True},
-            "gravadas"         : {"type": "NUMBER",  "nullable": True},
-            "exentas"          : {"type": "NUMBER",  "nullable": True},
-            "no_sujetas"       : {"type": "NUMBER",  "nullable": True},
-            "iva"              : {"type": "NUMBER",  "nullable": True},
-            "total"            : {"type": "NUMBER",  "nullable": True},
-            "iva_correcto"     : {"type": "BOOLEAN", "nullable": True},
-            "alertas_fiscales" : {"type": "ARRAY",   "items": {"type": "STRING"}},
+            "tipo_documento"   : {"type": "STRING"},
+            "fecha"            : {"type": "STRING"},
+            "num_control"      : {"type": "STRING"},
+            "codigo_generacion": {"type": "STRING"},
+            "sello_recepcion"  : {"type": "STRING"},
+            "nom_receptor"     : {"type": "STRING"},
+            "nit_receptor"     : {"type": "STRING"},
+            "dui_receptor"     : {"type": "STRING"},
+            "gravadas"         : {"type": "NUMBER"},
+            "exentas"          : {"type": "NUMBER"},
+            "no_sujetas"       : {"type": "NUMBER"},
+            "iva"              : {"type": "NUMBER"},
+            "total"            : {"type": "NUMBER"},
+            "alertas_fiscales" : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"     : _sub_razonamiento(),
             "auditoria_ia"     : _sub_auditoria(),
         },
-        "required": ["alertas_fiscales", "razonamiento", "auditoria_ia"],
+        "required": ["alertas_fiscales", "auditoria_ia"],
     },
     "compras": {
         "type": "OBJECT",
         "properties": {
-            "tipo_documento"   : {"type": "STRING",  "nullable": True},
-            "fecha"            : {"type": "STRING",  "nullable": True},
-            "num_control"      : {"type": "STRING",  "nullable": True},
-            "codigo_generacion": {"type": "STRING",  "nullable": True},
-            "sello_recepcion"  : {"type": "STRING",  "nullable": True},
-            "nom_emisor"       : {"type": "STRING",  "nullable": True},
-            "nit_emisor"       : {"type": "STRING",  "nullable": True},
-            "gravadas"         : {"type": "NUMBER",  "nullable": True},
-            "exentas"          : {"type": "NUMBER",  "nullable": True},
-            "no_sujetas"       : {"type": "NUMBER",  "nullable": True},
-            "iva"              : {"type": "NUMBER",  "nullable": True},
-            "total"            : {"type": "NUMBER",  "nullable": True},
-            "iva_correcto"     : {"type": "BOOLEAN", "nullable": True},
-            "alertas_fiscales" : {"type": "ARRAY",   "items": {"type": "STRING"}},
+            "tipo_documento"   : {"type": "STRING"},
+            "fecha"            : {"type": "STRING"},
+            "num_control"      : {"type": "STRING"},
+            "codigo_generacion": {"type": "STRING"},
+            "sello_recepcion"  : {"type": "STRING"},
+            "nom_emisor"       : {"type": "STRING"},
+            "nit_emisor"       : {"type": "STRING"},
+            "gravadas"         : {"type": "NUMBER"},
+            "exentas"          : {"type": "NUMBER"},
+            "no_sujetas"       : {"type": "NUMBER"},
+            "iva"              : {"type": "NUMBER"},
+            "total"            : {"type": "NUMBER"},
+            "alertas_fiscales" : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"     : _sub_razonamiento(),
             "auditoria_ia"     : _sub_auditoria(),
         },
-        "required": ["alertas_fiscales", "razonamiento", "auditoria_ia"],
+        "required": ["alertas_fiscales", "auditoria_ia"],
     },
     "retenciones": {
         "type": "OBJECT",
         "properties": {
-            "tipo_documento"    : {"type": "STRING",  "nullable": True},
-            "fecha"             : {"type": "STRING",  "nullable": True},
-            "num_control"       : {"type": "STRING",  "nullable": True},
-            "codigo_generacion" : {"type": "STRING",  "nullable": True},
-            "sello_recepcion"   : {"type": "STRING",  "nullable": True},
-            "nom_retenido"      : {"type": "STRING",  "nullable": True},
-            "nit_retenido"      : {"type": "STRING",  "nullable": True},
-            "monto_sujeto"      : {"type": "NUMBER",  "nullable": True},
-            "iva_retenido"      : {"type": "NUMBER",  "nullable": True},
-            "retencion_correcta": {"type": "BOOLEAN", "nullable": True},
-            "alertas_fiscales"  : {"type": "ARRAY",   "items": {"type": "STRING"}},
+            "tipo_documento"    : {"type": "STRING"},
+            "fecha"             : {"type": "STRING"},
+            "num_control"       : {"type": "STRING"},
+            "codigo_generacion" : {"type": "STRING"},
+            "sello_recepcion"   : {"type": "STRING"},
+            "nom_retenido"      : {"type": "STRING"},
+            "nit_retenido"      : {"type": "STRING"},
+            "monto_sujeto"      : {"type": "NUMBER"},
+            "iva_retenido"      : {"type": "NUMBER"},
+            "alertas_fiscales"  : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"      : _sub_razonamiento(),
             "auditoria_ia"      : _sub_auditoria(),
         },
-        "required": ["alertas_fiscales", "razonamiento", "auditoria_ia"],
+        "required": ["alertas_fiscales", "auditoria_ia"],
     },
     "sujetos_excluidos": {
         "type": "OBJECT",
         "properties": {
-            "tipo_documento"    : {"type": "STRING",  "nullable": True},
-            "fecha"             : {"type": "STRING",  "nullable": True},
-            "num_control"       : {"type": "STRING",  "nullable": True},
-            "codigo_generacion" : {"type": "STRING",  "nullable": True},
-            "sello_recepcion"   : {"type": "STRING",  "nullable": True},
-            "nom_sujeto"        : {"type": "STRING",  "nullable": True},
-            "nit_sujeto"        : {"type": "STRING",  "nullable": True},
-            "dui_sujeto"        : {"type": "STRING",  "nullable": True},
-            "base_compras"      : {"type": "NUMBER",  "nullable": True},
-            "retencion_renta"   : {"type": "NUMBER",  "nullable": True},
-            "retencion_correcta": {"type": "BOOLEAN", "nullable": True},
-            "alertas_fiscales"  : {"type": "ARRAY",   "items": {"type": "STRING"}},
+            "tipo_documento"    : {"type": "STRING"},
+            "fecha"             : {"type": "STRING"},
+            "num_control"       : {"type": "STRING"},
+            "codigo_generacion" : {"type": "STRING"},
+            "sello_recepcion"   : {"type": "STRING"},
+            "nom_sujeto"        : {"type": "STRING"},
+            "nit_sujeto"        : {"type": "STRING"},
+            "dui_sujeto"        : {"type": "STRING"},
+            "base_compras"      : {"type": "NUMBER"},
+            "retencion_renta"   : {"type": "NUMBER"},
+            "alertas_fiscales"  : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"      : _sub_razonamiento(),
             "auditoria_ia"      : _sub_auditoria(),
         },
-        "required": ["alertas_fiscales", "razonamiento", "auditoria_ia"],
+        "required": ["alertas_fiscales", "auditoria_ia"],
     },
 }
 
@@ -220,9 +218,9 @@ PASO 3 — EXTRAER VALORES (NUNCA ETIQUETAS)
 
   Para NÚMEROS: solo dígitos y punto decimal. Elimina "$", "US", comas de miles.
   Para FECHAS: formato DD/MM/YYYY (ej: "15/03/2025"). Busca "Fecha de Emisión:".
-  Para SELLO/UUID: cadenas alfanuméricas largas (sello: 30-40 chars sin guiones;
-    UUID: 36 chars con guiones en formato XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX).
-  Para NUM_CONTROL: formato DTE-XX-XXXX-XXXXXXXXX (con guiones).
+  Para SELLO: cadena alfanumérica sin guiones, 30-40 chars.
+  Para UUID (codigo_generacion): XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (36 chars).
+  Para num_control: formato DTE-XX-XXXX-XXXXXXXXX (con guiones).
 
 PASO 4 — AUTO-VALIDAR Y GENERAR ALERTAS
   Verifica cada campo extraído:
@@ -232,7 +230,7 @@ PASO 4 — AUTO-VALIDAR Y GENERAR ALERTAS
   • IVA del doc ≠ gravadas × 13% (±$0.02) → alerta "IVA no coincide: doc={X} calc={Y}"
   • Retención DTE-07 ≠ base × 1% (±$0.02) → alerta "Retención 1% incorrecta"
   • Retención DTE-14 ≠ base × 10% (±$0.02) → alerta "Retención renta 10% incorrecta"
-  Registra en razonamiento.autovalidacion y en alertas_fiscales.
+  Lista vacía [] si no hay alertas.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ESCALA DE CONFIANZA (auditoria_ia.confianza_extraccion):
@@ -249,8 +247,8 @@ _ROLES: dict[str, str] = {
         "El RECEPTOR es el COMPRADOR — extrae sus datos: nombre, NIT o DUI.\n"
         "• Para DTE-01 (consumidor final): receptor tiene DUI (9 dígitos), NO NIT.\n"
         "• Para DTE-03/05/06: receptor tiene NIT (14 dígitos).\n"
-        "• Si el receptor es 'CONSUMIDOR FINAL' o similar → nom_receptor='CONSUMIDOR FINAL', "
-        "nit_receptor=null, dui_receptor=null."
+        "• Si el receptor es 'CONSUMIDOR FINAL' → nom_receptor='CONSUMIDOR FINAL', "
+        "nit_receptor y dui_receptor deja vacíos."
     ),
     "compras": (
         "El RECEPTOR es el cliente activo del sistema (quien compra y recibe el crédito).\n"
@@ -277,27 +275,27 @@ _ROLES: dict[str, str] = {
 
 _CAMPOS: dict[str, str] = {
     "ventas": (
-        "• tipo_documento    : '01'|'03'|'05'|'06'\n"
+        "• tipo_documento    : '01'|'03'|'05'|'06' (del Número de Control)\n"
         "• fecha             : DD/MM/YYYY (campo 'Fecha de Emisión')\n"
-        "• num_control       : Número de control DTE (DTE-XX-XXXX-XXXXXXXXX)\n"
+        "• num_control       : Número de control DTE completo con guiones\n"
         "• codigo_generacion : UUID del documento (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)\n"
-        "• sello_recepcion   : Sello del MH (cadena alfanumérica 30-40 chars, sin guiones)\n"
-        "• nom_receptor      : Nombre/Razón social del COMPRADOR\n"
+        "• sello_recepcion   : Sello del MH (alfanumérico 30-40 chars, sin guiones)\n"
+        "• nom_receptor      : Nombre/Razón social del COMPRADOR (del bloque RECEPTOR)\n"
         "• nit_receptor      : NIT del receptor (14 dígitos, si aplica)\n"
         "• dui_receptor      : DUI del receptor (9 dígitos, consumidores finales)\n"
         "• gravadas, exentas, no_sujetas, iva, total : montos numéricos en dólares\n"
-        "• iva_correcto       : true si iva ≈ gravadas × 13% (±$0.02)"
+        "• alertas_fiscales  : lista de problemas encontrados (vacía [] si todo OK)"
     ),
     "compras": (
         "• tipo_documento    : '03'|'05'|'06'\n"
         "• fecha             : DD/MM/YYYY\n"
-        "• num_control       : Número de control DTE\n"
+        "• num_control       : Número de control DTE completo\n"
         "• codigo_generacion : UUID del documento\n"
         "• sello_recepcion   : Sello del MH\n"
-        "• nom_emisor        : Nombre/Razón social del PROVEEDOR (EMISOR del DTE)\n"
+        "• nom_emisor        : Nombre/Razón social del PROVEEDOR (bloque EMISOR)\n"
         "• nit_emisor        : NIT del PROVEEDOR (14 dígitos)\n"
         "• gravadas, exentas, no_sujetas, iva, total : montos en dólares\n"
-        "• iva_correcto       : true si iva ≈ gravadas × 13% (±$0.02)"
+        "• alertas_fiscales  : lista de problemas ([] si todo OK)"
     ),
     "retenciones": (
         "• tipo_documento    : '07'\n"
@@ -309,7 +307,7 @@ _CAMPOS: dict[str, str] = {
         "• nit_retenido      : NIT del sujeto retenido (14 dígitos)\n"
         "• monto_sujeto      : Base monetaria sujeta a retención ($)\n"
         "• iva_retenido      : Monto retenido ($ — debe ser ≈1% de monto_sujeto)\n"
-        "• retencion_correcta: true si iva_retenido ≈ monto_sujeto × 1% (±$0.02)"
+        "• alertas_fiscales  : lista de problemas ([] si todo OK)"
     ),
     "sujetos_excluidos": (
         "• tipo_documento    : '14'\n"
@@ -318,18 +316,18 @@ _CAMPOS: dict[str, str] = {
         "• codigo_generacion : UUID del documento\n"
         "• sello_recepcion   : Sello del MH\n"
         "• nom_sujeto        : Nombre del SUJETO EXCLUIDO\n"
-        "• nit_sujeto        : NIT del sujeto (14 dígitos, si es persona jurídica)\n"
-        "• dui_sujeto        : DUI del sujeto (9 dígitos, si es persona natural)\n"
+        "• nit_sujeto        : NIT del sujeto (14 dígitos, persona jurídica)\n"
+        "• dui_sujeto        : DUI del sujeto (9 dígitos, persona natural)\n"
         "• base_compras      : Sumatoria de compras / sub-total ($)\n"
-        "• retencion_renta   : Retención renta Pago a Cuenta ($ — debe ser ≈10% de base)\n"
-        "• retencion_correcta: true si retencion_renta ≈ base_compras × 10% (±$0.02)"
+        "• retencion_renta   : Retención renta Pago a Cuenta ($ ≈10% de base)\n"
+        "• alertas_fiscales  : lista de problemas ([] si todo OK)"
     ),
 }
 
 
 def _build_prompt(tipo_dte: str, nit_ctx: str, nom_ctx: str) -> str:
     return (
-        f"Eres un AUDITOR FISCAL SENIOR especializado en DTEs de El Salvador. "
+        f"Eres un AUDITOR FISCAL SENIOR especializado en DTEs de El Salvador.\n"
         f"Analiza el documento PDF adjunto usando tus CAPACIDADES DE VISIÓN.\n\n"
         f"{_CONTEXTO_FISCAL}\n"
         f"CLIENTE ACTIVO DEL SISTEMA:\n"
@@ -339,36 +337,38 @@ def _build_prompt(tipo_dte: str, nit_ctx: str, nom_ctx: str) -> str:
         f"{_INSTRUCCIONES_ESPACIALES}\n"
         f"CAMPOS A EXTRAER:\n{_CAMPOS.get(tipo_dte, '')}\n\n"
         f"INSTRUCCIONES DE SALIDA:\n"
-        f"  • Devuelve JSON según el responseSchema. Usa null para campos no encontrados.\n"
-        f"  • alertas_fiscales: lista todos los problemas de validación; [] si no hay ninguno.\n"
+        f"  • Devuelve JSON válido según el schema. Omite o deja null campos no encontrados.\n"
+        f"  • alertas_fiscales: lista todos los problemas; [] si no hay ninguno.\n"
         f"  • auditoria_ia.modelo_utilizado = 'gemini-2.5-flash-vision'\n"
-        f"  • auditoria_ia.confianza_extraccion: entero 0-100 según escala definida.\n"
+        f"  • auditoria_ia.confianza_extraccion: entero 0-100.\n"
         f"  • auditoria_ia.notas: 1-2 oraciones sobre cómo resolviste ambigüedades."
     )
 
 
-# ─── HTTP call con inlineData ─────────────────────────────────────────────────
+# ─── HTTP POST (una sola llamada, con o sin responseSchema) ───────────────────
 
-def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict) -> dict | None:
+def _http_post(
+    pdf_bytes: bytes,
+    prompt: str,
+    api_key: str,
+    schema: dict | None,
+) -> dict | None:
+    """
+    Sends the PDF as base64 inlineData to Gemini Vision.
+    Returns parsed JSON dict or None on any error (sets _ultimo_error).
+    """
     global _ultimo_error
-    api_key = _get_api_key()
-    if not api_key:
-        _ultimo_error = "API key de Gemini no configurada en secrets.toml."
-        return None
-
-    if len(pdf_bytes) > 20 * 1024 * 1024:
-        _ultimo_error = "PDF demasiado grande para envío inline (>20 MB)."
-        return None
 
     pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
 
     gen_cfg: dict = {
         "temperature"     : 0.0,
-        "maxOutputTokens" : 2048,
+        "maxOutputTokens" : 4096,
         "responseMimeType": "application/json",
         "thinkingConfig"  : {"thinkingBudget": 0},
-        "responseSchema"  : schema,
     }
+    if schema:
+        gen_cfg["responseSchema"] = schema
 
     payload = {
         "contents": [{
@@ -394,28 +394,28 @@ def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict) -> dict | None:
         )
 
         if resp.status_code == 400:
-            _ultimo_error = f"Gemini Vision rechazó la solicitud (400): {resp.text[:300]}"
-            log.error("Vision 400: %s", resp.text[:600])
+            body = resp.text[:500]
+            _ultimo_error = f"HTTP 400 — {body}"
+            log.error("Vision 400: %s", resp.text[:800])
             return None
         if resp.status_code == 403:
             _ultimo_error = "API key inválida o sin permiso (403)."
             return None
         if resp.status_code == 404:
-            _ultimo_error = f"Modelo '{_GEMINI_MODEL}' no disponible para esta API key (404)."
+            _ultimo_error = f"Modelo '{_GEMINI_MODEL}' no disponible (404)."
             return None
         if resp.status_code == 429:
-            _ultimo_error = "Cuota de Gemini Vision agotada (429). Espera un momento."
+            _ultimo_error = "Cuota de Gemini Vision agotada (429)."
             return None
         if resp.status_code in (500, 502, 503, 504):
             _ultimo_error = f"Gemini Vision no disponible temporalmente ({resp.status_code})."
-            log.warning("Vision %s transient error", resp.status_code)
             return None
 
         resp.raise_for_status()
 
         candidates = resp.json().get("candidates", [])
         if not candidates:
-            _ultimo_error = "Gemini Vision devolvió respuesta sin candidatos."
+            _ultimo_error = "Gemini Vision: respuesta sin candidatos."
             return None
 
         raw = ""
@@ -426,32 +426,84 @@ def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict) -> dict | None:
                 break
 
         if not raw:
-            _ultimo_error = "Gemini Vision devolvió respuesta vacía."
+            _ultimo_error = "Gemini Vision: respuesta vacía."
             return None
 
         raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
         raw = re.sub(r'\s*```\s*$', '', raw)
 
-        resultado = json.loads(raw)
+        result = json.loads(raw)
         _ultimo_error = ""
-        return resultado
+        return result
 
     except requests.exceptions.Timeout:
-        _ultimo_error = f"Timeout ({_TIMEOUT}s) al llamar a Gemini Vision."
-        log.warning("Vision timeout")
+        _ultimo_error = f"Timeout ({_TIMEOUT}s) — PDF demasiado grande o red lenta."
         return None
     except requests.exceptions.ConnectionError:
         _ultimo_error = "Sin conexión a Internet para llamar a Gemini Vision."
-        log.warning("Vision connection error")
         return None
     except json.JSONDecodeError as exc:
         _ultimo_error = f"JSON inválido de Gemini Vision: {exc}"
-        log.warning("Vision JSON error: %s | raw=%s", exc, (raw or "")[:200])
+        log.warning("Vision JSON error: %s | raw=%s", exc, (raw or "")[:300])
         return None
     except Exception as exc:
-        _ultimo_error = f"Error inesperado en Gemini Vision: {exc}"
+        _ultimo_error = f"Error inesperado: {exc}"
         log.error("Vision unexpected error", exc_info=True)
         return None
+
+
+# ─── Llamada con reintentos automáticos ──────────────────────────────────────
+
+def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict | None) -> dict | None:
+    """
+    Two-phase Vision call:
+      Phase 1 — with responseSchema (structured output).
+      Phase 2 — without responseSchema if Phase 1 returns HTTP 400
+                 (responseSchema + inlineData can conflict in some API versions).
+    """
+    global _ultimo_error
+
+    if not pdf_bytes or len(pdf_bytes) < 512:
+        _ultimo_error = "PDF vacío o demasiado pequeño para Vision."
+        return None
+
+    if len(pdf_bytes) > 20 * 1024 * 1024:
+        _ultimo_error = "PDF demasiado grande para envío inline (>20 MB)."
+        return None
+
+    api_key = _get_api_key()
+
+    # Phase 1: with schema
+    result = _http_post(pdf_bytes, prompt, api_key, schema)
+    if result is not None:
+        return result
+
+    # Phase 2: retry without schema on 400 or schema-related errors
+    err = _ultimo_error
+    is_schema_error = (
+        "400" in err
+        or "schema" in err.lower()
+        or "nullable" in err.lower()
+        or "unknown field" in err.lower()
+        or "invalid value" in err.lower()
+    )
+    if schema and is_schema_error:
+        log.warning("Vision Phase 1 failed (%s). Retrying without responseSchema.", err[:80])
+        result = _http_post(pdf_bytes, prompt, api_key, schema=None)
+        if result is not None:
+            # Mark that we ran without schema so the caller knows
+            if isinstance(result, dict) and "auditoria_ia" not in result:
+                result["auditoria_ia"] = {}
+            log.info("Vision Phase 2 (no schema) succeeded.")
+            _ultimo_error = ""
+            return result
+        # Both phases failed — keep the Phase 2 error but mention Phase 1 too
+        if _ultimo_error:
+            _ultimo_error = f"Fase 1: {err} | Fase 2: {_ultimo_error}"
+        else:
+            _ultimo_error = err
+
+    return None
 
 
 # ─── Mapeo de campos (vision output → nombres esperados por las páginas) ──────
@@ -479,7 +531,7 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
     """Maps vision field names to page-expected field names and filters invalid values."""
     out: dict = {}
 
-    # Campos comunes de todos los tipos
+    # Campos comunes
     for campo in ("tipo_documento", "fecha", "num_control", "codigo_generacion", "sello_recepcion"):
         v = _limpio_str(resultado.get(campo))
         if v:
@@ -503,9 +555,6 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
             if v is not None:
                 out[campo] = v
 
-        if resultado.get("iva_correcto") is not None:
-            out["iva_correcto"] = bool(resultado["iva_correcto"])
-
     elif tipo_dte == "compras":
         nom = _limpio_str(resultado.get("nom_emisor"))
         if nom and len(nom) >= 3:
@@ -519,9 +568,6 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
             v = _limpio_num(resultado.get(campo))
             if v is not None:
                 out[campo] = v
-
-        if resultado.get("iva_correcto") is not None:
-            out["iva_correcto"] = bool(resultado["iva_correcto"])
 
     elif tipo_dte == "retenciones":
         nom = _limpio_str(resultado.get("nom_retenido"))
@@ -539,9 +585,6 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
         ret = _limpio_num(resultado.get("iva_retenido"))
         if ret is not None:
             out["ret"] = ret
-
-        if resultado.get("retencion_correcta") is not None:
-            out["retencion_correcta"] = bool(resultado["retencion_correcta"])
 
     elif tipo_dte == "sujetos_excluidos":
         nom = _limpio_str(resultado.get("nom_sujeto"))
@@ -564,9 +607,6 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
         if ret is not None:
             out["ret"] = ret
 
-        if resultado.get("retencion_correcta") is not None:
-            out["retencion_correcta"] = bool(resultado["retencion_correcta"])
-
     return out
 
 
@@ -587,15 +627,15 @@ def extraer_dte_con_vision(
 
     Returns:
         (campos, alertas, audit)
-          campos  : dict con campos extraídos, nombres compatibles con cada página.
-          alertas : list[str] con alertas de validación fiscal.
+          campos  : dict con campos extraídos (nombres compatibles con cada página).
+          alertas : list[str] con alertas de validación fiscal detectadas por Vision.
           audit   : {"confianza": int, "notas": str, "layout": str, "tipo_dte": str}
-                    Diccionario vacío si Vision no pudo conectarse.
+                    Vacío {} si Vision no pudo ejecutarse.
     """
     global _ultimo_error
 
     if not vision_disponible():
-        _ultimo_error = "API key de Gemini no configurada."
+        _ultimo_error = "API key de Gemini no configurada en secrets.toml."
         return {}, [], {}
 
     schema = _SCHEMAS.get(tipo_dte)
@@ -619,7 +659,7 @@ def extraer_dte_con_vision(
     audit: dict = {
         "confianza": int(audit_raw.get("confianza_extraccion", 0)),
         "notas"    : str(audit_raw.get("notas", "")),
-        "layout"   : str(razon.get("layout_detectado", "")),
+        "layout"   : str(razon.get("layout_detectado", "") if razon else ""),
         "tipo_dte" : tipo_dte,
         "modelo"   : str(audit_raw.get("modelo_utilizado", "gemini-2.5-flash-vision")),
     }
