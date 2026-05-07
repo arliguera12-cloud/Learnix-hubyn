@@ -19,6 +19,11 @@ from utils.pdf_utils import (
     extraer_y_formatear_fecha as _extraer_fecha,
     extraer_texto_pdf,
 )
+from utils.gemini_utils import (
+    gemini_disponible,
+    gemini_ultimo_error,
+    procesar_dte_con_gemini,
+)
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -487,6 +492,31 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 )
             nom_cli = nombre_encontrado if nombre_encontrado else "SIN NOMBRE"
 
+        # ── Verificación y corrección con Gemini ─────────────────────────────
+        gemini_correcciones: list[str] = []
+        if gemini_disponible():
+            _nom_emisor = safe_str(cliente_activo.get('nombre', '')).strip().upper()
+            _campos_act = {
+                "fecha"  : fecha,
+                "nom_cli": nom_cli,
+                "nit_cli": nit_cli,
+                "dui_cli": dui_cli,
+            }
+            _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
+                texto_lineal,
+                "ventas",
+                _campos_act,
+                {"nit": nit_emisor, "nombre": _nom_emisor},
+            )
+            if _corr_dict.get("fecha"):
+                fecha   = _corr_dict["fecha"]
+            if _corr_dict.get("nom_cli"):
+                nom_cli = _corr_dict["nom_cli"]
+            if _corr_dict.get("nit_cli"):
+                nit_cli = _corr_dict["nit_cli"]
+            if _corr_dict.get("dui_cli"):
+                dui_cli = _corr_dict["dui_cli"]
+
         # ── Montos ────────────────────────────────────────────────────────────
         exentas    = 0.0
         no_sujetas = 0.0
@@ -635,9 +665,10 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             "terceros"      : round(terceros, 2),
             "deb_terc"      : round(deb_terc, 2),
             "total"         : round(total, 2),
-            "estado"        : "OK",
-            "iva_calc"      : iva_calc,
-            "es_nuevo"      : es_nuevo,
+            "estado"              : "OK",
+            "iva_calc"            : iva_calc,
+            "es_nuevo"            : es_nuevo,
+            "gemini_correcciones" : gemini_correcciones,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
@@ -1221,6 +1252,21 @@ if st.session_state.cola_revision_v:
                     texto_crudo += safe_extract_text(page, layout=True) + "\n"
 
                 with st.expander("🔍 Datos extraídos automáticamente"):
+                    # ── Indicador Gemini ──────────────────────────────────────
+                    _g_corr = datos_act.get("gemini_correcciones", [])
+                    if _g_corr:
+                        st.markdown(
+                            "⚡ **Gemini corrigió:** " +
+                            " · ".join(f"`{c}`" for c in _g_corr),
+                            help="Correcciones aplicadas automáticamente por Gemini 1.5 Flash"
+                        )
+                    elif gemini_disponible():
+                        st.caption("⚡ Gemini activo — datos verificados sin correcciones")
+                    else:
+                        _err = gemini_ultimo_error()
+                        msg  = f" (`{_err}`)" if _err else ""
+                        st.caption(f"🔌 Gemini no configurado — extracción solo por regex{msg}")
+                    # ─────────────────────────────────────────────────────────
                     col_d1, col_d2 = st.columns(2)
                     with col_d1:
                         st.caption(f"**Tipo DTE:** `{tipo_badge(tipo_actual)}`")
