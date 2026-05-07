@@ -19,6 +19,11 @@ from utils.pdf_utils import (
     extraer_y_formatear_fecha as _extraer_fecha,
     extraer_texto_pdf,
 )
+from utils.gemini_utils import (
+    es_nombre_sospechoso,
+    extraer_nombre_con_gemini,
+    gemini_disponible,
+)
 # Alias para compatibilidad con código existente
 limpiar_monto             = _limpiar_monto
 extraer_y_formatear_fecha = _extraer_fecha
@@ -57,8 +62,11 @@ TIPOS_VALIDOS_COMPRAS = {"03", "05", "06", "11", "14", "01"}
 SKIP_LINEAS = re.compile(
     r'^(?:DOCUMENTO|TRIBUTARIO|ELECTR[OÓ]NICO|ELECTRONICO|COMPROBANTE|'
     r'CR[EÉ]DITO|CREDITO|FISCAL|C[OÓ]DIGO|CODIGO|SELLO|N[UÚ]MERO|NUMERO|'
-    r'MODELO|TIPO\s+DE|FECHA\s*:|RECEPTOR|EMISOR|CLIENTE|DTE-|'
-    r'P[AÁ]GINA|PAGINA|VER\.|VERSI[OÓ]N|VERSION|[A-F0-9]{8}-)',
+    r'MODELO\s+DE|M[OÓ]DULO\s+DE|TIPO\s+DE|'
+    r'FECHA\s*[:\s]|FECHA\s+Y\s+HORA|FECHA\s+PROCESADO|'
+    r'RECEPTOR|EMISOR|CLIENTE|DTE-|'
+    r'P[AÁ]GINA|PAGINA|VER\.|VERSI[OÓ]N|VERSION|[A-F0-9]{8}-|'
+    r'\d{2}[/\-]\d{2}[/\-]\d{4}|\d{2}:\d{2}:\d{2})',
     re.I
 )
 
@@ -515,6 +523,14 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             nombre_encontrado = extraer_nombre_emisor(texto_lineal, nit_prov, nom_receptor)
             if not nombre_encontrado:
                 nombre_encontrado = extraer_nombre_emisor(texto_visual, nit_prov, nom_receptor)
+
+            # Fallback Gemini si el nombre está vacío o parece metadata
+            if (not nombre_encontrado or es_nombre_sospechoso(nombre_encontrado)) \
+                    and gemini_disponible():
+                nombre_gemini = extraer_nombre_con_gemini(texto_lineal, nit=nit_prov)
+                if nombre_gemini:
+                    nombre_encontrado = nombre_gemini
+
             nom_prov = nombre_encontrado if nombre_encontrado else ""
 
         # ── FOVIAL y COTRANS ───────────────────────────────────────────────────
@@ -1638,3 +1654,4 @@ else:
         </p>
     </div>
     """, unsafe_allow_html=True)
+
