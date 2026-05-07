@@ -1,10 +1,13 @@
 """
-Learnix Hub — Gemini utility (REST, sin SDK).
-Verificador universal de DTEs alineado con el Manual de IVA DGII El Salvador.
+Learnix Hub — Gemini utility v3.0 (REST, sin SDK).
+Arquitectura: Chain-of-Thought + Auto-Validación + Trazabilidad de IA.
 
-PUNTO DE FALLA ORIGINAL:
-    El modelo 'gemini-1.5-flash' fue retirado del proyecto de esta API key (HTTP 404).
-    Se migró a 'gemini-2.5-flash', que es el modelo activo disponible.
+Modelo: gemini-2.5-flash  (gemini-1.5-flash fue retirado — HTTP 404)
+Técnicas:
+  • CoT  — 4 pasos explícitos de razonamiento dentro del JSON de salida.
+  • Auto-Revisión — validación contra anti-patrones fiscales antes de responder.
+  • responseSchema estricto — garantiza JSON válido y completo en cada llamada.
+  • auditoria_ia — trazabilidad modelo/confianza/notas por documento.
 """
 import os
 import re
@@ -15,18 +18,17 @@ import streamlit as st
 
 log = logging.getLogger(__name__)
 
-# ─── Modelo y URL ─────────────────────────────────────────────────────────────
-# gemini-1.5-flash fue retirado → 404 NOT_FOUND en esta API key.
-# gemini-2.5-flash es el modelo flash más reciente y disponible.
+# ─── Modelo ───────────────────────────────────────────────────────────────────
 _GEMINI_MODEL = "gemini-2.5-flash"
 _GEMINI_URL   = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{_GEMINI_MODEL}:generateContent"
 )
-_TIMEOUT      = 25  # segundos — 2.5-flash puede tardar un poco más en razonar
+_TIMEOUT = 25
 
-# Estado del último error (expuesto a la UI)
+# ─── Estado del módulo ────────────────────────────────────────────────────────
 _ultimo_error: str = ""
+_ultimo_audit: dict = {}          # audit del último documento procesado
 
 
 # ─── API key & disponibilidad ─────────────────────────────────────────────────
@@ -47,8 +49,13 @@ def gemini_disponible() -> bool:
 
 
 def gemini_ultimo_error() -> str:
-    """Devuelve el último mensaje de error de Gemini (vacío = sin error)."""
+    """Último mensaje de error Gemini (vacío = sin error)."""
     return _ultimo_error
+
+
+def gemini_ultimo_audit() -> dict:
+    """Devuelve el audit del último documento procesado con Gemini."""
+    return _ultimo_audit
 
 
 # ─── Validadores de calidad de nombre ────────────────────────────────────────
@@ -72,6 +79,15 @@ _PAT_HORA      = re.compile(r'\b\d{2}:\d{2}:\d{2}\b')
 _PAT_META      = re.compile(r'\b(?:PROCESADO|MODELO\s+FACTURACI|GENERACI[OÓ]N\s*:)', re.I)
 _PAT_DDMMYYYY  = re.compile(r'^\d{2}/\d{2}/20\d{2}$')
 
+# Anti-patrones de nombre: palabras que indican que se capturó una etiqueta
+_ANTIPATRONES_NOMBRE = re.compile(
+    r'\b(?:RAZ[OÓ]N\s+SOCIAL|NOMBRE\s+O\s+RAZ|NOMBRE\s+COMERCIAL|'
+    r'NIT\s*:|NRC\s*:|COD\.\s*GEN|CODIGO\s+DE\s+GENERACION|'
+    r'DTE-\d{2}|FACTURA\s+CAMBIARIA|COMPROBANTE\s+DE\s+CR[EÉ]DITO|'
+    r'DOCUMENTO\s+TRIBUTARIO|SELLO\s+DE\s+RECEP|NUMERO\s+DE\s+CONTROL)\b',
+    re.I,
+)
+
 
 def es_nombre_sospechoso(nombre: str) -> bool:
     if not nombre:
@@ -81,15 +97,110 @@ def es_nombre_sospechoso(nombre: str) -> bool:
         return True
     if _PAT_FECHA_STR.search(n) or _PAT_HORA.search(n) or _PAT_META.search(n):
         return True
+    if _ANTIPATRONES_NOMBRE.search(n):
+        return True
+    # Cadenas hex largas sin espacios (UUIDs, códigos) de más de 20 caracteres
+    if re.search(r'[A-F0-9]{20,}', n) and ' ' not in n:
+        return True
+    # Más del 40% dígitos → probablemente un código, no un nombre
+    if len(n) > 5 and sum(c.isdigit() for c in n) / len(n) > 0.40:
+        return True
     return False
+
+
+# ─── JSON Schemas estrictos (Gemini OpenAPI format) ───────────────────────────
+
+def _sub_razonamiento() -> dict:
+    """Sub-schema del bloque de cadena de pensamiento (CoT)."""
+    return {
+        "type": "OBJECT",
+        "properties": {
+            "ubicacion_seccion" : {"type": "STRING"},
+            "etiqueta_vs_valor" : {"type": "STRING"},
+            "limpieza_aplicada" : {"type": "STRING"},
+            "autovalidacion"    : {"type": "STRING"},
+        },
+        "required": ["ubicacion_seccion", "etiqueta_vs_valor", "autovalidacion"],
+    }
+
+
+def _sub_auditoria() -> dict:
+    """Sub-schema del bloque de trazabilidad de IA."""
+    return {
+        "type": "OBJECT",
+        "properties": {
+            "modelo_utilizado"     : {"type": "STRING"},
+            "confianza_extraccion" : {"type": "INTEGER"},
+            "notas_de_razonamiento": {"type": "STRING"},
+        },
+        "required": ["modelo_utilizado", "confianza_extraccion", "notas_de_razonamiento"],
+    }
+
+
+_SCHEMAS: dict[str, dict] = {
+    "compras": {
+        "type": "OBJECT",
+        "properties": {
+            "razonamiento": _sub_razonamiento(),
+            "fecha"       : {"type": "STRING", "nullable": True},
+            "nit_prov"    : {"type": "STRING", "nullable": True},
+            "nom_prov"    : {"type": "STRING", "nullable": True},
+            "correcciones": {"type": "ARRAY", "items": {"type": "STRING"}},
+            "auditoria_ia": _sub_auditoria(),
+        },
+        "required": ["razonamiento", "correcciones", "auditoria_ia"],
+    },
+    "ventas": {
+        "type": "OBJECT",
+        "properties": {
+            "razonamiento": _sub_razonamiento(),
+            "fecha"       : {"type": "STRING", "nullable": True},
+            "nit_cli"     : {"type": "STRING", "nullable": True},
+            "dui_cli"     : {"type": "STRING", "nullable": True},
+            "nom_cli"     : {"type": "STRING", "nullable": True},
+            "correcciones": {"type": "ARRAY", "items": {"type": "STRING"}},
+            "auditoria_ia": _sub_auditoria(),
+        },
+        "required": ["razonamiento", "correcciones", "auditoria_ia"],
+    },
+    "retenciones": {
+        "type": "OBJECT",
+        "properties": {
+            "razonamiento": _sub_razonamiento(),
+            "fecha"       : {"type": "STRING", "nullable": True},
+            "nit_prov"    : {"type": "STRING", "nullable": True},
+            "correcciones": {"type": "ARRAY", "items": {"type": "STRING"}},
+            "auditoria_ia": _sub_auditoria(),
+        },
+        "required": ["razonamiento", "correcciones", "auditoria_ia"],
+    },
+    "sujetos_excluidos": {
+        "type": "OBJECT",
+        "properties": {
+            "razonamiento": _sub_razonamiento(),
+            "fecha"       : {"type": "STRING", "nullable": True},
+            "nit_sujeto"  : {"type": "STRING", "nullable": True},
+            "dui_sujeto"  : {"type": "STRING", "nullable": True},
+            "nom_sujeto"  : {"type": "STRING", "nullable": True},
+            "correcciones": {"type": "ARRAY", "items": {"type": "STRING"}},
+            "auditoria_ia": _sub_auditoria(),
+        },
+        "required": ["razonamiento", "correcciones", "auditoria_ia"],
+    },
+}
 
 
 # ─── Llamada HTTP central ─────────────────────────────────────────────────────
 
-def _llamar_gemini(prompt: str, max_tokens: int = 512) -> dict | None:
+def _llamar_gemini(
+    prompt: str,
+    schema: dict | None = None,
+    max_tokens: int = 1024,
+) -> dict | None:
     """
-    Envía un prompt a Gemini y retorna el JSON parseado.
-    Ante cualquier fallo retorna None y registra el error en _ultimo_error.
+    Envía un prompt a Gemini con responseMimeType=application/json.
+    Si se provee `schema`, lo adjunta como responseSchema para forzar
+    estructura estricta.  Retorna el JSON parseado o None en caso de error.
     """
     global _ultimo_error
     api_key = _get_api_key()
@@ -98,17 +209,21 @@ def _llamar_gemini(prompt: str, max_tokens: int = 512) -> dict | None:
         log.warning("Gemini: API key ausente")
         return None
 
+    gen_cfg: dict = {
+        "temperature"     : 0.0,
+        "maxOutputTokens" : max_tokens,
+        "responseMimeType": "application/json",
+        # gemini-2.5-flash habilita thinking por defecto (hasta 8192 tokens).
+        # Para extracción estructurada de DTEs lo desactivamos; el CoT está
+        # integrado en el prompt y en el campo razonamiento del JSON de salida.
+        "thinkingConfig"  : {"thinkingBudget": 0},
+    }
+    if schema:
+        gen_cfg["responseSchema"] = schema
+
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature"     : 0.0,
-            "maxOutputTokens" : max_tokens,
-            "responseMimeType": "application/json",  # fuerza salida JSON puro
-            # gemini-2.5-flash habilita thinking por defecto (hasta 8192 tokens).
-            # Para extracción estructurada de DTEs no se necesita razonamiento
-            # extendido; desactivarlo evita que consuma el presupuesto de salida.
-            "thinkingConfig"  : {"thinkingBudget": 0},
-        },
+        "contents"       : [{"parts": [{"text": prompt}]}],
+        "generationConfig": gen_cfg,
     }
 
     try:
@@ -119,50 +234,49 @@ def _llamar_gemini(prompt: str, max_tokens: int = 512) -> dict | None:
             timeout=_TIMEOUT,
         )
 
-        # Errores HTTP específicos con mensajes claros
         if resp.status_code == 400:
             _ultimo_error = f"Gemini rechazó la solicitud (400): {resp.text[:200]}"
             log.error("Gemini 400: %s", resp.text[:500])
             return None
         if resp.status_code == 403:
-            _ultimo_error = "API key inválida o sin permiso (403). Verifica tu key en Google AI Studio."
+            _ultimo_error = "API key inválida o sin permiso (403). Verifica en Google AI Studio."
             log.error("Gemini 403")
             return None
         if resp.status_code == 404:
             _ultimo_error = (
-                f"Modelo '{_GEMINI_MODEL}' no encontrado (404). "
-                "La key puede no tener acceso a este modelo."
+                f"Modelo '{_GEMINI_MODEL}' no disponible para esta API key (404)."
             )
-            log.error("Gemini 404 — modelo no disponible para esta API key")
+            log.error("Gemini 404 — modelo no disponible")
             return None
         if resp.status_code == 429:
-            _ultimo_error = "Cuota de Gemini agotada (429). Espera un momento e intenta de nuevo."
+            _ultimo_error = "Cuota de Gemini agotada (429). Espera un momento."
             log.warning("Gemini 429 quota")
+            return None
+        if resp.status_code in (500, 502, 503, 504):
+            _ultimo_error = f"Gemini no disponible temporalmente ({resp.status_code}). Reintenta en segundos."
+            log.warning("Gemini %s transient error", resp.status_code)
             return None
 
         resp.raise_for_status()
 
-        # Parsear respuesta — gemini-2.5-flash puede devolver partes múltiples
-        # (p. ej. una parte de "pensamiento" invisible y otra de texto)
-        # Buscamos la primera parte que sea texto no vacío.
+        # Buscar la primera parte de texto no vacía (ignora thinking parts)
         candidates = resp.json().get("candidates", [])
         if not candidates:
-            _ultimo_error = "Gemini devolvió una respuesta sin candidatos."
+            _ultimo_error = "Gemini devolvió respuesta sin candidatos."
             return None
 
-        parts = candidates[0].get("content", {}).get("parts", [])
         raw = ""
-        for part in parts:
+        for part in candidates[0].get("content", {}).get("parts", []):
             txt = part.get("text", "").strip()
             if txt:
                 raw = txt
                 break
 
         if not raw:
-            _ultimo_error = "Gemini devolvió una respuesta vacía."
+            _ultimo_error = "Gemini devolvió respuesta vacía."
             return None
 
-        # Limpiar markdown fences si Gemini los incluyó a pesar del responseMimeType
+        # Limpiar markdown fences residuales
         raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
         raw = re.sub(r'\s*```\s*$', '', raw)
 
@@ -171,7 +285,7 @@ def _llamar_gemini(prompt: str, max_tokens: int = 512) -> dict | None:
         return resultado
 
     except requests.exceptions.Timeout:
-        _ultimo_error = f"Timeout ({_TIMEOUT}s) al llamar a Gemini. Verifica tu conexión."
+        _ultimo_error = f"Timeout ({_TIMEOUT}s). Verifica tu conexión a Internet."
         log.warning("Gemini timeout")
         return None
     except requests.exceptions.ConnectionError:
@@ -180,82 +294,96 @@ def _llamar_gemini(prompt: str, max_tokens: int = 512) -> dict | None:
         return None
     except json.JSONDecodeError as e:
         _ultimo_error = f"Gemini devolvió JSON inválido: {e}"
-        log.warning("Gemini JSON parse error: %s | raw=%s", e, raw[:200] if raw else "")
+        log.warning("Gemini JSON error: %s | raw=%s", e, (raw or "")[:200])
         return None
     except Exception as e:
-        _ultimo_error = f"Error inesperado en Gemini: {e}"
+        _ultimo_error = f"Error inesperado: {e}"
         log.error("Gemini unexpected error", exc_info=True)
         return None
 
 
-# ─── Contexto fiscal común (inyectado en todos los prompts) ──────────────────
+# ─── Contexto fiscal y reglas CoT compartidas ────────────────────────────────
 
 _CONTEXTO_FISCAL = """
-MARCO LEGAL — MANUAL DE IVA DGII EL SALVADOR:
-• DTE-01  Factura                        → Venta a consumidor final. Sin crédito fiscal.
-• DTE-03  Comprobante de Crédito Fiscal  → Entre contribuyentes IVA. Débito/Crédito 13%.
-• DTE-05  Nota de Crédito               → Reducción/anulación sobre DTE-03 previo.
-• DTE-06  Nota de Débito                → Cargo adicional sobre DTE-03 previo.
-• DTE-07  Comprobante de Retención      → Agente retenedor descuenta 1% IVA al sujeto.
-• DTE-11  Factura de Exportación        → Operación de exportación, tasa 0%.
-• DTE-14  Comprobante de Liquidación    → Pago a sujeto excluido (no inscrito en IVA).
+╔══════════════════════════════════════════════════════════════════════╗
+║  MARCO LEGAL — MANUAL DE IVA DGII / SISTEMA DTE EL SALVADOR         ║
+╠══════════════════════════════════════════════════════════════════════╣
+║  DTE-01  Factura                        → Venta a consumidor final   ║
+║  DTE-03  Comprobante de Crédito Fiscal  → Entre contribuyentes IVA   ║
+║  DTE-05  Nota de Crédito               → Reducción/anulación DTE-03 ║
+║  DTE-06  Nota de Débito                → Cargo adicional DTE-03      ║
+║  DTE-07  Comprobante de Retención      → Agente retiene 1% IVA       ║
+║  DTE-11  Factura de Exportación        → Tasa 0%, exportaciones      ║
+║  DTE-14  Comprobante de Liquidación    → Sujeto excluido (no IVA)    ║
+╠══════════════════════════════════════════════════════════════════════╣
+║  NIT  : EXACTAMENTE 14 dígitos  (formato XXXX-XXXXXX-XXX-X)         ║
+║  NRC  : 1-7 dígitos, solo contribuyentes inscritos en IVA           ║
+║  DUI  : EXACTAMENTE 9 dígitos   (formato XXXXXXXX-X)                ║
+║  UUID : XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (32 hex + guiones)     ║
+╚══════════════════════════════════════════════════════════════════════╝
+REGLA CRÍTICA: El NIT del EMISOR NUNCA puede ser igual al del RECEPTOR.
+REGLA CRÍTICA: IVA siempre es el 13% de las ventas gravadas.
+"""
 
-IDENTIFICADORES SALVADOREÑOS:
-• NIT (Número de Identificación Tributaria): EXACTAMENTE 14 dígitos (formato: XXXX-XXXXXX-XXX-X).
-• NRC (Número de Registro de Contribuyente): 1-7 dígitos, solo contribuyentes IVA.
-• DUI (Documento Único de Identidad): EXACTAMENTE 9 dígitos (formato: XXXXXXXX-X).
-• UUID / Código de Generación: formato XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (hexadecimal).
-• Número de Control: formato DTE-XX-XXXXXXXXXX-XXXXXXXXXXXXXX.
+_INSTRUCCIONES_COT = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PROCESO DE EXTRACCIÓN — 4 PASOS OBLIGATORIOS (Chain of Thought)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-REGLA CRITICA: El NIT del EMISOR nunca puede ser igual al NIT del RECEPTOR.
-REGLA CRITICA: Los montos gravados se calculan SIN IVA; el IVA es siempre el 13%.
+PASO 1 ▶ LOCALIZA LA SECCIÓN OBJETIVO
+  Busca marcadores de inicio: "DATOS DEL EMISOR", "EMISOR:", "PROVEEDOR:",
+  "DATOS DEL RECEPTOR", "RECEPTOR:", "ADQUIRIENTE:".
+  Registra en razonamiento.ubicacion_seccion dónde encontraste cada bloque.
+
+PASO 2 ▶ DISTINGUE ETIQUETAS DE VALORES REALES
+  ETIQUETA = texto fijo que describe el campo, termina en ":"
+    Ejemplos: "Nombre o Razón Social:", "NIT:", "NRC:", "Fecha de Emisión:"
+  VALOR = el texto que viene INMEDIATAMENTE DESPUÉS del ":" de la etiqueta.
+
+  ✅ CORRECTO: "Nombre o Razón Social: GRANJA SAN DIEGO S.A."  →  "GRANJA SAN DIEGO S.A."
+  ❌ INCORRECTO: Extraer "Nombre o Razón Social" como valor  →  eso es la ETIQUETA
+  ❌ INCORRECTO: Extraer "RAZÓN SOCIAL / FACTURA CAMBIARIA…" → mezcla de etiqueta+ruido
+
+  Registra en razonamiento.etiqueta_vs_valor qué identificaste en el texto.
+
+PASO 3 ▶ LIMPIA EL VALOR BRUTO
+  Elimina del valor extraído:
+    ✗ Cualquier prefijo de etiqueta residual: "Nombre:", "Razón Social:", "EMISOR:"
+    ✗ Texto de campos adjacentes: "NIT:", "NRC:", "Dirección:", "Teléfono:"
+    ✗ UUIDs y códigos alfanuméricos largos sin espacios (más de 15 chars)
+    ✗ Horas: "08:30:00", "14:25:12"
+    ✗ Marcas de versión: "v1", "V14", "2025"
+    ✗ Guiones y dos puntos al inicio/final del valor
+  Registra en razonamiento.limpieza_aplicada qué eliminaste y el valor resultante.
+
+PASO 4 ▶ AUTO-VALIDACIÓN (si falla, vuelve a buscar)
+  El valor es INVÁLIDO si cumple CUALQUIERA de estas condiciones:
+    ✗ Nombre contiene: RAZÓN SOCIAL, NOMBRE O RAZ, NIT:, NRC:, COD., DTE-,
+                       UUID, GENERACIÓN, CONTROL, FACTURA CAMBIARIA, SELLO,
+                       COMPROBANTE, TRIBUTARIO, REPRESENTACIÓN, VERSIÓN
+    ✗ Nombre contiene cadena hex de más de 20 chars sin espacios
+    ✗ Nombre tiene más del 40% de dígitos en su longitud
+    ✗ NIT no tiene EXACTAMENTE 14 dígitos (después de eliminar guiones/espacios)
+    ✗ DUI no tiene EXACTAMENTE 9 dígitos
+    ✗ Fecha no cumple DD/MM/YYYY con día 1-31, mes 1-12, año 2020-2030
+  Si el valor es inválido, documenta "INVÁLIDO: [razón]" y busca nuevamente.
+  Registra el resultado en razonamiento.autovalidacion.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ESCALA DE CONFIANZA para auditoria_ia.confianza_extraccion:
+  95-100 : Valor extraído directamente de etiqueta explícita, sin ambigüedad
+  80- 94 : Valor extraído con alta certeza, limpieza menor aplicada
+  60- 79 : Valor inferido con certeza moderada, posible revisión manual
+   0- 59 : Alta incertidumbre — se recomienda revisión manual del documento
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SIEMPRE completa auditoria_ia con:
+  modelo_utilizado      = "gemini-2.5-flash"
+  confianza_extraccion  = número entero 0-100
+  notas_de_razonamiento = resumen en 1-2 oraciones de cómo resolviste ambigüedades
 """
 
 
-# ─── Constructores de prompt por tipo de DTE ──────────────────────────────────
-
-def _prompt_ventas(
-    texto_pdf: str,
-    campos: dict,
-    nit_emisor: str,
-    nom_emisor: str,
-) -> str:
-    return f"""Eres un auditor fiscal experto en el sistema DTE de El Salvador (Manual de IVA DGII).
-{_CONTEXTO_FISCAL}
-ROL: El EMISOR de este DTE es el cliente activo del sistema (quien vende).
-     El RECEPTOR es el comprador/adquiriente cuyo nombre y NIT debemos verificar.
-
-EMISOR (vendedor — nuestro cliente activo):
-  NIT  : {nit_emisor}
-  Nombre: {nom_emisor}
-
-CAMPOS EXTRAÍDOS POR REGEX (pueden contener errores de OCR o parsing):
-  fecha_emision  : "{campos.get('fecha', '')}"
-  nit_receptor   : "{campos.get('nit_cli', '')}"
-  dui_receptor   : "{campos.get('dui_cli', '')}"
-  nombre_receptor: "{campos.get('nom_cli', '')}"
-
-TEXTO DEL PDF:
-{texto_pdf[:3500]}
-
-TAREA DE VERIFICACIÓN:
-1. FECHA: Debe ser DD/MM/YYYY y corresponder a la fecha de emisión del DTE.
-   Busca en el texto si el campo está vacío, tiene formato incorrecto o es una fecha de vencimiento.
-2. NOMBRE RECEPTOR: Razón social o nombre completo del COMPRADOR.
-   - NO puede ser el mismo que el emisor: "{nom_emisor}".
-   - Si dice "SIN NOMBRE" o está vacío, extrae el nombre real del bloque RECEPTOR del texto.
-   - Devuelve en MAYÚSCULAS, sin caracteres especiales redundantes.
-3. NIT RECEPTOR (14 dígitos): Identifica al comprador contribuyente.
-   - NO puede ser igual al NIT del emisor ({nit_emisor}).
-   - Si es vacío o incorrecto, busca en la sección RECEPTOR del texto.
-4. DUI RECEPTOR (9 dígitos): Solo aplica para consumidor final (DTE-01/02).
-   - Si el receptor tiene DUI y no NIT, el campo nit_cli debe quedar vacío.
-
-Devuelve ÚNICAMENTE este JSON (sin markdown, sin texto adicional):
-{{"fecha": "DD/MM/YYYY o null", "nom_cli": "NOMBRE EN MAYUSCULAS o null", "nit_cli": "14 digitos o null", "dui_cli": "9 digitos o null", "correcciones": ["descripcion breve de cada campo que cambiaste"]}}
-
-IMPORTANTE: Usa null (sin comillas) cuando el campo ya está correcto. La lista correcciones debe estar vacía [] si no cambiaste nada."""
-
+# ─── Constructores de prompt con CoT por tipo de DTE ─────────────────────────
 
 def _prompt_compras(
     texto_pdf: str,
@@ -263,39 +391,78 @@ def _prompt_compras(
     nit_receptor: str,
     nom_receptor: str,
 ) -> str:
-    return f"""Eres un auditor fiscal experto en el sistema DTE de El Salvador (Manual de IVA DGII).
+    return f"""Eres un AUDITOR FISCAL SENIOR especializado en DTEs de El Salvador (Manual de IVA DGII).
 {_CONTEXTO_FISCAL}
-ROL: El RECEPTOR de este DTE es el cliente activo del sistema (quien compra).
-     El EMISOR es el proveedor/vendedor cuyos datos debemos verificar y corregir.
+ROL EN ESTE DOCUMENTO:
+  El RECEPTOR es el cliente activo del sistema (quien compra y recibe el crédito fiscal).
+  El EMISOR es el proveedor/vendedor — sus datos son los que debes verificar/corregir.
 
-RECEPTOR (comprador — nuestro cliente activo):
-  NIT  : {nit_receptor}
+RECEPTOR (comprador — cliente activo del sistema):
+  NIT   : {nit_receptor}
   Nombre: {nom_receptor}
 
-CAMPOS EXTRAÍDOS POR REGEX (pueden contener errores):
+CAMPOS EXTRAÍDOS POR REGEX — PUEDEN CONTENER ERRORES:
   fecha_emision : "{campos.get('fecha', '')}"
   nit_emisor    : "{campos.get('nit_prov', '')}"
   nombre_emisor : "{campos.get('nom_prov', '')}"
 
-TEXTO DEL PDF:
+  ⚠️  Si nombre_emisor contiene texto como "RAZÓN SOCIAL", "NIT:", "COD.", cadenas largas
+      sin espacios, o coincide con el nombre del receptor → ESTÁ MAL EXTRAÍDO.
+
+TEXTO COMPLETO DEL PDF:
 {texto_pdf[:3500]}
 
-TAREA DE VERIFICACIÓN:
-1. FECHA: Debe ser DD/MM/YYYY y ser la fecha de emisión del DTE (no de vencimiento, no de proceso).
-2. NOMBRE EMISOR (proveedor/vendedor):
-   - NO puede ser el nombre del receptor: "{nom_receptor}".
-   - NO puede ser texto de metadata del PDF (fechas, "MÓDULO DE FACTURACIÓN", códigos, etc.).
-   - Busca la Razón Social real en la sección EMISOR del documento.
-   - Devuelve en MAYÚSCULAS.
-3. NIT EMISOR (14 dígitos):
-   - NO puede ser igual al NIT del receptor ({nit_receptor}).
-   - Busca en la sección EMISOR si está vacío o incorrecto.
-   - Ignora NRC, DUI y otros identificadores.
+{_INSTRUCCIONES_COT}
 
-Devuelve ÚNICAMENTE este JSON (sin markdown, sin texto adicional):
-{{"fecha": "DD/MM/YYYY o null", "nit_prov": "14 digitos o null", "nom_prov": "NOMBRE EN MAYUSCULAS o null", "correcciones": ["descripcion breve de cada campo que cambiaste"]}}
+CAMPOS A VERIFICAR Y CORREGIR:
+  • fecha    : Fecha de EMISIÓN del DTE en formato DD/MM/YYYY
+  • nit_prov : NIT del EMISOR (14 dígitos); NO puede ser {nit_receptor}
+  • nom_prov : Razón social del EMISOR; NO puede ser "{nom_receptor}" ni metadata
 
-IMPORTANTE: Usa null cuando el campo ya está correcto. Lista correcciones vacía [] si no cambiaste nada."""
+Devuelve el JSON siguiendo exactamente el responseSchema definido.
+Usa null (sin comillas) para campos que ya están correctos y no necesitan cambio.
+La lista correcciones describe brevemente solo los campos que modificaste."""
+
+
+def _prompt_ventas(
+    texto_pdf: str,
+    campos: dict,
+    nit_emisor: str,
+    nom_emisor: str,
+) -> str:
+    return f"""Eres un AUDITOR FISCAL SENIOR especializado en DTEs de El Salvador (Manual de IVA DGII).
+{_CONTEXTO_FISCAL}
+ROL EN ESTE DOCUMENTO:
+  El EMISOR es el cliente activo del sistema (quien vende y emite el DTE).
+  El RECEPTOR es el comprador/adquiriente — sus datos son los que debes verificar.
+
+EMISOR (vendedor — cliente activo del sistema):
+  NIT   : {nit_emisor}
+  Nombre: {nom_emisor}
+
+CAMPOS EXTRAÍDOS POR REGEX — PUEDEN CONTENER ERRORES:
+  fecha_emision  : "{campos.get('fecha', '')}"
+  nit_receptor   : "{campos.get('nit_cli', '')}"
+  dui_receptor   : "{campos.get('dui_cli', '')}"
+  nombre_receptor: "{campos.get('nom_cli', '')}"
+
+  ⚠️  Si nombre_receptor dice "SIN NOMBRE", está vacío, o contiene etiquetas/metadata
+      → ESTÁ MAL EXTRAÍDO. Busca el nombre real del COMPRADOR en la sección RECEPTOR.
+  ⚠️  Para DTE-01 (consumidor final): el receptor tiene DUI (9 dígitos), no NIT.
+      En ese caso nit_cli debe quedar null y dui_cli debe tener los 9 dígitos.
+
+TEXTO COMPLETO DEL PDF:
+{texto_pdf[:3500]}
+
+{_INSTRUCCIONES_COT}
+
+CAMPOS A VERIFICAR Y CORREGIR:
+  • fecha   : Fecha de EMISIÓN en formato DD/MM/YYYY
+  • nom_cli : Nombre completo del RECEPTOR/COMPRADOR; NO puede ser "{nom_emisor}"
+  • nit_cli : NIT del receptor (14 dígitos); vacío si es consumidor final con DUI
+  • dui_cli : DUI del receptor (9 dígitos); solo si es persona natural/consumidor final
+
+Devuelve el JSON siguiendo el responseSchema. Usa null para campos ya correctos."""
 
 
 def _prompt_retenciones(
@@ -304,33 +471,30 @@ def _prompt_retenciones(
     nit_cliente: str,
     nom_cliente: str,
 ) -> str:
-    return f"""Eres un auditor fiscal experto en el sistema DTE de El Salvador (Manual de IVA DGII).
+    return f"""Eres un AUDITOR FISCAL SENIOR especializado en DTEs de El Salvador (Manual de IVA DGII).
 {_CONTEXTO_FISCAL}
-ROL: Este es un DTE-07 (Comprobante de Retención).
-     El AGENTE RETENEDOR es el cliente activo que emite la retención del 1% de IVA.
-     El SUJETO RETENIDO es el proveedor sobre quien se aplica la retención.
+ROL EN ESTE DOCUMENTO (DTE-07 — Comprobante de Retención):
+  El AGENTE RETENEDOR es el cliente activo que emite la retención del 1% de IVA.
+  El SUJETO RETENIDO es el proveedor sobre quien se aplica la retención.
 
 AGENTE RETENEDOR (cliente activo — emite el DTE-07):
-  NIT  : {nit_cliente}
+  NIT   : {nit_cliente}
   Nombre: {nom_cliente}
 
-CAMPOS EXTRAÍDOS POR REGEX:
+CAMPOS EXTRAÍDOS POR REGEX — PUEDEN CONTENER ERRORES:
   fecha_emision : "{campos.get('fecha', '')}"
   nit_proveedor : "{campos.get('nit_prov', '')}"
 
-TEXTO DEL PDF:
+TEXTO COMPLETO DEL PDF:
 {texto_pdf[:3500]}
 
-TAREA DE VERIFICACIÓN:
-1. FECHA: Debe ser DD/MM/YYYY y corresponder a la fecha de emisión del DTE-07.
-2. NIT PROVEEDOR (14 dígitos): NIT del SUJETO RETENIDO (proveedor al que se le retiene).
-   - NO puede ser igual al NIT del agente retenedor ({nit_cliente}).
-   - Busca en el bloque del sujeto retenido si está vacío o es incorrecto.
+{_INSTRUCCIONES_COT}
 
-Devuelve ÚNICAMENTE este JSON (sin markdown, sin texto adicional):
-{{"fecha": "DD/MM/YYYY o null", "nit_prov": "14 digitos o null", "correcciones": ["descripcion breve de cada campo que cambiaste"]}}
+CAMPOS A VERIFICAR Y CORREGIR:
+  • fecha   : Fecha de EMISIÓN en formato DD/MM/YYYY
+  • nit_prov: NIT del SUJETO RETENIDO (14 dígitos); NO puede ser {nit_cliente}
 
-IMPORTANTE: Usa null cuando el campo ya está correcto. Lista correcciones vacía [] si no cambiaste nada."""
+Devuelve el JSON siguiendo el responseSchema. Usa null para campos ya correctos."""
 
 
 def _prompt_sujetos_excluidos(
@@ -339,40 +503,37 @@ def _prompt_sujetos_excluidos(
     nit_cliente: str,
     nom_cliente: str,
 ) -> str:
-    return f"""Eres un auditor fiscal experto en el sistema DTE de El Salvador (Manual de IVA DGII).
+    return f"""Eres un AUDITOR FISCAL SENIOR especializado en DTEs de El Salvador (Manual de IVA DGII).
 {_CONTEXTO_FISCAL}
-ROL: Este es un DTE-14 (Comprobante de Liquidación / Sujeto Excluido).
-     El COMPRADOR es el cliente activo que paga al sujeto excluido.
-     El SUJETO EXCLUIDO es una persona natural o jurídica no inscrita en el IVA.
+ROL EN ESTE DOCUMENTO (DTE-14 — Comprobante de Liquidación / Sujeto Excluido):
+  El COMPRADOR es el cliente activo del sistema que paga al sujeto excluido.
+  El SUJETO EXCLUIDO es quien presta el servicio — NO está inscrito en el IVA.
 
-COMPRADOR (cliente activo — recibe el servicio/producto):
-  NIT  : {nit_cliente}
+COMPRADOR (cliente activo):
+  NIT   : {nit_cliente}
   Nombre: {nom_cliente}
 
-CAMPOS EXTRAÍDOS POR REGEX:
+CAMPOS EXTRAÍDOS POR REGEX — PUEDEN CONTENER ERRORES:
   fecha_emision : "{campos.get('fecha', '')}"
   nit_sujeto    : "{campos.get('nit_sujeto', '')}"
   dui_sujeto    : "{campos.get('dui_sujeto', '')}"
   nombre_sujeto : "{campos.get('nom_sujeto', '')}"
 
-TEXTO DEL PDF:
+  ⚠️  Los sujetos excluidos suelen ser personas naturales (DUI de 9 dígitos).
+      Si el sujeto es persona jurídica, tendrá NIT de 14 dígitos.
+
+TEXTO COMPLETO DEL PDF:
 {texto_pdf[:3500]}
 
-TAREA DE VERIFICACIÓN:
-1. FECHA: Debe ser DD/MM/YYYY y ser la fecha de emisión del DTE-14.
-2. NOMBRE SUJETO EXCLUIDO: Persona natural o jurídica que presta el servicio.
-   - NO puede ser el mismo que el comprador: "{nom_cliente}".
-   - Los sujetos excluidos suelen ser personas naturales (personas físicas).
-   - Busca en la sección del sujeto excluido del documento.
-3. NIT SUJETO (14 dígitos): Si el sujeto es persona jurídica o natural con NIT.
-   - NO puede ser igual al NIT del comprador ({nit_cliente}).
-4. DUI SUJETO (9 dígitos): Si el sujeto es persona natural con DUI únicamente.
-   - Solo aplica si no tiene NIT. El formato es XXXXXXXX-X (9 dígitos).
+{_INSTRUCCIONES_COT}
 
-Devuelve ÚNICAMENTE este JSON (sin markdown, sin texto adicional):
-{{"fecha": "DD/MM/YYYY o null", "nom_sujeto": "NOMBRE EN MAYUSCULAS o null", "nit_sujeto": "14 digitos o null", "dui_sujeto": "9 digitos o null", "correcciones": ["descripcion breve de cada campo que cambiaste"]}}
+CAMPOS A VERIFICAR Y CORREGIR:
+  • fecha      : Fecha de EMISIÓN en formato DD/MM/YYYY
+  • nom_sujeto : Nombre del sujeto excluido; NO puede ser "{nom_cliente}"
+  • nit_sujeto : NIT del sujeto (14 dígitos), si es persona jurídica
+  • dui_sujeto : DUI del sujeto (9 dígitos), si es persona natural
 
-IMPORTANTE: Usa null cuando el campo ya está correcto. Lista correcciones vacía [] si no cambiaste nada."""
+Devuelve el JSON siguiendo el responseSchema. Usa null para campos ya correctos."""
 
 
 # ─── Validadores de campos post-respuesta ────────────────────────────────────
@@ -389,15 +550,16 @@ def _validar_fecha(nueva: str | None, actual: str) -> str | None:
 def _validar_nombre(nuevo: str | None, actual: str, excluir_prefijo: str = "") -> str | None:
     if not nuevo or str(nuevo).lower() == "null":
         return None
-    nuevo = str(nuevo).strip().upper()
+    nuevo_str = str(nuevo).strip().upper()
+    if not nuevo_str:
+        return None
     if (
-        nuevo
-        and nuevo != actual.upper()
-        and not es_nombre_sospechoso(nuevo)
-        and 3 <= len(nuevo) <= 120
-        and (not excluir_prefijo or not nuevo.startswith(excluir_prefijo[:12]))
+        nuevo_str != actual.upper()
+        and not es_nombre_sospechoso(nuevo_str)
+        and 3 <= len(nuevo_str) <= 120
+        and (not excluir_prefijo or not nuevo_str.startswith(excluir_prefijo[:12]))
     ):
-        return nuevo
+        return nuevo_str
     return None
 
 
@@ -417,10 +579,34 @@ def _extraer_campos_corregidos(
     tipo_dte: str,
     nit_contexto: str,
 ) -> dict:
-    """Toma la respuesta de Gemini y retorna solo los campos que realmente cambiaron."""
+    """
+    Valida la respuesta de Gemini campo a campo y retorna solo
+    los que realmente cambiaron respecto a campos_actuales.
+    También guarda audit y razonamiento en el estado del módulo.
+    """
+    global _ultimo_audit
     campos_corr: dict = {}
     excluir = {nit_contexto} if nit_contexto else set()
 
+    # Guardar audit en estado del módulo y en session_state
+    auditoria = resultado.get("auditoria_ia", {})
+    razonamiento = resultado.get("razonamiento", {})
+    _ultimo_audit = {
+        **auditoria,
+        "razonamiento": razonamiento,
+        "tipo_dte"    : tipo_dte,
+    }
+    try:
+        if "gemini_audit_log" not in st.session_state:
+            st.session_state.gemini_audit_log = []
+        st.session_state.gemini_audit_log.append(_ultimo_audit)
+        # Conservar solo los últimos 50 audits en sesión
+        if len(st.session_state.gemini_audit_log) > 50:
+            st.session_state.gemini_audit_log = st.session_state.gemini_audit_log[-50:]
+    except Exception:
+        pass
+
+    # Validar fecha
     fecha_ok = _validar_fecha(resultado.get("fecha"), campos_actuales.get("fecha", ""))
     if fecha_ok:
         campos_corr["fecha"] = fecha_ok
@@ -467,6 +653,98 @@ def _extraer_campos_corregidos(
     return campos_corr
 
 
+# ─── UI Helper: visualización del audit en Streamlit ─────────────────────────
+
+def mostrar_audit_gemini(archivo: str = "", container=None) -> None:
+    """
+    Renderiza el bloque de trazabilidad IA en la UI de Streamlit.
+    Llama a esta función DESPUÉS de procesar un documento con Gemini
+    para mostrar el razonamiento y el nivel de confianza.
+
+    Ejemplo de uso en cualquier extractor:
+        from utils.gemini_utils import mostrar_audit_gemini
+        mostrar_audit_gemini(archivo=f.name)
+    """
+    audit = gemini_ultimo_audit()
+    if not audit:
+        return
+
+    target = container or st
+    titulo = f"🔬 Trazabilidad IA — Auditoría de Extracción{f': {archivo}' if archivo else ''}"
+
+    with target.expander(titulo, expanded=False):
+        modelo     = audit.get("modelo_utilizado", "—")
+        confianza  = int(audit.get("confianza_extraccion", 0))
+        notas      = audit.get("notas_de_razonamiento", "—")
+        tipo_dte   = audit.get("tipo_dte", "—")
+        razon      = audit.get("razonamiento", {})
+
+        col1, col2, col3 = target.columns([3, 2, 2])
+        col1.metric("Modelo IA", modelo)
+        col2.metric("Tipo DTE", tipo_dte.upper())
+        col3.metric(
+            "Confianza",
+            f"{confianza}%",
+            delta=None,
+            help="Estimación del modelo sobre la certeza de la extracción",
+        )
+
+        # Barra de confianza con color según nivel
+        if confianza >= 85:
+            bar_color = "#6AB040"
+            nivel_txt = "Alta confianza"
+        elif confianza >= 65:
+            bar_color = "#F0A500"
+            nivel_txt = "Confianza moderada — revisar si hay dudas"
+        else:
+            bar_color = "#E53935"
+            nivel_txt = "Baja confianza — se recomienda revisión manual"
+
+        target.markdown(
+            f"""<div style="background:#1A2C18;border-radius:6px;padding:4px 10px;margin:4px 0">
+            <div style="background:{bar_color};width:{confianza}%;height:8px;border-radius:4px"></div>
+            <small style="color:{bar_color}">{nivel_txt}</small></div>""",
+            unsafe_allow_html=True,
+        )
+
+        target.info(f"📝 **Notas de razonamiento:** {notas}")
+
+        # Cadena de razonamiento (CoT steps)
+        if razon:
+            with target.expander("📊 Cadena de Razonamiento (CoT) — Detalle paso a paso"):
+                if razon.get("ubicacion_seccion"):
+                    target.markdown(
+                        f"**🔍 Paso 1 — Localización de sección:**\n\n"
+                        f"> {razon['ubicacion_seccion']}"
+                    )
+                if razon.get("etiqueta_vs_valor"):
+                    target.markdown(
+                        f"**🏷️ Paso 2 — Etiqueta vs Valor real:**\n\n"
+                        f"> {razon['etiqueta_vs_valor']}"
+                    )
+                if razon.get("limpieza_aplicada"):
+                    target.markdown(
+                        f"**🧹 Paso 3 — Limpieza aplicada:**\n\n"
+                        f"> {razon['limpieza_aplicada']}"
+                    )
+                if razon.get("autovalidacion"):
+                    autoval = razon["autovalidacion"]
+                    fn = target.success if "VÁLIDO" in autoval.upper() else target.warning
+                    fn(f"**✅ Paso 4 — Auto-Validación:** {autoval}")
+
+        # Histórico de audits de la sesión (si existen)
+        audit_log = []
+        try:
+            audit_log = st.session_state.get("gemini_audit_log", [])
+        except Exception:
+            pass
+        if len(audit_log) > 1:
+            target.caption(
+                f"📋 Esta sesión tiene **{len(audit_log)} documentos** procesados con Gemini. "
+                "Los logs se conservan en `st.session_state.gemini_audit_log`."
+            )
+
+
 # ─── Función pública universal ────────────────────────────────────────────────
 
 def procesar_dte_con_gemini(
@@ -476,7 +754,10 @@ def procesar_dte_con_gemini(
     contexto_receptor: dict,
 ) -> tuple[dict, list[str]]:
     """
-    Verificador universal de DTEs con Gemini (auditor fiscal DGII El Salvador).
+    Verificador universal de DTEs con Gemini (auditor fiscal DGII).
+
+    Utiliza Chain-of-Thought (4 pasos explícitos dentro del JSON),
+    Auto-Validación contra anti-patrones y responseSchema estricto.
 
     Args:
         texto_pdf        : Texto extraído del PDF.
@@ -487,6 +768,7 @@ def procesar_dte_con_gemini(
     Returns:
         (campos_corregidos, lista_de_correcciones)
         campos_corregidos contiene SOLO las claves cuyos valores cambiaron.
+        El audit completo queda en gemini_ultimo_audit() y session_state.gemini_audit_log.
     """
     if not gemini_disponible():
         return {}, []
@@ -506,8 +788,9 @@ def procesar_dte_con_gemini(
         log.warning("procesar_dte_con_gemini: tipo_dte desconocido '%s'", tipo_dte)
         return {}, []
 
+    schema    = _SCHEMAS.get(tipo_dte)
     prompt    = build_prompt(texto_pdf, campos_actuales, nit_ctx, nom_ctx)
-    resultado = _llamar_gemini(prompt)
+    resultado = _llamar_gemini(prompt, schema=schema)
 
     if resultado is None:
         return {}, []
@@ -530,7 +813,7 @@ def necesita_verificacion(campos: dict, nit_receptor: str) -> tuple[bool, list[s
     if not campos.get("nom_prov", "").strip():
         razones.append("Nombre del emisor vacío")
     elif es_nombre_sospechoso(campos.get("nom_prov", "")):
-        razones.append(f"Nombre extraído parece metadata: {campos['nom_prov'][:40]}")
+        razones.append(f"Nombre extraído es metadata: {campos['nom_prov'][:40]}")
     if not campos.get("fecha", "").strip():
         razones.append("Fecha de emisión no encontrada")
     if not campos.get("nit_prov", "").strip():
