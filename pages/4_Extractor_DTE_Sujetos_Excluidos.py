@@ -16,6 +16,11 @@ from utils.pdf_utils import (
     extraer_y_formatear_fecha,
     extraer_texto_pdf,
 )
+from utils.gemini_utils import (
+    gemini_disponible,
+    gemini_ultimo_error,
+    procesar_dte_con_gemini,
+)
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -251,16 +256,45 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         if base > 0 and ret == 0:
             ret = round(base * 0.10, 2)
 
+        # ── Verificación con Gemini ───────────────────────────────────────────
+        gemini_correcciones: list[str] = []
+        if gemini_disponible():
+            # id_sujeto puede ser NIT (14 dígitos) o DUI (9 dígitos)
+            _nit_suj = id_sujeto if len(id_sujeto) == 14 else ""
+            _dui_suj = id_sujeto if len(id_sujeto) == 9  else ""
+            _campos_act = {
+                "fecha"     : fecha,
+                "nom_sujeto": nom_sujeto,
+                "nit_sujeto": _nit_suj,
+                "dui_sujeto": _dui_suj,
+            }
+            _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
+                texto_lineal,
+                "sujetos_excluidos",
+                _campos_act,
+                {"nit": nit_cliente, "nombre": cliente_activo.get('nombre', '')},
+            )
+            if _corr_dict.get("fecha"):
+                fecha = _corr_dict["fecha"]
+            if _corr_dict.get("nom_sujeto"):
+                nom_sujeto = _corr_dict["nom_sujeto"]
+            # Actualizar id_sujeto con el valor corregido (NIT tiene precedencia)
+            if _corr_dict.get("nit_sujeto"):
+                id_sujeto = _corr_dict["nit_sujeto"]
+            elif _corr_dict.get("dui_sujeto"):
+                id_sujeto = _corr_dict["dui_sujeto"]
+
         return {
-            "fecha"      : fecha,
-            "id_sujeto"  : id_sujeto,
-            "nom_sujeto" : nom_sujeto,
-            "tipo"       : tipo,
-            "sello"      : sello,        # ← Sello de Recepción (para mostrar y exportar)
-            "gen"        : gen,          # ← UUID (guardado internamente)
-            "num_control": num_control,
-            "base"       : base,
-            "ret"        : ret,
+            "fecha"               : fecha,
+            "id_sujeto"           : id_sujeto,
+            "nom_sujeto"          : nom_sujeto,
+            "tipo"                : tipo,
+            "sello"               : sello,
+            "gen"                 : gen,
+            "num_control"         : num_control,
+            "base"                : base,
+            "ret"                 : ret,
+            "gemini_correcciones" : gemini_correcciones,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
