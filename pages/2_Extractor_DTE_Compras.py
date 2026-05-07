@@ -6,7 +6,11 @@ import time
 import json
 import os
 import gc
+import sys
 from io import BytesIO
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from styles import DARK_PRO_CSS
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -16,77 +20,7 @@ st.set_page_config(page_title="Extractor DTE · Compras", layout="wide", page_ic
 # ─────────────────────────────────────────────
 # 2. ESTILOS
 # ─────────────────────────────────────────────
-ESTILO = """
-<style>
-  [data-testid="stAppViewContainer"],
-  [data-testid="stHeader"]          { background-color: #0D0F07 !important; }
-  [data-testid="stSidebar"]         { background-color: #141A08 !important;
-                                      border-right: 1px solid #4A5520 !important; }
-  h1, h2, h3, h4, h5, h6           { color: #C8D87A !important; letter-spacing: 0.5px; }
-  p, label, span, li                { color: #F0EDD8 !important; }
-  [data-testid="stDataFrame"] span  { color: inherit !important; }
-  div.stButton > button[kind="primary"],
-  div.stDownloadButton > button[kind="primary"] {
-    background-color : #6B7A2A !important;
-    border           : 1px solid #8A9A35 !important;
-    border-radius    : 6px !important;
-    transition       : background-color 0.25s ease, transform 0.1s ease;
-  }
-  div.stButton > button[kind="primary"]:hover,
-  div.stDownloadButton > button[kind="primary"]:hover {
-    background-color : #8A9A35 !important; transform: scale(1.02);
-  }
-  div.stButton > button[kind="primary"] *,
-  div.stDownloadButton > button[kind="primary"] * { color:#FFFFFF !important; font-weight:bold !important; }
-  div.stButton > button[kind="secondary"] {
-    background-color : transparent !important;
-    border           : 1px solid #4A5520 !important;
-    border-radius    : 6px !important; transition: 0.25s;
-  }
-  div.stButton > button[kind="secondary"]:hover { background-color:#1A2008 !important; }
-  div.stButton > button[kind="secondary"] *     { color:#C8D87A !important; }
-  div[data-testid="stTextInput"] input,
-  div[data-testid="stNumberInput"] input {
-    background-color:#1A2008 !important; border:1px solid #4A5520 !important;
-    border-radius:6px !important; color:#F0EDD8 !important; caret-color:#C8D87A;
-  }
-  div[data-testid="stTextInput"] input:focus,
-  div[data-testid="stNumberInput"] input:focus {
-    border-color:#8A9A35 !important;
-    box-shadow:0 0 0 2px rgba(138,154,53,0.25) !important;
-  }
-  button[data-baseweb="tab"] { color:#8A9A35 !important; }
-  button[data-baseweb="tab"][aria-selected="true"] {
-    border-bottom:2px solid #8A9A35 !important; color:#F0EDD8 !important;
-  }
-  div[data-testid="stAlert"] { display:flex; align-items:center; min-height:56px; }
-  hr { border-color:#4A5520 !important; opacity:0.4; }
-  .card-emisor {
-    padding:12px 16px; border-radius:8px; background-color:#1A2008;
-    color:#F0EDD8 !important; margin-bottom:18px; font-size:14px;
-    line-height:1.6; border:1px solid #2A3010; border-left:4px solid #8A9A35;
-  }
-  .card-emisor strong { color:#C8D87A !important; }
-  .scroll-list {
-    max-height:200px; overflow-y:auto; padding:8px 12px;
-    background-color:#1A2008; border-radius:6px;
-    border:1px solid #2A3010; font-family:monospace;
-    font-size:12px; color:#A8BB45; line-height:1.8;
-  }
-  .inbox-revision {
-    background-color:#1A2008; border:1px solid #8A9A35;
-    border-radius:10px; padding:20px; margin-top:20px; margin-bottom:20px;
-  }
-  .inbox-revision h3 { color:#C8D87A !important; margin-top:0; }
-  .inbox-revision p  { color:#8A9A35 !important; }
-  .debug-box {
-    background-color:#111808; border:1px solid #2A3010; border-radius:6px;
-    padding:10px 14px; font-family:monospace; font-size:11px;
-    color:#7A9A35; line-height:1.7; margin-top:8px;
-  }
-</style>
-"""
-st.markdown(ESTILO, unsafe_allow_html=True)
+st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # 3. SEGURIDAD
@@ -1010,7 +944,7 @@ def tipo_badge_compra(tipo: str) -> str:
 col_logo, col_titulo = st.columns([1, 8])
 with col_logo:
     st.markdown(
-        "<h2 style='font-family:Courier New,monospace;color:#8A9A35;"
+        "<h2 style='font-family:Courier New,monospace;color:#6AB040;"
         "letter-spacing:3px;margin-top:8px;'>YN</h2>",
         unsafe_allow_html=True,
     )
@@ -1040,7 +974,7 @@ if 'reporte_compras'   not in st.session_state: st.session_state.reporte_compras
 with st.sidebar:
     st.markdown("### 📂 Carga de Compras")
     st.markdown(
-        "<small style='color:#8A9A35'>Acepta: CCF (03), NC (05), ND (06), "
+        "<small style='color:#6AB040'>Acepta: CCF (03), NC (05), ND (06), "
         "Fac. (01/11), Suj. Excluido (14)</small>",
         unsafe_allow_html=True,
     )
@@ -1575,23 +1509,38 @@ if not st.session_state.db_compras.empty:
         if col not in df.columns:
             df[col] = default
 
-    # ── Filtros de Auditoría ──────────────────────────────────────────────────
-    st.markdown("### 🔍 Filtros de Auditoría")
-    col_f1, col_f2 = st.columns([2, 1])
-    with col_f1:
+    # ── Panel de Filtros Avanzado ────────────────────────────────────────────
+    st.markdown('<div class="filter-panel">', unsafe_allow_html=True)
+    st.markdown('<span class="filter-title">🔍 Filtros de Auditoría — F-07 Compras</span>', unsafe_allow_html=True)
+
+    fc1, fc2 = st.columns([3, 1])
+    with fc1:
         busqueda = st.text_input(
-            "Buscar proveedor 🔎",
-            placeholder="Nombre, NIT, DUI o UUID…"
+            "busqueda_c", label_visibility="collapsed",
+            placeholder="Buscar por nombre, NIT, DUI, Núm. Control o UUID…"
         )
-    with col_f2:
+    with fc2:
         tipos_disponibles = sorted(df['tipo'].unique().tolist()) if 'tipo' in df.columns else []
         filtro_tipo = st.multiselect(
-            "Tipo DTE 📄",
-            options=tipos_disponibles,
-            default=tipos_disponibles,
+            "Tipo DTE", options=tipos_disponibles,
+            default=tipos_disponibles, placeholder="Todos los tipos"
         )
 
+    fd1, fd2, fd3, fd4 = st.columns(4)
+    with fd1:
+        fecha_desde = st.date_input("Desde", value=None, format="DD/MM/YYYY", key="cmp_fd")
+    with fd2:
+        fecha_hasta = st.date_input("Hasta", value=None, format="DD/MM/YYYY", key="cmp_fh")
+    with fd3:
+        monto_min = st.number_input("Monto mín. ($)", min_value=0.0, value=0.0, step=10.0, key="cmp_mm")
+    with fd4:
+        monto_max = st.number_input("Monto máx. ($)", min_value=0.0, value=0.0, step=100.0,
+                                     key="cmp_mx", help="0 = sin límite superior")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Aplicar filtros ──────────────────────────────────────────────────────
     df_filtrado = df.copy()
+
     if busqueda:
         t_bus = busqueda.strip()
         mask = (
@@ -1606,7 +1555,45 @@ if not st.session_state.db_compras.empty:
     if filtro_tipo:
         df_filtrado = df_filtrado[df_filtrado['tipo'].isin(filtro_tipo)]
 
-    st.divider()
+    def _dmy_ts(fecha_str: str):
+        try:
+            p = str(fecha_str).strip().split('/')
+            if len(p) == 3:
+                return pd.Timestamp(int(p[2]), int(p[1]), int(p[0]))
+        except Exception:
+            pass
+        return pd.NaT
+
+    if (fecha_desde or fecha_hasta) and 'fecha' in df_filtrado.columns:
+        df_filtrado['_fts'] = df_filtrado['fecha'].apply(_dmy_ts)
+        if fecha_desde:
+            df_filtrado = df_filtrado[df_filtrado['_fts'] >= pd.Timestamp(fecha_desde)]
+        if fecha_hasta:
+            df_filtrado = df_filtrado[df_filtrado['_fts'] <= pd.Timestamp(fecha_hasta)]
+        df_filtrado = df_filtrado.drop(columns=['_fts'], errors='ignore')
+
+    if 'tot' in df_filtrado.columns:
+        if monto_min > 0:
+            df_filtrado = df_filtrado[df_filtrado['tot'] >= monto_min]
+        if monto_max > 0:
+            df_filtrado = df_filtrado[df_filtrado['tot'] <= monto_max]
+
+    # ── Badge de resultados ──────────────────────────────────────────────────
+    n_tot = len(df)
+    n_fil = len(df_filtrado)
+    filtros_activos = sum([
+        bool(busqueda),
+        bool(filtro_tipo and len(filtro_tipo) < len(tipos_disponibles)),
+        bool(fecha_desde), bool(fecha_hasta),
+        bool(monto_min > 0), bool(monto_max > 0),
+    ])
+    badge_extra = (f'<span class="active-filters"> · {filtros_activos} filtro(s) activo(s)</span>'
+                   if filtros_activos else "")
+    st.markdown(
+        f'<div class="results-badge"><span class="cnt">{n_fil}</span> de {n_tot} registros{badge_extra}</div>',
+        unsafe_allow_html=True
+    )
+    st.markdown("")
 
     tab1, tab2, tab3 = st.tabs([
         "📊 Libro F-07 Compras (Anexo 3)",
@@ -1727,12 +1714,11 @@ else:
     # ── Estado vacío ──────────────────────────────────────────────────────────
     st.markdown("""
     <div style="text-align:center; padding:60px 20px;">
-        <h3 style="color:#8A9A35 !important;">📂 Sin documentos cargados</h3>
-        <p style="color:#4A5520 !important;">
+        <h3 style="color:#6AB040 !important;">📂 Sin documentos cargados</h3>
+        <p style="color:#3A5830 !important;">
             Usa el panel lateral para cargar y procesar PDFs de compras.<br>
             Acepta: CCF (03), NC (05), ND (06), Factura (01/11), Suj. Excluido (14)
         </p>
     </div>
     """, unsafe_allow_html=True)
-
 
