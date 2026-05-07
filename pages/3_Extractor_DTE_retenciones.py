@@ -16,6 +16,11 @@ from utils.pdf_utils import (
     extraer_y_formatear_fecha,
     extraer_texto_pdf,
 )
+from utils.gemini_utils import (
+    gemini_disponible,
+    gemini_ultimo_error,
+    procesar_dte_con_gemini,
+)
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -196,15 +201,32 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         if ret > 0 and base == 0:
             base = round(ret * 100, 2)
 
+        # ── Verificación con Gemini ───────────────────────────────────────
+        gemini_correcciones: list[str] = []
+        if gemini_disponible():
+            _nit_cliente = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
+            _campos_act  = {"fecha": fecha, "nit_prov": nit_prov}
+            _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
+                texto_lineal,
+                "retenciones",
+                _campos_act,
+                {"nit": _nit_cliente, "nombre": cliente_activo.get('nombre', '')},
+            )
+            if _corr_dict.get("fecha"):
+                fecha    = _corr_dict["fecha"]
+            if _corr_dict.get("nit_prov"):
+                nit_prov = _corr_dict["nit_prov"]
+
         return {
-            "nit_prov" : nit_prov,
-            "fecha"    : fecha,
-            "tipo"     : tipo,
-            "sello"    : sello,
-            "gen"      : gen,
-            "base"     : base,
-            "ret"      : ret,
-            "estado"   : 7,
+            "nit_prov"            : nit_prov,
+            "fecha"               : fecha,
+            "tipo"                : tipo,
+            "sello"               : sello,
+            "gen"                 : gen,
+            "base"                : base,
+            "ret"                 : ret,
+            "estado"              : 7,
+            "gemini_correcciones" : gemini_correcciones,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
