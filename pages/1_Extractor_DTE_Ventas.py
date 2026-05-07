@@ -27,7 +27,7 @@ from utils.gemini_utils import (
 from utils.gemini_vision import (
     extraer_dte_con_vision,
     vision_disponible,
-    vision_ultimo_error,
+    vision_ultimo_error,   # surfaces the actual API error for debugging
 )
 from utils.qa_utils import (
     campos_invalidos_dte,
@@ -1309,7 +1309,10 @@ if st.session_state.cola_revision_v:
                         confianza=_confianza,
                         alertas=_v_alertas + _alertas_qa,
                     )
-                    mostrar_indicador_vision(_v_campos, _v_alertas, _v_audit)
+                    mostrar_indicador_vision(
+                        _v_campos, _v_alertas, _v_audit,
+                        error_vision=vision_ultimo_error(),
+                    )
                     # ─────────────────────────────────────────────────────────
                     col_d1, col_d2 = st.columns(2)
                     with col_d1:
