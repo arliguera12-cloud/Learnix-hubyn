@@ -9,6 +9,13 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
+from utils.pdf_utils import (
+    safe_str,
+    normalizar_unicode,
+    limpiar_monto,
+    extraer_y_formatear_fecha,
+    extraer_texto_pdf,
+)
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -36,38 +43,10 @@ cliente = st.session_state.cliente_activo
 # ─────────────────────────────────────────────
 # 4. FUNCIONES AUXILIARES
 # ─────────────────────────────────────────────
-def limpiar_monto(monto_str: str) -> float:
-    s = re.sub(r'[^\d.,]', '', str(monto_str).strip())
-    if not s:
-        return 0.0
-    ultimo_coma  = s.rfind(',')
-    ultimo_punto = s.rfind('.')
-    if ultimo_coma > ultimo_punto:
-        s = s.replace('.', '').replace(',', '.')
-    elif ultimo_punto > ultimo_coma:
-        s = s.replace(',', '')
-    else:
-        s = s.replace(',', '').replace('.', '')
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
 
 
-def extraer_y_formatear_fecha(texto: str) -> str:
-    m = re.search(
-        r"\b(20[2-3]\d)\s*[-\/]\s*(0[1-9]|1[0-2])\s*[-\/]\s*([0-2]\d|3[01])\b",
-        texto
-    )
-    if m:
-        return f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/{m.group(1)}"
-    m = re.search(r"\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b", texto)
-    if m:
-        p1, p2, y = int(m.group(1)), int(m.group(2)), m.group(3)
-        if p1 <= 12 and p2 > 12:  return f"{p2:02d}/{p1:02d}/{y}"
-        if p2 <= 12 and p1 > 12:  return f"{p1:02d}/{p2:02d}/{y}"
-        if p2 <= 12 and p1 <= 31: return f"{p1:02d}/{p2:02d}/{y}"
-    return ""
+
+
 
 
 def limpiar_nit(raw: str) -> str:
@@ -142,12 +121,34 @@ def extraer_nit_receptor(texto: str, nit_cliente: str) -> str:
 
 def extraer_sello_dte14(texto: str) -> str:
     """Extrae el Sello de Recepción del DTE-14."""
+    # Intento 1: etiqueta explícita
     m = re.search(
-        r"[Ss]ello\s+de\s+[Rr]ecepci[oó]n\s*[:\-]?\s*([A-Z0-9]{20,})",
+        r"[Ss]ello\s+(?:de\s+)?[Rr]ecepci[oó]n\s*[:\-]?\s*([A-Z0-9]{20,50})",
         texto, re.I
     )
     if m:
-        return m.group(1).strip()
+        return m.group(1).strip()[:40]
+
+    # Intento 2: cadena año + 36 chars alfanuméricos en texto sin espacios
+    t_ns = re.sub(r'\s+', '', texto).upper()
+    m2 = re.search(r'(20[2-3]\d[A-Z0-9]{36})', t_ns)
+    if m2:
+        return m2.group(1)
+
+    # Intento 3: "SELLO" seguido de la cadena en texto compacto
+    m3 = re.search(r'SELLO[A-Z]*:?([A-Z0-9]{30,50})', t_ns)
+    if m3:
+        return m3.group(1)[:40]
+
+    # Intento 4: línea que sea exactamente un sello (año + alfanumérico, sin guiones)
+    for linea in texto.splitlines():
+        linea_s = linea.strip()
+        mc = re.match(r'^(20[2-3]\d[A-Z0-9]{26,})$', linea_s, re.I)
+        if mc:
+            candidato = mc.group(1).upper()
+            if '-' not in candidato:
+                return candidato
+
     return ""
 
 
@@ -155,12 +156,8 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
     if not file_bytes or len(file_bytes) < 512:
         return {"error": "Archivo vacío o corrupto."}
     try:
-        texto_completo = ""
-        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
-            if not pdf.pages:
-                return {"error": "PDF sin páginas."}
-            for page in pdf.pages:
-                texto_completo += (page.extract_text() or "") + "\n"
+        texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
+        texto_completo = texto_lineal + "\n" + texto_visual
 
         if len(texto_completo.strip()) < 50:
             return {"error": "PDF de imagen — sin texto extraíble."}
@@ -169,7 +166,7 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         t_no_sp = re.sub(r'\s+', '', t_clean).upper()
 
         # ── Tipo DTE ──
-        m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_sp)
+        m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]{1,20}-\d{9,18})", t_no_sp)
         tipo   = "14"
         if m_ctrl:
             ctrl   = m_ctrl.group(1).replace("O", "0")
