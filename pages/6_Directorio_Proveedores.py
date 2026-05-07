@@ -1,84 +1,22 @@
 import streamlit as st
 import json
 import os
+import sys
 import pandas as pd
 import re
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from styles import DARK_PRO_CSS
+
 # ─────────────────────────────────────────────
-# 1. PAGE CONFIG — SIEMPRE PRIMERO
+# 1. PAGE CONFIG
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="Directorio Proveedores", layout="wide", page_icon="🏢")
 
 # ─────────────────────────────────────────────
-# 2. ESTILOS — VERDE OLIVA UNIFICADO
+# 2. ESTILOS
 # ─────────────────────────────────────────────
-ESTILO = """
-<style>
-  [data-testid="stAppViewContainer"],
-  [data-testid="stHeader"]          { background-color: #0D0F07 !important; }
-  [data-testid="stSidebar"]         { background-color: #141A08 !important;
-                                      border-right: 1px solid #4A5520 !important; }
-
-  h1, h2, h3, h4, h5, h6           { color: #C8D87A !important; letter-spacing: 0.5px; }
-  p, label, span, li                { color: #F0EDD8 !important; }
-  [data-testid="stDataFrame"] span  { color: inherit !important; }
-
-  div.stButton > button[kind="primary"],
-  div.stDownloadButton > button[kind="primary"] {
-    background-color : #6B7A2A !important;
-    border           : 1px solid #8A9A35 !important;
-    border-radius    : 6px !important;
-    transition       : background-color 0.25s ease, transform 0.1s ease;
-  }
-  div.stButton > button[kind="primary"]:hover,
-  div.stDownloadButton > button[kind="primary"]:hover {
-    background-color : #8A9A35 !important;
-    transform        : scale(1.02);
-  }
-  div.stButton > button[kind="primary"] *,
-  div.stDownloadButton > button[kind="primary"] * {
-    color: #FFFFFF !important; font-weight: bold !important;
-  }
-
-  div.stButton > button[kind="secondary"] {
-    background-color : transparent !important;
-    border           : 1px solid #4A5520 !important;
-    border-radius    : 6px !important;
-    transition       : 0.25s;
-  }
-  div.stButton > button[kind="secondary"]:hover { background-color: #1A2008 !important; }
-  div.stButton > button[kind="secondary"] *     { color: #C8D87A !important; }
-
-  div[data-testid="stTextInput"] input {
-    background-color : #1A2008 !important;
-    border           : 1px solid #4A5520 !important;
-    border-radius    : 6px !important;
-    color            : #F0EDD8 !important;
-    caret-color      : #C8D87A;
-  }
-  div[data-testid="stTextInput"] input:focus {
-    border-color : #8A9A35 !important;
-    box-shadow   : 0 0 0 2px rgba(138,154,53,0.25) !important;
-  }
-
-  div[data-testid="stSelectbox"] > div > div {
-    background-color : #1A2008 !important;
-    border           : 1px solid #4A5520 !important;
-    border-radius    : 6px !important;
-    color            : #F0EDD8 !important;
-  }
-
-  button[data-baseweb="tab"]                       { color: #8A9A35 !important; }
-  button[data-baseweb="tab"][aria-selected="true"] {
-    border-bottom : 2px solid #8A9A35 !important;
-    color         : #F0EDD8 !important;
-  }
-
-  div[data-testid="stAlert"] { display: flex; align-items: center; }
-  hr                         { border-color: #4A5520 !important; opacity: 0.4; }
-</style>
-"""
-st.markdown(ESTILO, unsafe_allow_html=True)
+st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # 3. VERIFICACIÓN DE SEGURIDAD
@@ -123,7 +61,7 @@ def limpiar_numero(num: str) -> str:
 col_logo, col_titulo = st.columns([1, 8])
 with col_logo:
     st.markdown(
-        "<h2 style='font-family: Courier New, monospace; color: #8A9A35;"
+        "<h2 style='font-family: Courier New, monospace; color: #6AB040;"
         " letter-spacing: 3px; margin-top:8px;'>YN</h2>",
         unsafe_allow_html=True
     )

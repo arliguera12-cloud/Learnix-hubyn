@@ -4,71 +4,21 @@ import pandas as pd
 import re
 import json
 import os
+import sys
 from io import BytesIO
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from styles import DARK_PRO_CSS
+
 # ─────────────────────────────────────────────
-# 1. PAGE CONFIG — SIEMPRE PRIMERO
+# 1. PAGE CONFIG
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="Extractor DTE · Sujetos Excluidos", layout="wide", page_icon="⚖️")
 
 # ─────────────────────────────────────────────
-# 2. ESTILOS — VERDE OLIVA UNIFICADO
+# 2. ESTILOS
 # ─────────────────────────────────────────────
-ESTILO = """
-<style>
-  [data-testid="stAppViewContainer"],
-  [data-testid="stHeader"]          { background-color: #0D0F07 !important; }
-  [data-testid="stSidebar"]         { background-color: #141A08 !important;
-                                      border-right: 1px solid #4A5520 !important; }
-
-  h1, h2, h3, h4, h5, h6           { color: #C8D87A !important; letter-spacing: 0.5px; }
-  p, label, span, li                { color: #F0EDD8 !important; }
-  [data-testid="stDataFrame"] span  { color: inherit !important; }
-
-  div.stButton > button[kind="primary"],
-  div.stDownloadButton > button[kind="primary"] {
-    background-color : #6B7A2A !important;
-    border           : 1px solid #8A9A35 !important;
-    border-radius    : 6px !important;
-    transition       : background-color 0.25s ease, transform 0.1s ease;
-  }
-  div.stButton > button[kind="primary"]:hover,
-  div.stDownloadButton > button[kind="primary"]:hover {
-    background-color : #8A9A35 !important;
-    transform        : scale(1.02);
-  }
-  div.stButton > button[kind="primary"] *,
-  div.stDownloadButton > button[kind="primary"] * {
-    color: #FFFFFF !important; font-weight: bold !important;
-  }
-
-  div.stButton > button[kind="secondary"] {
-    background-color : transparent !important;
-    border           : 1px solid #4A5520 !important;
-    border-radius    : 6px !important;
-    transition       : 0.25s;
-  }
-  div.stButton > button[kind="secondary"]:hover { background-color: #1A2008 !important; }
-  div.stButton > button[kind="secondary"] *     { color: #C8D87A !important; }
-
-  div[data-testid="stAlert"] { display: flex; align-items: center; min-height: 56px; }
-  hr                         { border-color: #4A5520 !important; opacity: 0.4; }
-
-  .card-emisor {
-    padding          : 12px 16px;
-    border-radius    : 8px;
-    border           : 1px solid #2A3010;
-    border-left      : 4px solid #8A9A35;
-    background-color : #1A2008;
-    color            : #F0EDD8 !important;
-    margin-bottom    : 18px;
-    font-size        : 14px;
-    line-height      : 1.6;
-  }
-  .card-emisor strong { color: #C8D87A !important; }
-</style>
-"""
-st.markdown(ESTILO, unsafe_allow_html=True)
+st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # 3. VERIFICACIÓN DE SEGURIDAD
@@ -352,7 +302,7 @@ def generar_excel_libro(df: pd.DataFrame, nombre_cliente: str) -> bytes:
         ("1","c1",4),("1","c2",4),("4","c3",4),("5","c4",4),("5","c5",4),
     ]
 
-    header_fill = PatternFill("solid", fgColor="4A5520")
+    header_fill = PatternFill("solid", fgColor="1A2C18")
     header_font = Font(bold=True, color="FFFFFF", size=9)
     border_side = Side(style="thin", color="CCCCCC")
     cell_border  = Border(left=border_side, right=border_side,
@@ -403,7 +353,7 @@ def generar_excel_libro(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     tot.font = Font(bold=True)
     tot.number_format = num_fmt
     tot.alignment = Alignment(horizontal="right", vertical="center")
-    tot.fill = PatternFill("solid", fgColor="C8D87A")
+    tot.fill = PatternFill("solid", fgColor="A8E870")
     tot.border = cell_border
 
     buf = BytesIO()
@@ -438,7 +388,7 @@ def generar_excel_retencion(df: pd.DataFrame, nombre_cliente: str) -> bytes:
         ("Mes/Año","mesanio",10),
     ]
 
-    header_fill = PatternFill("solid", fgColor="4A5520")
+    header_fill = PatternFill("solid", fgColor="1A2C18")
     header_font = Font(bold=True, color="FFFFFF", size=9)
     border_side = Side(style="thin", color="CCCCCC")
     cell_border  = Border(left=border_side, right=border_side,
@@ -500,7 +450,7 @@ def generar_excel_retencion(df: pd.DataFrame, nombre_cliente: str) -> bytes:
         tot.font = Font(bold=True)
         tot.number_format = num_fmt
         tot.alignment = Alignment(horizontal="right", vertical="center")
-        tot.fill = PatternFill("solid", fgColor="C8D87A")
+        tot.fill = PatternFill("solid", fgColor="A8E870")
         tot.border = cell_border
 
     buf = BytesIO()
@@ -514,7 +464,7 @@ def generar_excel_retencion(df: pd.DataFrame, nombre_cliente: str) -> bytes:
 col_logo, col_titulo = st.columns([1, 8])
 with col_logo:
     st.markdown(
-        "<h2 style='font-family: Courier New, monospace; color: #8A9A35;"
+        "<h2 style='font-family: Courier New, monospace; color: #6AB040;"
         " letter-spacing: 3px; margin-top:8px;'>YN</h2>",
         unsafe_allow_html=True
     )
@@ -683,8 +633,8 @@ if not st.session_state.db_sujetos.empty:
 
 else:
     st.markdown("""
-    <div style="text-align:center; padding: 60px 20px; color: #6B7A2A;">
-        <h3 style="color:#8A9A35 !important;">📂 Sin documentos cargados</h3>
-        <p style="color:#4A5520 !important;">Usa el panel lateral para cargar y procesar DTE-14 de sujetos excluidos.</p>
+    <div style="text-align:center; padding: 60px 20px; color: #4E7040;">
+        <h3 style="color:#6AB040 !important;">📂 Sin documentos cargados</h3>
+        <p style="color:#3A5830 !important;">Usa el panel lateral para cargar y procesar DTE-14 de sujetos excluidos.</p>
     </div>
     """, unsafe_allow_html=True)

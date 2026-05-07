@@ -2,137 +2,31 @@ import streamlit as st
 import pandas as pd
 import json
 import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from styles import DARK_PRO_CSS
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title = "Dashboard · Learnix DTE Hub",
-    layout     = "wide",
-    page_icon  = "🏠"
+    page_title="Dashboard · Learnix DTE Hub",
+    layout="wide",
+    page_icon="🏠"
 )
 
 # ─────────────────────────────────────────────
-# 2. VERIFICACIÓN DE SEGURIDAD
+# 2. SEGURIDAD
 # ─────────────────────────────────────────────
 if not st.session_state.get("autenticado"):
     st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
     st.stop()
 
 # ─────────────────────────────────────────────
-# 3. ESTILOS — VERDE OLIVA ARMONIZADO
+# 3. ESTILOS
 # ─────────────────────────────────────────────
-ESTILO = """
-<style>
-  [data-testid="stAppViewContainer"],
-  [data-testid="stHeader"]          { background-color: #0D0F07 !important; }
-  [data-testid="stSidebar"]         { background-color: #141A08 !important;
-                                      border-right: 1px solid #4A5520 !important; }
-
-  h1, h2, h3, h4, h5, h6           { color: #C8D87A !important; }
-  p, label, span, li                { color: #F0EDD8 !important; }
-  [data-testid="stDataFrame"] span  { color: inherit !important; }
-
-  div[data-testid="stSelectbox"] > div > div {
-    background-color : #1A2008 !important;
-    border           : 1px solid #4A5520 !important;
-    border-radius    : 8px !important;
-    color            : #F0EDD8 !important;
-  }
-
-  div.stButton > button[kind="primary"] {
-    background-color : #6B7A2A !important;
-    border           : 1px solid #8A9A35 !important;
-    border-radius    : 6px !important;
-    transition       : 0.25s;
-  }
-  div.stButton > button[kind="primary"]:hover {
-    background-color : #8A9A35 !important;
-    transform        : scale(1.02);
-  }
-  div.stButton > button[kind="primary"] * {
-    color: #FFFFFF !important; font-weight: bold !important;
-  }
-
-  div[data-testid="stAlert"] { display: flex; align-items: center; }
-  hr { border-color: #4A5520 !important; opacity: 0.4; }
-
-  /* ── Tarjetas de módulos ── */
-  .modulo-card {
-    background-color : #141A08;
-    padding          : 24px 20px;
-    border-radius    : 12px;
-    border           : 1px solid #2A3010;
-    height           : 100%;
-    min-height       : 130px;
-    transition       : border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
-    cursor           : default;
-  }
-  .modulo-card:hover {
-    border-color : #8A9A35;
-    box-shadow   : 0 0 20px rgba(138, 154, 53, 0.18);
-    transform    : translateY(-2px);
-  }
-  .modulo-icon  { font-size: 2.2rem; margin-bottom: 10px; display: block; }
-  .modulo-title { font-size: 1.1rem; font-weight: bold; color: #C8D87A !important; margin-bottom: 8px; }
-  .modulo-desc  { font-size: 0.875rem; color: #8A9A35 !important; line-height: 1.5; }
-  .modulo-badge {
-    display          : inline-block;
-    margin-top       : 10px;
-    padding          : 2px 10px;
-    border-radius    : 12px;
-    font-size        : 0.72rem;
-    background-color : #2A3010;
-    color            : #A8BB45 !important;
-    border           : 1px solid #4A5520;
-    letter-spacing   : 0.5px;
-  }
-
-  /* ── Card cliente activo ── */
-  .card-cliente-activo {
-    padding          : 14px 18px;
-    border-radius    : 10px;
-    border-left      : 4px solid #8A9A35;
-    background-color : #1A2008;
-    margin-bottom    : 8px;
-    font-size        : 14px;
-    line-height      : 1.7;
-    border           : 1px solid #2A3010;
-    border-left      : 4px solid #8A9A35;
-  }
-  .card-cliente-activo .label  { font-size: 0.72rem; color: #6B7A2A !important; letter-spacing: 1px; text-transform: uppercase; }
-  .card-cliente-activo .nombre { color: #C8D87A !important; font-weight: bold; font-size: 1rem; }
-  .card-cliente-activo .nit    { color: #8A9A35 !important; font-size: 0.85rem; }
-
-  /* ── KPI Cards ── */
-  .kpi-card {
-    background-color : #1A2008;
-    border           : 1px solid #2A3010;
-    border-radius    : 10px;
-    padding          : 18px 16px;
-    text-align       : center;
-  }
-  .kpi-valor { font-size: 1.9rem; font-weight: bold; color: #C8D87A !important; }
-  .kpi-label { font-size: 0.8rem; color: #6B7A2A !important; margin-top: 4px; }
-
-  /* ── Bienvenida ── */
-  .bienvenida-titulo {
-    text-align    : center;
-    font-size     : 1.9rem;
-    font-weight   : bold;
-    color         : #C8D87A !important;
-    letter-spacing: 1px;
-    margin-bottom : 4px;
-  }
-  .bienvenida-sub {
-    text-align    : center;
-    font-size     : 0.95rem;
-    color         : #6B7A2A !important;
-    margin-bottom : 0;
-  }
-</style>
-"""
-st.markdown(ESTILO, unsafe_allow_html=True)
+st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # 4. CARGA DE CLIENTES
@@ -154,17 +48,25 @@ def cargar_clientes() -> dict:
 # ─────────────────────────────────────────────
 # 5. ENCABEZADO
 # ─────────────────────────────────────────────
-col_logo, col_hdr, _ = st.columns([1, 6, 1])
+col_logo, col_hdr, col_badge = st.columns([1, 6, 2])
 with col_logo:
     st.markdown(
-        "<h2 style='font-family: Courier New, monospace; color: #8A9A35;"
-        " letter-spacing: 3px; margin-top:12px;'>YN</h2>",
+        "<h2 style='font-family: Courier New, monospace; color: #A8E870;"
+        " letter-spacing: 3px; margin-top:14px;'>YN</h2>",
         unsafe_allow_html=True
     )
 with col_hdr:
-    st.markdown("<div class='bienvenida-titulo'>Bienvenido al Hub DTE 👋</div>", unsafe_allow_html=True)
+    st.markdown("<div class='bienvenida-titulo'>Hub DTE — El Salvador</div>", unsafe_allow_html=True)
     st.markdown(
-        "<p class='bienvenida-sub'>Selecciona tu espacio de trabajo para comenzar a procesar documentos.</p>",
+        "<p class='bienvenida-sub'>Procesamiento inteligente de documentos tributarios electrónicos · Anexos F-07 y F-14</p>",
+        unsafe_allow_html=True
+    )
+with col_badge:
+    st.markdown(
+        "<div style='text-align:right; margin-top:18px;'>"
+        "<span style='background:#152015; border:1px solid #2E4828; border-radius:20px;"
+        " padding:4px 14px; font-size:0.7rem; color:#5EA830; letter-spacing:2px;'>v3.0 · PRODUCCIÓN</span>"
+        "</div>",
         unsafe_allow_html=True
     )
 
@@ -175,13 +77,13 @@ st.divider()
 # ─────────────────────────────────────────────
 db_clientes = cargar_clientes()
 
-_, col_sel, _ = st.columns([1, 2, 1])
+_, col_sel, _ = st.columns([1, 2.2, 1])
 with col_sel:
     if not db_clientes:
         st.warning("⚠️ El Directorio de Clientes está vacío. Agrégalos desde el menú lateral.")
     else:
         opciones: list[str] = ["— Selecciona una empresa —"]
-        mapa:     dict[str, dict] = {}
+        mapa: dict[str, dict] = {}
 
         for nit, datos in db_clientes.items():
             nombre = datos.get("nombre", "Sin nombre")
@@ -219,53 +121,60 @@ with col_sel:
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.info("👆 Selecciona una empresa para activar los módulos de procesamiento.")
+            st.info("☝️ Selecciona una empresa para activar los módulos de procesamiento.")
 
 st.markdown("")
 st.divider()
 
 # ─────────────────────────────────────────────
-# 7. KPIs (si hay cliente activo)
+# 7. KPIs DE SESIÓN
 # ─────────────────────────────────────────────
 cliente_activo = st.session_state.get("cliente_activo")
 
 if cliente_activo:
     df_ventas  = st.session_state.get("db_ventas",  pd.DataFrame())
     df_compras = st.session_state.get("db_compras", pd.DataFrame())
+    df_ret     = st.session_state.get("db_ret",     pd.DataFrame())
 
     n_ventas  = len(df_ventas)
     n_compras = len(df_compras)
+    n_ret     = len(df_ret)
 
-    sum_ventas  = float(df_ventas["tot"].sum())  if not df_ventas.empty  and "tot" in df_ventas.columns  else 0.0
-    sum_compras = float(df_compras["tot"].sum()) if not df_compras.empty and "tot" in df_compras.columns else 0.0
+    # buscar columna de totales compatible
+    sum_ventas  = (
+        float(df_ventas["total"].sum()) if not df_ventas.empty and "total" in df_ventas.columns
+        else float(df_ventas["tot"].sum()) if not df_ventas.empty and "tot" in df_ventas.columns
+        else 0.0
+    )
+    sum_compras = (
+        float(df_compras["tot"].sum()) if not df_compras.empty and "tot" in df_compras.columns else 0.0
+    )
+    sum_ret = (
+        float(df_ret["base"].sum()) if not df_ret.empty and "base" in df_ret.columns else 0.0
+    )
 
-    st.markdown("#### 📊 Resumen de Sesión Actual")
-    k1, k2, k3, k4 = st.columns(4)
+    st.markdown(
+        "<div style='font-size:0.72rem; color:#3A5830; letter-spacing:2px; text-transform:uppercase;"
+        " font-weight:600; margin-bottom:10px;'>📊 Resumen de Sesión Actual</div>",
+        unsafe_allow_html=True
+    )
+    k1, k2, k3, k4, k5 = st.columns(5)
 
-    with k1:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-valor">{n_ventas}</div>
-            <div class="kpi-label">📈 DTE Ventas</div>
-        </div>""", unsafe_allow_html=True)
-    with k2:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-valor">${sum_ventas:,.2f}</div>
-            <div class="kpi-label">💰 Total Ventas</div>
-        </div>""", unsafe_allow_html=True)
-    with k3:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-valor">{n_compras}</div>
-            <div class="kpi-label">🛒 DTE Compras</div>
-        </div>""", unsafe_allow_html=True)
-    with k4:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-valor">${sum_compras:,.2f}</div>
-            <div class="kpi-label">🧾 Total Compras</div>
-        </div>""", unsafe_allow_html=True)
+    kpi_data = [
+        (k1, str(n_ventas),        "DTE Ventas procesados",    "Documentos cargados"),
+        (k2, f"${sum_ventas:,.0f}","Total Ventas",             "Monto acumulado"),
+        (k3, str(n_compras),       "DTE Compras procesados",   "Documentos cargados"),
+        (k4, f"${sum_compras:,.0f}","Total Compras",           "Monto acumulado"),
+        (k5, str(n_ret),           "Retenciones DTE-07",       "Comprobantes cargados"),
+    ]
+    for col, val, lbl, sub in kpi_data:
+        with col:
+            st.markdown(f"""
+            <div class="kpi-pro">
+                <div class="value">{val}</div>
+                <div class="label">{lbl}</div>
+                <div class="sub">{sub}</div>
+            </div>""", unsafe_allow_html=True)
 
     st.markdown("")
     st.divider()
@@ -273,8 +182,11 @@ if cliente_activo:
 # ─────────────────────────────────────────────
 # 8. TARJETAS DE MÓDULOS
 # ─────────────────────────────────────────────
-st.markdown("#### 🗂️ Módulos Disponibles")
-st.markdown("")
+st.markdown(
+    "<div style='font-size:0.72rem; color:#3A5830; letter-spacing:2px; text-transform:uppercase;"
+    " font-weight:600; margin-bottom:12px;'>🗂️ Módulos Disponibles</div>",
+    unsafe_allow_html=True
+)
 
 c1, c2 = st.columns(2, gap="large")
 
@@ -282,26 +194,28 @@ with c1:
     st.markdown("""
     <div class="modulo-card">
         <span class="modulo-icon">📈</span>
-        <div class="modulo-title">Extractor de Ventas</div>
+        <div class="modulo-title">Extractor de Ventas — Anexo F-07</div>
         <div class="modulo-desc">
-            Procesa CCF y Facturas en formato PDF nativo. Genera el Anexo F-07
-            separando automáticamente ventas a contribuyentes y consumidores finales.
+            Procesa CCF, Facturas, Notas de Crédito y Débito en PDF nativo.
+            Genera el Anexo F-07 separando automáticamente ventas a contribuyentes
+            (Anexo 1) y consumidores finales (Anexo 2).
         </div>
-        <span class="modulo-badge">DTE 01 · 03 · 05 · 06</span>
+        <span class="modulo-badge">DTE-01 · DTE-03 · DTE-05 · DTE-06</span>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("")
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
 
     st.markdown("""
     <div class="modulo-card">
         <span class="modulo-icon">✂️</span>
-        <div class="modulo-title">Retenciones 1%</div>
+        <div class="modulo-title">Retenciones 1% — Anexo F-14</div>
         <div class="modulo-desc">
-            Lee documentos DTE-07 y estructura el Anexo F-14 calculando automáticamente
-            las bases gravables y los montos retenidos por proveedor.
+            Lee Comprobantes de Retención DTE-07 y estructura el Libro de Retenciones
+            para el Anexo F-14, calculando automáticamente bases gravables y montos
+            retenidos por proveedor.
         </div>
-        <span class="modulo-badge">DTE 07 · Anexo F-14</span>
+        <span class="modulo-badge">DTE-07 · Casilla F-14</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -309,27 +223,27 @@ with c2:
     st.markdown("""
     <div class="modulo-card">
         <span class="modulo-icon">🛒</span>
-        <div class="modulo-title">Extractor de Compras</div>
+        <div class="modulo-title">Extractor de Compras — Anexo F-07</div>
         <div class="modulo-desc">
-            Digitaliza compras del Anexo F-07 con motor de extracción inteligente.
+            Digitaliza compras con motor de extracción inteligente y OCR de respaldo.
             Incluye bandeja de revisión manual, detección de duplicados y directorio
             de proveedores persistente.
         </div>
-        <span class="modulo-badge">DTE 03 · 05 · 06 · Anexo F-07</span>
+        <span class="modulo-badge">DTE-03 · DTE-05 · DTE-06 · Anexo F-07</span>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("")
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
 
     st.markdown("""
     <div class="modulo-card">
         <span class="modulo-icon">⚖️</span>
-        <div class="modulo-title">Sujetos Excluidos</div>
+        <div class="modulo-title">Sujetos Excluidos — Casilla 66 F-14</div>
         <div class="modulo-desc">
-            Extrae datos de DTE-14 para la Casilla 66 de Compras y calcula automáticamente
-            las retenciones del 10% para el formulario F-14.
+            Extrae datos de DTE-14 (Sujetos Excluidos) para la Casilla 66 de Compras
+            y calcula automáticamente las retenciones del 10% para el formulario F-14.
         </div>
-        <span class="modulo-badge">DTE 14 · Casilla 66 · F-14</span>
+        <span class="modulo-badge">DTE-14 · Casilla 66 · Retención 10%</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -339,10 +253,10 @@ with c2:
 if not cliente_activo and db_clientes:
     st.markdown("")
     st.markdown("""
-    <div style="text-align:center; padding: 32px 20px; color:#4A5520;
-                border: 1px dashed #2A3010; border-radius: 12px; margin-top: 10px;">
+    <div style="text-align:center; padding: 32px 20px;
+                border: 1px dashed #1E3020; border-radius: 12px; margin-top: 10px;">
         <p style="font-size:1.5rem; margin-bottom:6px;">☝️</p>
-        <p style="color:#6B7A2A !important; font-size:0.95rem;">
+        <p style="color:#3A5830 !important; font-size:0.95rem;">
             Selecciona una empresa arriba para activar los módulos
             y visualizar el resumen de sesión.
         </p>
@@ -355,8 +269,8 @@ if not cliente_activo and db_clientes:
 st.markdown("")
 st.divider()
 st.markdown(
-    "<p style='text-align:center; font-size:0.75rem; color:#4A5520;'>"
-    "Learnix DTE Hub &nbsp;·&nbsp; v2.1 &nbsp;·&nbsp; El Salvador &nbsp;·&nbsp; "
-    "Todos los datos se procesan localmente.</p>",
+    "<p style='text-align:center; font-size:0.72rem; color:#1E3020;'>"
+    "Learnix DTE Hub &nbsp;·&nbsp; v3.0 &nbsp;·&nbsp; El Salvador &nbsp;·&nbsp; "
+    "Todos los datos se procesan localmente sin envío a terceros.</p>",
     unsafe_allow_html=True
 )
