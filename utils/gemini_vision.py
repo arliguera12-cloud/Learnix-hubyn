@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import time
 
 import requests
 import streamlit as st
@@ -27,6 +28,9 @@ _GEMINI_URL   = (
     f"{_GEMINI_MODEL}:generateContent"
 )
 _TIMEOUT = 60
+
+_MAX_RETRIES    = 3
+_BACKOFF_DELAYS = [2, 4, 8]   # seconds per retry attempt
 
 _ultimo_error: str = ""
 
@@ -456,10 +460,10 @@ def _http_post(
 
 def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict | None) -> dict | None:
     """
-    Two-phase Vision call:
-      Phase 1 — with responseSchema (structured output).
-      Phase 2 — without responseSchema if Phase 1 returns HTTP 400
-                 (responseSchema + inlineData can conflict in some API versions).
+    Calls Gemini Vision with automatic retry for transient errors:
+      • 429 / 5xx  → exponential backoff (2 s, 4 s, 8 s), up to 3 attempts.
+      • 400 schema error → Phase 2: one retry without responseSchema (no sleep).
+      • Other errors → fail immediately.
     """
     global _ultimo_error
 
@@ -473,35 +477,54 @@ def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict | None) -> dict |
 
     api_key = _get_api_key()
 
-    # Phase 1: with schema
-    result = _http_post(pdf_bytes, prompt, api_key, schema)
-    if result is not None:
-        return result
-
-    # Phase 2: retry without schema on 400 or schema-related errors
-    err = _ultimo_error
-    is_schema_error = (
-        "400" in err
-        or "schema" in err.lower()
-        or "nullable" in err.lower()
-        or "unknown field" in err.lower()
-        or "invalid value" in err.lower()
-    )
-    if schema and is_schema_error:
-        log.warning("Vision Phase 1 failed (%s). Retrying without responseSchema.", err[:80])
-        result = _http_post(pdf_bytes, prompt, api_key, schema=None)
+    for attempt in range(_MAX_RETRIES):
+        result = _http_post(pdf_bytes, prompt, api_key, schema)
         if result is not None:
-            # Mark that we ran without schema so the caller knows
-            if isinstance(result, dict) and "auditoria_ia" not in result:
-                result["auditoria_ia"] = {}
-            log.info("Vision Phase 2 (no schema) succeeded.")
-            _ultimo_error = ""
             return result
-        # Both phases failed — keep the Phase 2 error but mention Phase 1 too
-        if _ultimo_error:
-            _ultimo_error = f"Fase 1: {err} | Fase 2: {_ultimo_error}"
-        else:
-            _ultimo_error = err
+
+        err = _ultimo_error
+
+        # Transient error (429 burst limit or 5xx server error) → retry with backoff
+        is_transient = (
+            "429" in err or "quota" in err.lower()
+            or any(code in err for code in ("500", "502", "503", "504"))
+        )
+        if is_transient:
+            if attempt < _MAX_RETRIES - 1:
+                wait = _BACKOFF_DELAYS[attempt]
+                log.warning(
+                    "Vision transient error (attempt %d/%d): %s. Waiting %ds...",
+                    attempt + 1, _MAX_RETRIES, err[:80], wait,
+                )
+                time.sleep(wait)
+                continue
+            _ultimo_error = f"{err} (tras {_MAX_RETRIES} intentos)"
+            return None
+
+        # Schema conflict → Phase 2: one attempt without responseSchema
+        is_schema_error = (
+            "400" in err
+            or "schema" in err.lower()
+            or "nullable" in err.lower()
+            or "unknown field" in err.lower()
+            or "invalid value" in err.lower()
+        )
+        if schema and is_schema_error:
+            log.warning("Vision Phase 2 (no schema) due to: %s", err[:80])
+            result = _http_post(pdf_bytes, prompt, api_key, schema=None)
+            if result is not None:
+                if isinstance(result, dict) and "auditoria_ia" not in result:
+                    result["auditoria_ia"] = {}
+                _ultimo_error = ""
+                return result
+            if _ultimo_error:
+                _ultimo_error = f"Fase 1: {err} | Fase 2: {_ultimo_error}"
+            else:
+                _ultimo_error = err
+            return None
+
+        # Non-retryable error (403, 404, JSON parse, connection, timeout)
+        return None
 
     return None
 

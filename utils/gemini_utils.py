@@ -13,6 +13,7 @@ import os
 import re
 import json
 import logging
+import time
 import requests
 import streamlit as st
 
@@ -24,7 +25,9 @@ _GEMINI_URL   = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{_GEMINI_MODEL}:generateContent"
 )
-_TIMEOUT = 25
+_TIMEOUT        = 25
+_MAX_RETRIES    = 3
+_BACKOFF_DELAYS = [2, 4, 8]   # seconds per retry attempt
 
 # ─── Estado del módulo ────────────────────────────────────────────────────────
 _ultimo_error: str = ""
@@ -226,80 +229,93 @@ def _llamar_gemini(
         "generationConfig": gen_cfg,
     }
 
-    try:
-        resp = requests.post(
-            _GEMINI_URL,
-            params={"key": api_key},
-            json=payload,
-            timeout=_TIMEOUT,
-        )
-
-        if resp.status_code == 400:
-            _ultimo_error = f"Gemini rechazó la solicitud (400): {resp.text[:200]}"
-            log.error("Gemini 400: %s", resp.text[:500])
-            return None
-        if resp.status_code == 403:
-            _ultimo_error = "API key inválida o sin permiso (403). Verifica en Google AI Studio."
-            log.error("Gemini 403")
-            return None
-        if resp.status_code == 404:
-            _ultimo_error = (
-                f"Modelo '{_GEMINI_MODEL}' no disponible para esta API key (404)."
-            )
-            log.error("Gemini 404 — modelo no disponible")
-            return None
-        if resp.status_code == 429:
-            _ultimo_error = "Cuota de Gemini agotada (429). Espera un momento."
-            log.warning("Gemini 429 quota")
-            return None
-        if resp.status_code in (500, 502, 503, 504):
-            _ultimo_error = f"Gemini no disponible temporalmente ({resp.status_code}). Reintenta en segundos."
-            log.warning("Gemini %s transient error", resp.status_code)
-            return None
-
-        resp.raise_for_status()
-
-        # Buscar la primera parte de texto no vacía (ignora thinking parts)
-        candidates = resp.json().get("candidates", [])
-        if not candidates:
-            _ultimo_error = "Gemini devolvió respuesta sin candidatos."
-            return None
-
+    for attempt in range(_MAX_RETRIES):
         raw = ""
-        for part in candidates[0].get("content", {}).get("parts", []):
-            txt = part.get("text", "").strip()
-            if txt:
-                raw = txt
-                break
+        try:
+            resp = requests.post(
+                _GEMINI_URL,
+                params={"key": api_key},
+                json=payload,
+                timeout=_TIMEOUT,
+            )
 
-        if not raw:
-            _ultimo_error = "Gemini devolvió respuesta vacía."
+            if resp.status_code == 400:
+                _ultimo_error = f"Gemini rechazó la solicitud (400): {resp.text[:200]}"
+                log.error("Gemini 400: %s", resp.text[:500])
+                return None
+            if resp.status_code == 403:
+                _ultimo_error = "API key inválida o sin permiso (403). Verifica en Google AI Studio."
+                log.error("Gemini 403")
+                return None
+            if resp.status_code == 404:
+                _ultimo_error = (
+                    f"Modelo '{_GEMINI_MODEL}' no disponible para esta API key (404)."
+                )
+                log.error("Gemini 404 — modelo no disponible")
+                return None
+
+            if resp.status_code == 429 or resp.status_code in (500, 502, 503, 504):
+                _ultimo_error = (
+                    f"Cuota de Gemini agotada (429). Espera un momento."
+                    if resp.status_code == 429
+                    else f"Gemini no disponible temporalmente ({resp.status_code})."
+                )
+                if attempt < _MAX_RETRIES - 1:
+                    wait = _BACKOFF_DELAYS[attempt]
+                    log.warning(
+                        "Gemini %s (attempt %d/%d), waiting %ds...",
+                        resp.status_code, attempt + 1, _MAX_RETRIES, wait,
+                    )
+                    time.sleep(wait)
+                    continue
+                _ultimo_error += f" (tras {_MAX_RETRIES} intentos)"
+                log.warning("Gemini %s — all retries exhausted", resp.status_code)
+                return None
+
+            resp.raise_for_status()
+
+            # Buscar la primera parte de texto no vacía (ignora thinking parts)
+            candidates = resp.json().get("candidates", [])
+            if not candidates:
+                _ultimo_error = "Gemini devolvió respuesta sin candidatos."
+                return None
+
+            for part in candidates[0].get("content", {}).get("parts", []):
+                txt = part.get("text", "").strip()
+                if txt:
+                    raw = txt
+                    break
+
+            if not raw:
+                _ultimo_error = "Gemini devolvió respuesta vacía."
+                return None
+
+            # Limpiar markdown fences residuales
+            raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
+            raw = re.sub(r'\s*```\s*$', '', raw)
+
+            resultado = json.loads(raw)
+            _ultimo_error = ""
+            return resultado
+
+        except requests.exceptions.Timeout:
+            _ultimo_error = f"Timeout ({_TIMEOUT}s). Verifica tu conexión a Internet."
+            log.warning("Gemini timeout")
+            return None
+        except requests.exceptions.ConnectionError:
+            _ultimo_error = "Sin conexión a Internet para llamar a Gemini."
+            log.warning("Gemini connection error")
+            return None
+        except json.JSONDecodeError as e:
+            _ultimo_error = f"Gemini devolvió JSON inválido: {e}"
+            log.warning("Gemini JSON error: %s | raw=%s", e, (raw or "")[:200])
+            return None
+        except Exception as e:
+            _ultimo_error = f"Error inesperado: {e}"
+            log.error("Gemini unexpected error", exc_info=True)
             return None
 
-        # Limpiar markdown fences residuales
-        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
-        raw = re.sub(r'\s*```\s*$', '', raw)
-
-        resultado = json.loads(raw)
-        _ultimo_error = ""
-        return resultado
-
-    except requests.exceptions.Timeout:
-        _ultimo_error = f"Timeout ({_TIMEOUT}s). Verifica tu conexión a Internet."
-        log.warning("Gemini timeout")
-        return None
-    except requests.exceptions.ConnectionError:
-        _ultimo_error = "Sin conexión a Internet para llamar a Gemini."
-        log.warning("Gemini connection error")
-        return None
-    except json.JSONDecodeError as e:
-        _ultimo_error = f"Gemini devolvió JSON inválido: {e}"
-        log.warning("Gemini JSON error: %s | raw=%s", e, (raw or "")[:200])
-        return None
-    except Exception as e:
-        _ultimo_error = f"Error inesperado: {e}"
-        log.error("Gemini unexpected error", exc_info=True)
-        return None
+    return None
 
 
 # ─── Contexto fiscal y reglas CoT compartidas ────────────────────────────────
