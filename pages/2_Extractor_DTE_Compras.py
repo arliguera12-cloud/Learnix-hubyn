@@ -21,7 +21,8 @@ from utils.pdf_utils import (
 )
 from utils.gemini_utils import (
     es_nombre_sospechoso,
-    extraer_nombre_con_gemini,
+    verificar_compra_con_gemini,
+    necesita_verificacion,
     gemini_disponible,
 )
 # Alias para compatibilidad con código existente
@@ -523,15 +524,31 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             nombre_encontrado = extraer_nombre_emisor(texto_lineal, nit_prov, nom_receptor)
             if not nombre_encontrado:
                 nombre_encontrado = extraer_nombre_emisor(texto_visual, nit_prov, nom_receptor)
-
-            # Fallback Gemini si el nombre está vacío o parece metadata
-            if (not nombre_encontrado or es_nombre_sospechoso(nombre_encontrado)) \
-                    and gemini_disponible():
-                nombre_gemini = extraer_nombre_con_gemini(texto_lineal, nit=nit_prov)
-                if nombre_gemini:
-                    nombre_encontrado = nombre_gemini
-
             nom_prov = nombre_encontrado if nombre_encontrado else ""
+
+        # ── Guard: emisor no puede ser el mismo que el receptor ──────────────
+        if nit_prov and nit_prov == nit_receptor:
+            nit_prov = ""
+            nom_prov = ""
+
+        # ── Verificación y corrección con Gemini ─────────────────────────────
+        gemini_correcciones: list[str] = []
+        if gemini_disponible():
+            _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "nom_prov": nom_prov}
+            _necesita, _ = necesita_verificacion(_campos_act, nit_receptor)
+            if _necesita:
+                _corr_dict, gemini_correcciones = verificar_compra_con_gemini(
+                    texto_lineal,
+                    _campos_act,
+                    nit_receptor,
+                    nom_receptor,
+                )
+                if _corr_dict.get("fecha"):
+                    fecha    = _corr_dict["fecha"]
+                if _corr_dict.get("nom_prov"):
+                    nom_prov = _corr_dict["nom_prov"]
+                if _corr_dict.get("nit_prov"):
+                    nit_prov = _corr_dict["nit_prov"]
 
         # ── FOVIAL y COTRANS ───────────────────────────────────────────────────
         fovial  = 0.0
@@ -721,9 +738,10 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             "tot"            : round(tot,  2),
             "fovial"         : round(fovial,  2),
             "cotrans"        : round(cotrans, 2),
-            "estado"         : "OK",
-            "iva_calc"       : iva_calculado,
-            "es_nuevo"       : es_nuevo,
+            "estado"              : "OK",
+            "iva_calc"            : iva_calculado,
+            "es_nuevo"            : es_nuevo,
+            "gemini_correcciones" : gemini_correcciones,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
@@ -1122,6 +1140,19 @@ if st.session_state.cola_revision:
                     texto_crudo += safe_extract_text(page, layout=True) + "\n"
 
                 with st.expander("🔍 Datos extraídos automáticamente"):
+                    # ── Indicador Gemini ──────────────────────────────────────
+                    _g_corr = datos_act.get("gemini_correcciones", [])
+                    if _g_corr:
+                        st.markdown(
+                            "⚡ **Gemini corrigió:** " +
+                            " · ".join(f"`{c}`" for c in _g_corr),
+                            help="Correcciones aplicadas automáticamente por Gemini 1.5 Flash"
+                        )
+                    elif gemini_disponible():
+                        st.caption("⚡ Gemini activo — datos verificados sin correcciones")
+                    else:
+                        st.caption("🔌 Gemini no configurado — extracción solo por regex")
+
                     col_d1, col_d2 = st.columns(2)
                     with col_d1:
                         st.caption(f"**Tipo:** `{tipo_badge_compra(tipo_actual)}`")
