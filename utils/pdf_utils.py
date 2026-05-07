@@ -152,6 +152,17 @@ def extraer_y_formatear_fecha(texto: str) -> str:
         )
         candidatas = []
 
+        # Paso 0: tabla DIA / MES / AÑO (formato PriceSmart y similares)
+        # Acepta AÑO con o sin tilde según como lo extraiga el PDF
+        for m in re.finditer(
+            r'[Dd][Ii][Aa]\s+[Mm][Ee][Ss]\s+[Aa][ÑñNn][Oo]\s+'
+            r'(\d{1,2})\s+(\d{1,2})\s+(20[2-3]\d)',
+            texto_clean,
+        ):
+            dia, mes, anio = m.group(1), m.group(2), m.group(3)
+            if 1 <= int(dia) <= 31 and 1 <= int(mes) <= 12:
+                candidatas.append((m.start(), f"{int(dia):02d}/{int(mes):02d}/{anio}"))
+
         # Paso 1: etiqueta explícita de emisión (mayor prioridad)
         for m in re.finditer(
             r'(?:[Ff]echa\s+y\s+[Hh]ora\s+de\s+(?:[Gg]eneraci[oó]n|[Ee]misi[oó]n)|'

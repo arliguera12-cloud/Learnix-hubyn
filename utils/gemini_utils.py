@@ -1,18 +1,20 @@
 """
-Gemini 1.5 Flash utility for DTE field extraction fallback.
-Used when regex-based extraction produces suspicious or empty results.
+Gemini 1.5 Flash utility via REST API (no SDK dependency).
+Used as fallback when regex-based name extraction produces suspicious results.
 """
 import os
 import re
+import json
+import requests
 import streamlit as st
 
-try:
-    import google.generativeai as genai
-    _GENAI_OK = True
-except ImportError:
-    _GENAI_OK = False
+_GEMINI_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    "gemini-1.5-flash:generateContent"
+)
+_TIMEOUT = 12  # seconds
 
-# ─── In-process cache: nit/uuid → nombre ─────────────────────────────────────
+# ─── In-process cache: nit → nombre ──────────────────────────────────────────
 _nombre_cache: dict[str, str] = {}
 
 # ─── Patterns that indicate a bad supplier name ───────────────────────────────
@@ -28,11 +30,10 @@ _SOSPECHOSO = re.compile(
         RAZ[OÓ]N\s+SOCIAL\s*:|
         NIT\s*:|
         NRC\s*:|
-        \d{2}[/\-]\d{2}[/\-]\d{4}   # date as name
+        \d{2}[/\-]\d{2}[/\-]\d{4}
     )""",
     re.I | re.X,
 )
-
 _PATRON_FECHA = re.compile(r'\d{2}[/\-]\d{2}[/\-]\d{4}')
 _PATRON_HORA  = re.compile(r'\b\d{2}:\d{2}:\d{2}\b')
 _PATRON_META  = re.compile(
@@ -42,7 +43,7 @@ _PATRON_META  = re.compile(
 
 
 def es_nombre_sospechoso(nombre: str) -> bool:
-    """Return True if the extracted name looks like metadata, not a real company name."""
+    """Return True if the extracted name looks like metadata, not a company name."""
     if not nombre:
         return False
     n = nombre.strip().upper()
@@ -58,7 +59,7 @@ def es_nombre_sospechoso(nombre: str) -> bool:
 
 
 def _get_api_key() -> str:
-    """Read Gemini key from Streamlit secrets → env var → session state."""
+    """Read Gemini key: Streamlit secrets → env var → session state."""
     try:
         return st.secrets["gemini"]["api_key"]
     except Exception:
@@ -70,20 +71,17 @@ def _get_api_key() -> str:
 
 
 def gemini_disponible() -> bool:
-    return _GENAI_OK and bool(_get_api_key())
+    return bool(_get_api_key())
 
 
 def extraer_nombre_con_gemini(
     texto_pdf: str,
     nit: str = "",
-    tipo_doc: str = "compra",
 ) -> str:
     """
-    Use Gemini 1.5 Flash to extract the supplier name from DTE text.
+    Call Gemini 1.5 Flash REST API to extract the supplier (emisor) name.
     Returns uppercase name or "" on failure/unavailability.
     """
-    if not _GENAI_OK:
-        return ""
     api_key = _get_api_key()
     if not api_key:
         return ""
@@ -92,37 +90,46 @@ def extraer_nombre_con_gemini(
     if cache_key in _nombre_cache:
         return _nombre_cache[cache_key]
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-
-    seccion = tipo_doc  # "compra" → emisor = proveedor
     texto_recortado = texto_pdf[:3500]
 
-    prompt = f"""Eres un extractor de datos de documentos tributarios electrónicos (DTE) de El Salvador.
-
-Del siguiente texto extraído de un PDF, encuentra el nombre o razón social del EMISOR (quien emite/vende el documento).
-
-Reglas estrictas:
-- Devuelve ÚNICAMENTE el nombre empresarial, sin explicaciones
-- El EMISOR está en la sección "EMISOR" o "DATOS DEL EMISOR"
-- El nombre termina antes de NIT, NRC, GIRO, dirección, correo, teléfono
-- Ejemplos válidos: "GUARDADO S.A DE C.V", "ALMACENES VIDRI S.A. DE C.V.", "GRANJA SAN DIEGO S.A. DE C.V"
-- Si no puedes identificarlo con certeza, devuelve exactamente: DESCONOCIDO
-
-Texto del PDF:
-{texto_recortado}
-
-Responde solo con el nombre del emisor (sin comillas, sin explicaciones):"""
+    payload = {
+        "contents": [{
+            "parts": [{
+                "text": (
+                    "Eres un extractor de datos de documentos tributarios electrónicos "
+                    "(DTE) de El Salvador.\n\n"
+                    "Del siguiente texto extraído de un PDF, encuentra el nombre o razón "
+                    "social del EMISOR (quien emite/vende el documento).\n\n"
+                    "Reglas estrictas:\n"
+                    "- Devuelve ÚNICAMENTE el nombre empresarial, sin explicaciones\n"
+                    "- El EMISOR está en la sección 'EMISOR' o 'DATOS DEL EMISOR'\n"
+                    "- El nombre termina antes de NIT, NRC, GIRO, dirección, correo, teléfono\n"
+                    "- Ejemplos válidos: 'GUARDADO S.A DE C.V', 'PRICESMART EL SALVADOR S.A. DE C.V.'\n"
+                    "- Si no puedes identificarlo con certeza, responde: DESCONOCIDO\n\n"
+                    f"Texto del PDF:\n{texto_recortado}\n\n"
+                    "Responde solo con el nombre del emisor (sin comillas, sin explicaciones):"
+                )
+            }]
+        }],
+        "generationConfig": {
+            "temperature": 0.0,
+            "maxOutputTokens": 80,
+        },
+    }
 
     try:
-        resp = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.0,
-                max_output_tokens=80,
-            ),
+        resp = requests.post(
+            _GEMINI_URL,
+            params={"key": api_key},
+            json=payload,
+            timeout=_TIMEOUT,
         )
-        nombre = resp.text.strip().strip('"').strip("'")
+        resp.raise_for_status()
+        data = resp.json()
+        nombre = (
+            data["candidates"][0]["content"]["parts"][0]["text"]
+            .strip().strip('"').strip("'")
+        )
         if nombre.upper() in ("DESCONOCIDO", "NO ENCONTRADO", "N/A", ""):
             nombre = ""
         if nombre and (len(nombre) < 3 or len(nombre) > 120):
