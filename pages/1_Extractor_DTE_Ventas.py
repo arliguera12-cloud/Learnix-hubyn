@@ -24,6 +24,18 @@ from utils.gemini_utils import (
     gemini_ultimo_error,
     procesar_dte_con_gemini,
 )
+from utils.gemini_vision import (
+    extraer_dte_con_vision,
+    vision_disponible,
+    vision_ultimo_error,
+)
+from utils.qa_utils import (
+    campos_invalidos_dte,
+    mostrar_banner_qa,
+    mostrar_indicador_vision,
+    requiere_revision_manual,
+    validar_montos_ventas,
+)
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -492,10 +504,41 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 )
             nom_cli = nombre_encontrado if nombre_encontrado else "SIN NOMBRE"
 
-        # ── Verificación y corrección con Gemini ─────────────────────────────
+        # ── Extracción multimodal con Gemini Vision (primera pasada) ─────────
         gemini_correcciones: list[str] = []
-        if gemini_disponible():
-            _nom_emisor = safe_str(cliente_activo.get('nombre', '')).strip().upper()
+        _vision_campos: dict  = {}
+        _vision_alertas: list = []
+        _vision_audit: dict   = {}
+
+        _nit_emisor_ctx = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
+        _nom_emisor_ctx = safe_str(cliente_activo.get('nombre', '')).strip().upper()
+
+        if vision_disponible():
+            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+                file_bytes,
+                "ventas",
+                {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
+            )
+            # Aplica resultados de Vision con prioridad sobre regex
+            if _vision_campos.get("fecha"):
+                fecha   = _vision_campos["fecha"]
+            if _vision_campos.get("nom_cli"):
+                nom_cli = _vision_campos["nom_cli"]
+            if _vision_campos.get("nit_cli"):
+                nit_cli = _vision_campos["nit_cli"]
+            if _vision_campos.get("dui_cli"):
+                dui_cli = _vision_campos["dui_cli"]
+            # Montos de Vision (solo si los campos regex quedaron en 0)
+            # Los montos del regex siguen siendo la fuente primaria por precisión
+            gemini_correcciones = [
+                f"Vision: {a}" for a in _vision_alertas
+            ] if _vision_alertas else (
+                [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+                if _vision_campos else []
+            )
+
+        elif gemini_disponible():
+            # Fallback: verificación textual con Gemini cuando Vision no disponible
             _campos_act = {
                 "fecha"  : fecha,
                 "nom_cli": nom_cli,
@@ -506,7 +549,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 texto_lineal,
                 "ventas",
                 _campos_act,
-                {"nit": nit_emisor, "nombre": _nom_emisor},
+                {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
             )
             if _corr_dict.get("fecha"):
                 fecha   = _corr_dict["fecha"]
@@ -669,6 +712,9 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             "iva_calc"            : iva_calc,
             "es_nuevo"            : es_nuevo,
             "gemini_correcciones" : gemini_correcciones,
+            "_vision_campos"      : _vision_campos,
+            "_vision_alertas"     : _vision_alertas,
+            "_vision_audit"       : _vision_audit,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
@@ -1252,20 +1298,18 @@ if st.session_state.cola_revision_v:
                     texto_crudo += safe_extract_text(page, layout=True) + "\n"
 
                 with st.expander("🔍 Datos extraídos automáticamente"):
-                    # ── Indicador Gemini ──────────────────────────────────────
-                    _g_corr = datos_act.get("gemini_correcciones", [])
-                    if _g_corr:
-                        st.markdown(
-                            "⚡ **Gemini corrigió:** " +
-                            " · ".join(f"`{c}`" for c in _g_corr),
-                            help="Correcciones aplicadas automáticamente por Gemini 1.5 Flash"
-                        )
-                    elif gemini_disponible():
-                        st.caption("⚡ Gemini activo — datos verificados sin correcciones")
-                    else:
-                        _err = gemini_ultimo_error()
-                        msg  = f" (`{_err}`)" if _err else ""
-                        st.caption(f"🔌 Gemini no configurado — extracción solo por regex{msg}")
+                    # ── QA Banner + Vision indicator ──────────────────────────
+                    _v_campos = datos_act.get("_vision_campos", {})
+                    _v_alertas = datos_act.get("_vision_alertas", [])
+                    _v_audit   = datos_act.get("_vision_audit", {})
+                    _confianza = _v_audit.get("confianza", 100) if _v_audit else 100
+                    _alertas_qa = validar_montos_ventas(datos_act)
+                    mostrar_banner_qa(
+                        "ventas", datos_act,
+                        confianza=_confianza,
+                        alertas=_v_alertas + _alertas_qa,
+                    )
+                    mostrar_indicador_vision(_v_campos, _v_alertas, _v_audit)
                     # ─────────────────────────────────────────────────────────
                     col_d1, col_d2 = st.columns(2)
                     with col_d1:

@@ -25,6 +25,16 @@ from utils.gemini_utils import (
     necesita_verificacion,
     gemini_disponible,
 )
+from utils.gemini_vision import (
+    extraer_dte_con_vision,
+    vision_disponible,
+)
+from utils.qa_utils import (
+    campos_invalidos_dte,
+    mostrar_banner_qa,
+    mostrar_indicador_vision,
+    validar_montos_ventas,
+)
 # Alias para compatibilidad con código existente
 limpiar_monto             = _limpiar_monto
 extraer_y_formatear_fecha = _extraer_fecha
@@ -531,9 +541,30 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             nit_prov = ""
             nom_prov = ""
 
-        # ── Verificación y corrección con Gemini ─────────────────────────────
+        # ── Extracción multimodal con Gemini Vision (primera pasada) ─────────
         gemini_correcciones: list[str] = []
-        if gemini_disponible():
+        _vision_campos: dict  = {}
+        _vision_alertas: list = []
+        _vision_audit: dict   = {}
+
+        if vision_disponible():
+            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+                file_bytes,
+                "compras",
+                {"nit": nit_receptor, "nombre": nom_receptor},
+            )
+            if _vision_campos.get("fecha"):
+                fecha    = _vision_campos["fecha"]
+            if _vision_campos.get("nom_prov"):
+                nom_prov = _vision_campos["nom_prov"]
+            if _vision_campos.get("nit_prov"):
+                nit_prov = _vision_campos["nit_prov"]
+            gemini_correcciones = [f"Vision: {a}" for a in _vision_alertas] if _vision_alertas else (
+                [f"Vision extrajo {len(_vision_campos)} campo(s)"] if _vision_campos else []
+            )
+
+        elif gemini_disponible():
+            # Fallback: verificación textual cuando Vision no está disponible
             _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "nom_prov": nom_prov}
             _necesita, _ = necesita_verificacion(_campos_act, nit_receptor)
             if _necesita:
@@ -742,6 +773,9 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             "iva_calc"            : iva_calculado,
             "es_nuevo"            : es_nuevo,
             "gemini_correcciones" : gemini_correcciones,
+            "_vision_campos"      : _vision_campos,
+            "_vision_alertas"     : _vision_alertas,
+            "_vision_audit"       : _vision_audit,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
@@ -1140,18 +1174,23 @@ if st.session_state.cola_revision:
                     texto_crudo += safe_extract_text(page, layout=True) + "\n"
 
                 with st.expander("🔍 Datos extraídos automáticamente"):
-                    # ── Indicador Gemini ──────────────────────────────────────
-                    _g_corr = datos_act.get("gemini_correcciones", [])
-                    if _g_corr:
-                        st.markdown(
-                            "⚡ **Gemini corrigió:** " +
-                            " · ".join(f"`{c}`" for c in _g_corr),
-                            help="Correcciones aplicadas automáticamente por Gemini 1.5 Flash"
-                        )
-                    elif gemini_disponible():
-                        st.caption("⚡ Gemini activo — datos verificados sin correcciones")
-                    else:
-                        st.caption("🔌 Gemini no configurado — extracción solo por regex")
+                    # ── QA Banner + Vision indicator ──────────────────────────
+                    _v_campos  = datos_act.get("_vision_campos", {})
+                    _v_alertas = datos_act.get("_vision_alertas", [])
+                    _v_audit   = datos_act.get("_vision_audit", {})
+                    _confianza = _v_audit.get("confianza", 100) if _v_audit else 100
+                    _alertas_qa = validar_montos_ventas({
+                        "gravadas": datos_act.get("gra", 0),
+                        "iva"     : datos_act.get("iva", 0),
+                        "total"   : datos_act.get("tot", 0),
+                        "exentas" : datos_act.get("exe", 0),
+                    })
+                    mostrar_banner_qa(
+                        "compras", datos_act,
+                        confianza=_confianza,
+                        alertas=_v_alertas + _alertas_qa,
+                    )
+                    mostrar_indicador_vision(_v_campos, _v_alertas, _v_audit)
 
                     col_d1, col_d2 = st.columns(2)
                     with col_d1:

@@ -21,6 +21,15 @@ from utils.gemini_utils import (
     gemini_ultimo_error,
     procesar_dte_con_gemini,
 )
+from utils.gemini_vision import (
+    extraer_dte_con_vision,
+    vision_disponible,
+)
+from utils.qa_utils import (
+    mostrar_banner_qa,
+    mostrar_indicador_vision,
+    validar_montos_retenciones,
+)
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -201,16 +210,42 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         if ret > 0 and base == 0:
             base = round(ret * 100, 2)
 
-        # ── Verificación con Gemini ───────────────────────────────────────
+        # ── Extracción multimodal con Gemini Vision ───────────────────────
         gemini_correcciones: list[str] = []
-        if gemini_disponible():
-            _nit_cliente = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
-            _campos_act  = {"fecha": fecha, "nit_prov": nit_prov}
+        _vision_campos: dict  = {}
+        _vision_alertas: list = []
+        _vision_audit: dict   = {}
+
+        _nit_cliente = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
+        _nom_cliente = cliente_activo.get('nombre', '')
+
+        if vision_disponible():
+            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+                file_bytes,
+                "retenciones",
+                {"nit": _nit_cliente, "nombre": _nom_cliente},
+            )
+            if _vision_campos.get("fecha"):
+                fecha    = _vision_campos["fecha"]
+            if _vision_campos.get("nit_prov"):
+                nit_prov = _vision_campos["nit_prov"]
+            if _vision_campos.get("nom_prov"):
+                pass  # nom_prov from vision stored but not surfaced in UI yet
+            if _vision_campos.get("base") and base == 0.0:
+                base = _vision_campos["base"]
+            if _vision_campos.get("ret") and ret == 0.0:
+                ret = _vision_campos["ret"]
+            gemini_correcciones = [f"Vision: {a}" for a in _vision_alertas] if _vision_alertas else (
+                [f"Vision extrajo {len(_vision_campos)} campo(s)"] if _vision_campos else []
+            )
+
+        elif gemini_disponible():
+            _campos_act = {"fecha": fecha, "nit_prov": nit_prov}
             _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
                 texto_lineal,
                 "retenciones",
                 _campos_act,
-                {"nit": _nit_cliente, "nombre": cliente_activo.get('nombre', '')},
+                {"nit": _nit_cliente, "nombre": _nom_cliente},
             )
             if _corr_dict.get("fecha"):
                 fecha    = _corr_dict["fecha"]
@@ -227,6 +262,9 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             "ret"                 : ret,
             "estado"              : 7,
             "gemini_correcciones" : gemini_correcciones,
+            "_vision_campos"      : _vision_campos,
+            "_vision_alertas"     : _vision_alertas,
+            "_vision_audit"       : _vision_audit,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
@@ -395,6 +433,11 @@ with st.sidebar:
                     errores.append(f"⚠️ `{f.name}` — {res['error_tipo']}")
                 else:
                     res["archivo"] = f.name
+                    # QA gate: flag documentos que requieren revisión
+                    _qa_alertas = validar_montos_retenciones(res)
+                    _v_audit    = res.get("_vision_audit", {})
+                    _confianza  = _v_audit.get("confianza", 100) if _v_audit else 100
+                    res["_revision"] = "⚠️" if (_qa_alertas or _confianza < 65) else "✅"
                     extracted.append(res)
 
                 st.session_state.archivos_ret.append(f.name)
@@ -504,6 +547,7 @@ if not st.session_state.db_ret.empty:
     st.markdown("#### 📋 Libro de Retenciones — Base para Formulario F-14")
 
     COLS_DISPLAY = {
+        "_revision": "QA",
         "nit_prov" : "NIT Proveedor",
         "fecha"    : "Fecha",
         "tipo"     : "Tipo",
