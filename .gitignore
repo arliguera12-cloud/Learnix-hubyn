@@ -1,0 +1,19 @@
+# Streamlit secrets — NUNCA subir al repositorio
+.streamlit/secrets.toml
+
+# Variables de entorno locales
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Datos locales (JSONs con info de clientes)
+data/
+
+# Sistema
+.DS_Store
+Thumbs.db
