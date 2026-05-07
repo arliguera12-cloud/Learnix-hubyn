@@ -21,6 +21,15 @@ from utils.gemini_utils import (
     gemini_ultimo_error,
     procesar_dte_con_gemini,
 )
+from utils.gemini_vision import (
+    extraer_dte_con_vision,
+    vision_disponible,
+)
+from utils.qa_utils import (
+    mostrar_banner_qa,
+    mostrar_indicador_vision,
+    validar_montos_sujetos,
+)
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -256,10 +265,36 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         if base > 0 and ret == 0:
             ret = round(base * 0.10, 2)
 
-        # ── Verificación con Gemini ───────────────────────────────────────────
+        # ── Extracción multimodal con Gemini Vision ───────────────────────────
         gemini_correcciones: list[str] = []
-        if gemini_disponible():
-            # id_sujeto puede ser NIT (14 dígitos) o DUI (9 dígitos)
+        _vision_campos: dict  = {}
+        _vision_alertas: list = []
+        _vision_audit: dict   = {}
+
+        _nom_cliente = cliente_activo.get('nombre', '')
+
+        if vision_disponible():
+            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+                file_bytes,
+                "sujetos_excluidos",
+                {"nit": nit_cliente, "nombre": _nom_cliente},
+            )
+            if _vision_campos.get("fecha"):
+                fecha = _vision_campos["fecha"]
+            if _vision_campos.get("nom_sujeto"):
+                nom_sujeto = _vision_campos["nom_sujeto"]
+            if _vision_campos.get("id_sujeto"):
+                id_sujeto = _vision_campos["id_sujeto"]
+            if _vision_campos.get("base") and base == 0.0:
+                base = _vision_campos["base"]
+            if _vision_campos.get("ret") and ret == 0.0:
+                ret = _vision_campos["ret"]
+            gemini_correcciones = [f"Vision: {a}" for a in _vision_alertas] if _vision_alertas else (
+                [f"Vision extrajo {len(_vision_campos)} campo(s)"] if _vision_campos else []
+            )
+
+        elif gemini_disponible():
+            # Fallback: verificación textual cuando Vision no está disponible
             _nit_suj = id_sujeto if len(id_sujeto) == 14 else ""
             _dui_suj = id_sujeto if len(id_sujeto) == 9  else ""
             _campos_act = {
@@ -272,13 +307,12 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
                 texto_lineal,
                 "sujetos_excluidos",
                 _campos_act,
-                {"nit": nit_cliente, "nombre": cliente_activo.get('nombre', '')},
+                {"nit": nit_cliente, "nombre": _nom_cliente},
             )
             if _corr_dict.get("fecha"):
                 fecha = _corr_dict["fecha"]
             if _corr_dict.get("nom_sujeto"):
                 nom_sujeto = _corr_dict["nom_sujeto"]
-            # Actualizar id_sujeto con el valor corregido (NIT tiene precedencia)
             if _corr_dict.get("nit_sujeto"):
                 id_sujeto = _corr_dict["nit_sujeto"]
             elif _corr_dict.get("dui_sujeto"):
@@ -295,6 +329,9 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             "base"                : base,
             "ret"                 : ret,
             "gemini_correcciones" : gemini_correcciones,
+            "_vision_campos"      : _vision_campos,
+            "_vision_alertas"     : _vision_alertas,
+            "_vision_audit"       : _vision_audit,
         }
 
     except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
@@ -569,6 +606,11 @@ with st.sidebar:
                     errores.append(f"⚠️ `{f.name}` — {res['error_tipo']}")
                 else:
                     res["archivo"] = f.name
+                    # QA gate: flag documentos que requieren revisión
+                    _qa_alertas = validar_montos_sujetos(res)
+                    _v_audit    = res.get("_vision_audit", {})
+                    _confianza  = _v_audit.get("confianza", 100) if _v_audit else 100
+                    res["_revision"] = "⚠️" if (_qa_alertas or _confianza < 65) else "✅"
                     extracted.append(res)
 
                 st.session_state.archivos_suj.append(f.name)
@@ -609,11 +651,12 @@ if not st.session_state.db_sujetos.empty:
 
     # Mostrar Sello en vez de Código de Generación
     COLS_DISPLAY = {
+        "_revision"  : "QA",
         "fecha"      : "Fecha",
         "id_sujeto"  : "DUI/NIT",
         "nom_sujeto" : "Nombre",
         "tipo"       : "Tipo",
-        "sello"      : "Sello de Recepción",   # ← SELLO
+        "sello"      : "Sello de Recepción",
         "num_control": "Núm. Control",
         "base"       : "Base ($)",
         "ret"        : "Ret. Renta ($)",
