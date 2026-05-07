@@ -11,6 +11,19 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
+from utils.pdf_utils import (
+    safe_str as _safe_str,
+    safe_extract_text as _safe_extract_text,
+    normalizar_unicode,
+    limpiar_monto as _limpiar_monto,
+    extraer_y_formatear_fecha as _extraer_fecha,
+    extraer_texto_pdf,
+)
+# Alias para compatibilidad con código existente
+limpiar_monto             = _limpiar_monto
+extraer_y_formatear_fecha = _extraer_fecha
+
+
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -90,72 +103,15 @@ CORTE_NOMBRE = re.compile(
 # ─────────────────────────────────────────────
 # 5. UTILIDADES BÁSICAS
 # ─────────────────────────────────────────────
-def safe_str(val) -> str:
-    return "" if val is None else str(val)
-
-
-def safe_extract_text(page, layout: bool = False) -> str:
-    try:
-        return safe_str(page.extract_text(layout=layout))
-    except Exception:
-        try:
-            return safe_str(page.extract_text())
-        except Exception:
-            return ""
-
+# Delegadas a utils.pdf_utils
+safe_str                  = _safe_str
+safe_extract_text         = _safe_extract_text
 
 def es_linea_direccion(texto: str) -> bool:
     L = safe_str(texto).upper().strip()
     return any(L.startswith(p) or (f" {p}" in L[:60]) for p in PREFIJOS_DIRECCION)
 
 
-def limpiar_monto(monto_str) -> float:
-    """
-    CORREGIDO: lógica robusta para separadores de miles/decimales.
-    Soporta: 1,234.56 | 1.234,56 | 1234.56 | 1234,56 | 1234
-    """
-    try:
-        s = re.sub(r'[^\d.,]', '', safe_str(monto_str).strip())
-        if not s:
-            return 0.0
-
-        n_comas  = s.count(',')
-        n_puntos = s.count('.')
-
-        # Sin separadores → entero puro
-        if n_comas == 0 and n_puntos == 0:
-            return float(s)
-
-        # Solo una coma
-        if n_comas == 1 and n_puntos == 0:
-            partes = s.split(',')
-            # Si la parte decimal tiene ≤2 dígitos → separador decimal europeo
-            if len(partes[1]) <= 2:
-                return float(s.replace(',', '.'))
-            # Si tiene 3 dígitos → separador de miles: 1,234
-            return float(s.replace(',', ''))
-
-        # Solo un punto
-        if n_puntos == 1 and n_comas == 0:
-            partes = s.split('.')
-            # Si la parte decimal tiene 3 dígitos → separador de miles europeo: 1.234
-            if len(partes[1]) == 3:
-                return float(s.replace('.', ''))
-            # Decimal americano estándar: 1234.56
-            return float(s)
-
-        # Múltiples separadores: el último indica el decimal
-        uc = s.rfind(',')
-        up = s.rfind('.')
-        if uc > up:
-            # Europeo: 1.234.567,89
-            s = s.replace('.', '').replace(',', '.')
-        else:
-            # Americano: 1,234,567.89
-            s = s.replace(',', '')
-        return float(s)
-    except Exception:
-        return 0.0
 
 
 # ─────────────────────────────────────────────
@@ -203,67 +159,6 @@ def actualizar_nombre_en_db(nit: str, nombre: str) -> None:
 # ─────────────────────────────────────────────
 # 7. EXTRACCIÓN DE FECHA
 # ─────────────────────────────────────────────
-def extraer_y_formatear_fecha(texto: str) -> str:
-    """
-    Extrae la fecha de EMISIÓN del DTE. Inmune a fechas de vencimiento.
-    Prioridad: etiqueta explícita → ISO → DMY genérico.
-    """
-    try:
-        texto       = safe_str(texto)
-        texto_clean = re.sub(
-            r'[-\s]\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?', ' ', texto, flags=re.I
-        )
-        candidatas: list[tuple[int, str]] = []
-
-        # ── Paso 1: etiqueta explícita de emisión ────────────────────────────
-        for m in re.finditer(
-            r'(?:[Ff]echa\s+y\s+[Hh]ora\s+de\s+(?:[Gg]eneraci[oó]n|[Ee]misi[oó]n)|'
-            r'[Ff]echa\s+(?:de\s+)?[Ee]misi[oó]n|[Ff]echa\s+[Gg]eneraci[oó]n|'
-            r'(?<!\w)[Ff]echa(?!\s+[Vv]enc))'
-            r'\s*:?\s*'
-            r'(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]20[2-3]\d|20[2-3]\d[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})',
-            texto_clean, re.I,
-        ):
-            candidatas.append((m.start(), m.group(1)))
-
-        # ── Paso 2: ISO YYYY-MM-DD sin etiqueta ─────────────────────────────
-        for m in re.finditer(
-            r'\b(20[2-3]\d)[-\/](0[1-9]|1[0-2])[-\/]([0-2]\d|3[01])\b', texto_clean
-        ):
-            ctx = texto_clean[max(0, m.start() - 30):m.start()].upper()
-            if not any(w in ctx for w in ['VENCE', 'LOTE', 'V:', 'EXPIRA', 'CADUCIDAD']):
-                candidatas.append((m.start(), f"{m.group(3)}/{m.group(2)}/{m.group(1)}"))
-
-        # ── Paso 3: DD/MM/YYYY sin etiqueta ─────────────────────────────────
-        for m in re.finditer(
-            r'\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](20[2-3]\d)\b', texto_clean
-        ):
-            ctx = texto_clean[max(0, m.start() - 30):m.start()].upper()
-            if any(w in ctx for w in ['VENCE', 'LOTE', 'V:', 'EXPIRA', 'CADUCIDAD']):
-                continue
-            p1, p2, y = int(m.group(1)), int(m.group(2)), m.group(3)
-            if p1 > 31 or p2 > 12:
-                continue
-            candidatas.append((m.start(), f"{p1:02d}/{p2:02d}/{y}"))
-
-        candidatas.sort(key=lambda x: x[0])
-
-        for _, fecha_str in candidatas:
-            # ISO: YYYY/MM/DD o YYYY-MM-DD
-            m_iso = re.match(r'(20[2-3]\d)[-\/](\d{1,2})[-\/](\d{1,2})', fecha_str)
-            if m_iso:
-                return f"{int(m_iso.group(3)):02d}/{int(m_iso.group(2)):02d}/{m_iso.group(1)}"
-            # DMY
-            m_dmy = re.match(r'(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](20[2-3]\d)', fecha_str)
-            if m_dmy:
-                return f"{int(m_dmy.group(1)):02d}/{int(m_dmy.group(2)):02d}/{m_dmy.group(3)}"
-            # Ya formateada
-            if re.match(r'\d{2}\/\d{2}\/20\d{2}', fecha_str):
-                return fecha_str
-
-    except Exception:
-        pass
-    return ""
 
 
 # ─────────────────────────────────────────────
@@ -420,7 +315,7 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
 # ══════════════════════════════════════════════════════════════
 # 9. EXTRACTOR PRINCIPAL DE COMPRAS
 # ══════════════════════════════════════════════════════════════
-def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
+def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedores_db: dict = None) -> dict:
     """
     Extrae datos de un DTE de compra.
     Correcciones aplicadas:
@@ -434,17 +329,15 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         return {"error_fatal": "Archivo vacio o demasiado pequeño."}
 
     try:
-        texto_lineal = ""
-        texto_visual = ""
-        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
-            if not pdf.pages:
-                return {"error_fatal": "PDF sin paginas."}
-            for page in pdf.pages:
-                texto_lineal += safe_extract_text(page, layout=False) + "\n"
-                texto_visual  += safe_extract_text(page, layout=True)  + "\n"
+        try:
+            texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
+        except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
+            return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+        except Exception as e:
+            if "password" in str(e).lower() or "encrypt" in str(e).lower():
+                return {"error_fatal": "PDF protegido con contraseña. Desbloquéalo antes de subir."}
+            raise
 
-        texto_lineal   = safe_str(texto_lineal)
-        texto_visual   = safe_str(texto_visual)
         texto_completo = texto_lineal + "\n" + texto_visual
 
         if len(texto_completo.strip()) < 50:
@@ -553,7 +446,8 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
         dui_prov     = ""
         nom_prov     = ""
         es_nuevo     = True
-        proveedores_db = cargar_proveedores_json()
+        if proveedores_db is None:
+            proveedores_db = cargar_proveedores_json()
 
         # Separar sección EMISOR del texto
         parte_emisor = texto_lineal
@@ -875,6 +769,28 @@ def ventana_descarga_compras(df_f07: pd.DataFrame, nombre_archivo: str) -> None:
         "Verifica los totales. El archivo está listo para cargar en el portal "
         "de Hacienda como **Anexo 3**."
     )
+
+    # Validación matemática: Gravadas + IVA + Exentas ≠ Total
+    if "J. Compras Gravadas" in df_f07.columns and "O. Total Compras" in df_f07.columns:
+        alertas_c = []
+        for _, row in df_f07.iterrows():
+            esperado = round(
+                float(row.get("J. Compras Gravadas", 0))
+                + float(row.get("N. Crédito Fiscal (IVA)", 0))
+                + float(row.get("G. Compras Exentas/NS", 0)), 2
+            )
+            real = round(float(row.get("O. Total Compras", 0)), 2)
+            if real > 0 and abs(esperado - real) > 0.50:
+                alertas_c.append({"doc": row.get("D. Num Documento (UUID)", "—"), "diff": abs(esperado - real)})
+        if alertas_c:
+            with st.expander(f"⚠️ {len(alertas_c)} fila(s) con posible inconsistencia matemática"):
+                for a in alertas_c[:8]:
+                    st.markdown(
+                        f'<div class="math-warn">📄 <code>{safe_str(a["doc"])[:20]}…</code> '
+                        f'— diferencia: <strong>${a["diff"]:,.2f}</strong></div>',
+                        unsafe_allow_html=True
+                    )
+
     resumen_cols = {
         "G. Compras Exentas/NS"  : "Exentas/NS",
         "J. Compras Gravadas"    : "Gravadas",
@@ -1001,6 +917,7 @@ with st.sidebar:
         if not nuevos:
             st.info("ℹ️ Todos los archivos ya fueron procesados.")
         else:
+            _proveedores_db_cache = cargar_proveedores_json()  # carga única
             extracted, duplicados, iva_calc_files    = [], [], []
             invalidos, corruptos, nuevos_proveedores = [], [], {}
 
@@ -1031,7 +948,7 @@ with st.sidebar:
                     bar.progress((idx + 1) / total_arch)
                     continue
 
-                res = extraer_compra_nativo_pro(file_bytes, cliente)
+                res = extraer_compra_nativo_pro(file_bytes, cliente, proveedores_db=_proveedores_db_cache)
 
                 cod_gen  = safe_str(res.get('gen', ''))
                 num_ctrl = safe_str(res.get('num_control', ''))
@@ -1721,4 +1638,3 @@ else:
         </p>
     </div>
     """, unsafe_allow_html=True)
-
