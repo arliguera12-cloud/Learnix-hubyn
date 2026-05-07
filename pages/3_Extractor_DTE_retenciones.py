@@ -9,6 +9,13 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
+from utils.pdf_utils import (
+    safe_str,
+    normalizar_unicode,
+    limpiar_monto,
+    extraer_y_formatear_fecha,
+    extraer_texto_pdf,
+)
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -51,38 +58,10 @@ def cargar_proveedores_json() -> dict:
         return {}
 
 
-def limpiar_monto(monto_str: str) -> float:
-    s = re.sub(r'[^\d.,]', '', str(monto_str).strip())
-    if not s:
-        return 0.0
-    ultimo_coma  = s.rfind(',')
-    ultimo_punto = s.rfind('.')
-    if ultimo_coma > ultimo_punto:
-        s = s.replace('.', '').replace(',', '.')
-    elif ultimo_punto > ultimo_coma:
-        s = s.replace(',', '')
-    else:
-        s = s.replace(',', '').replace('.', '')
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
 
 
-def extraer_y_formatear_fecha(texto: str) -> str:
-    m = re.search(
-        r"\b(20[2-3]\d)\s*[-\/]\s*(0[1-9]|1[0-2])\s*[-\/]\s*([0-2]\d|3[01])\b",
-        texto
-    )
-    if m:
-        return f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/{m.group(1)}"
-    m = re.search(r"\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b", texto)
-    if m:
-        p1, p2, y = int(m.group(1)), int(m.group(2)), m.group(3)
-        if p1 <= 12 and p2 > 12:  return f"{p2:02d}/{p1:02d}/{y}"
-        if p2 <= 12 and p1 > 12:  return f"{p1:02d}/{p2:02d}/{y}"
-        if p2 <= 12 and p1 <= 31: return f"{p1:02d}/{p2:02d}/{y}"
-    return ""
+
+
 
 
 def extraer_sello(texto_original: str) -> str:
@@ -107,7 +86,7 @@ def extraer_sello(texto_original: str) -> str:
 
     for linea in texto_original.splitlines():
         linea_s = linea.strip()
-        mc = re.match(r'^(202[0-9][A-Z0-9]{26,})$', linea_s, re.I)
+        mc = re.match(r'^(20[2-3]\d[A-Z0-9]{26,})$', linea_s, re.I)
         if mc:
             candidato = mc.group(1).upper()
             if '-' not in candidato:
@@ -120,12 +99,8 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
     if not file_bytes or len(file_bytes) < 512:
         return {"error": "Archivo vacío o corrupto."}
     try:
-        texto_completo = ""
-        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
-            if not pdf.pages:
-                return {"error": "PDF sin páginas."}
-            for page in pdf.pages:
-                texto_completo += (page.extract_text() or "") + "\n"
+        texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
+        texto_completo = texto_lineal + "\n" + texto_visual
 
         if len(texto_completo.strip()) < 50:
             return {"error": "PDF de imagen — sin texto extraíble."}
@@ -133,7 +108,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
         t_no_sp = re.sub(r'\s+', '', t_clean).upper()
 
-        m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]+-[A-Z0-9]+)", t_no_sp)
+        m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]{1,20}-\d{9,18})", t_no_sp)
         tipo   = "07"
         if m_ctrl:
             ctrl   = m_ctrl.group(1).replace("O", "0")
@@ -163,9 +138,12 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             r"\b\d{4}\s*-?\s*\d{6}\s*-?\s*\d{3}\s*-?\s*\d\b"
             r"|\b\d{14}\b"
         )
-        ids_raw    = re.findall(patron_ids, texto_completo)
+        # Buscar en texto_completo (con espacios, captura NITs con separadores)
+        ids_raw  = re.findall(patron_ids, texto_completo)
+        # Fallback: buscar 14 dígitos consecutivos en texto sin espacios
+        ids_raw += re.findall(r'\d{14}', t_no_sp)
         ids_limp   = list(dict.fromkeys(re.sub(r'[^0-9]', '', n) for n in ids_raw))
-        candidatos = [n for n in ids_limp if n != nit_cliente]
+        candidatos = [n for n in ids_limp if n != nit_cliente and len(n) == 14]
 
         proveedores_db = cargar_proveedores_json()
         for n in candidatos:
