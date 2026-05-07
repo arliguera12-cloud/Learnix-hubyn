@@ -100,6 +100,19 @@ def safe_extract_text(page, layout: bool = False) -> str:
         except Exception:
             return ""
 
+def _normalizar_unicode(texto: str) -> str:
+    """Normaliza caracteres unicode problemáticos para mejorar el matching de regex."""
+    reemplazos = {
+        '–': '-', '—': '-', '‒': '-',  # dashes → hyphen
+        ' ': ' ', ' ': ' ', ' ': ' ',  # non-breaking spaces → space
+        '‘': "'", '’': "'",                   # smart quotes → apostrophe
+        '“': '"', '”': '"',                   # smart double quotes
+        'ﬁ': 'fi', 'ﬂ': 'fl',                # ligatures
+    }
+    for orig, repl in reemplazos.items():
+        texto = texto.replace(orig, repl)
+    return texto
+
 def es_linea_direccion(texto: str) -> bool:
     L = safe_str(texto).upper().strip()
     return any(L.startswith(p) or (f" {p}" in L[:50]) for p in PREFIJOS_DIRECCION)
@@ -145,57 +158,94 @@ def actualizar_nombre_en_db_ventas(nit: str, nombre: str) -> None:
         st.session_state.db_ventas.loc[mask, "nom_cli"] = safe_str(nombre).strip().upper()
 
 def limpiar_monto(monto_str) -> float:
+    """Soporta: 1,234.56 | 1.234,56 | 1234.56 | 1234,56 | 1234"""
     try:
         s = re.sub(r'[^\d.,]', '', safe_str(monto_str).strip())
         if not s:
             return 0.0
-        uc, up = s.rfind(','), s.rfind('.')
+
+        n_comas  = s.count(',')
+        n_puntos = s.count('.')
+
+        if n_comas == 0 and n_puntos == 0:
+            return float(s)
+
+        # Solo una coma
+        if n_comas == 1 and n_puntos == 0:
+            partes = s.split(',')
+            if len(partes[1]) <= 2:
+                return float(s.replace(',', '.'))
+            return float(s.replace(',', ''))
+
+        # Solo un punto
+        if n_puntos == 1 and n_comas == 0:
+            partes = s.split('.')
+            if len(partes[1]) == 3:
+                return float(s.replace('.', ''))
+            return float(s)
+
+        # Múltiples separadores: el último indica el decimal
+        uc = s.rfind(',')
+        up = s.rfind('.')
         if uc > up:
             s = s.replace('.', '').replace(',', '.')
-        elif up > uc:
-            s = s.replace(',', '')
         else:
-            s = s.replace(',', '').replace('.', '')
+            s = s.replace(',', '')
         return float(s)
     except Exception:
         return 0.0
 
 def extraer_y_formatear_fecha(texto: str) -> str:
-    """Extrae fecha del texto y retorna en formato DD/MM/YYYY."""
+    """Extrae la fecha de EMISIÓN del DTE. Inmune a fechas de vencimiento."""
     try:
-        texto = safe_str(texto)
-        # Formato ISO: 2026-04-01
-        m = re.search(
-            r"\b(20[2-3]\d)\s*[-\/]\s*(0[1-9]|1[0-2])\s*[-\/]\s*([0-2]\d|3[01])\b",
-            texto
+        texto       = safe_str(texto)
+        texto_clean = re.sub(
+            r'[-\s]\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?', ' ', texto, flags=re.I
         )
-        if m:
-            return f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/{m.group(1)}"
-        # Formato con etiqueta
-        m = re.search(
-            r"(?:FECHA\s*(?:DE\s*)?(?:EMISI[OÓ]N|GENERACI[OÓ]N)?)"
-            r"[^\d]{0,20}(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})",
-            texto, re.I
-        )
-        if m:
-            d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-            if d <= 12 and mo > 12:
-                d, mo = mo, d
-            if mo <= 12:
-                return f"{d:02d}/{mo:02d}/{y}"
-        # Formato DD/MM/YYYY genérico
-        m = re.search(
-            r"\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b",
-            texto
-        )
-        if m:
+        candidatas: list = []
+
+        # Paso 1: etiqueta explícita de emisión (mayor prioridad)
+        for m in re.finditer(
+            r'(?:[Ff]echa\s+y\s+[Hh]ora\s+de\s+(?:[Gg]eneraci[oó]n|[Ee]misi[oó]n)|'
+            r'[Ff]echa\s+(?:de\s+)?[Ee]misi[oó]n|[Ff]echa\s+[Gg]eneraci[oó]n|'
+            r'(?<!\w)[Ff]echa(?!\s+[Vv]enc))'
+            r'\s*:?\s*'
+            r'(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]20[2-3]\d|20[2-3]\d[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})',
+            texto_clean, re.I,
+        ):
+            candidatas.append((m.start(), m.group(1)))
+
+        # Paso 2: ISO YYYY-MM-DD sin etiqueta
+        for m in re.finditer(
+            r'\b(20[2-3]\d)[-\/](0[1-9]|1[0-2])[-\/]([0-2]\d|3[01])\b', texto_clean
+        ):
+            ctx = texto_clean[max(0, m.start() - 30):m.start()].upper()
+            if not any(w in ctx for w in ['VENCE', 'LOTE', 'V:', 'EXPIRA', 'CADUCIDAD']):
+                candidatas.append((m.start(), f"{m.group(3)}/{m.group(2)}/{m.group(1)}"))
+
+        # Paso 3: DD/MM/YYYY sin etiqueta
+        for m in re.finditer(
+            r'\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](20[2-3]\d)\b', texto_clean
+        ):
+            ctx = texto_clean[max(0, m.start() - 30):m.start()].upper()
+            if any(w in ctx for w in ['VENCE', 'LOTE', 'V:', 'EXPIRA', 'CADUCIDAD']):
+                continue
             p1, p2, y = int(m.group(1)), int(m.group(2)), m.group(3)
-            if p1 <= 12 and p2 > 12:
-                return f"{p2:02d}/{p1:02d}/{y}"
-            elif p2 <= 12 and p1 > 12:
-                return f"{p1:02d}/{p2:02d}/{y}"
-            elif p2 <= 12 and p1 <= 31:
-                return f"{p1:02d}/{p2:02d}/{y}"
+            if p1 > 31 or p2 > 12:
+                continue
+            candidatas.append((m.start(), f"{p1:02d}/{p2:02d}/{y}"))
+
+        candidatas.sort(key=lambda x: x[0])
+
+        for _, fecha_str in candidatas:
+            m_iso = re.match(r'(20[2-3]\d)[-\/](\d{1,2})[-\/](\d{1,2})', fecha_str)
+            if m_iso:
+                return f"{int(m_iso.group(3)):02d}/{int(m_iso.group(2)):02d}/{m_iso.group(1)}"
+            m_dmy = re.match(r'(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](20[2-3]\d)', fecha_str)
+            if m_dmy:
+                return f"{int(m_dmy.group(1)):02d}/{int(m_dmy.group(2)):02d}/{m_dmy.group(3)}"
+            if re.match(r'\d{2}\/\d{2}\/20\d{2}', fecha_str):
+                return fecha_str
     except Exception:
         pass
     return ""
@@ -343,8 +393,8 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 texto_lineal += safe_extract_text(page, layout=False) + "\n"
                 texto_visual  += safe_extract_text(page, layout=True)  + "\n"
 
-        texto_lineal   = safe_str(texto_lineal)
-        texto_visual   = safe_str(texto_visual)
+        texto_lineal   = _normalizar_unicode(safe_str(texto_lineal))
+        texto_visual   = _normalizar_unicode(safe_str(texto_visual))
         texto_completo = texto_lineal + "\n" + texto_visual
 
         if len(texto_completo.strip()) < 50:

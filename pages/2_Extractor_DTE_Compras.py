@@ -104,6 +104,20 @@ def safe_extract_text(page, layout: bool = False) -> str:
             return ""
 
 
+def _normalizar_unicode(texto: str) -> str:
+    """Normaliza caracteres unicode problemáticos para mejorar el matching de regex."""
+    reemplazos = {
+        '–': '-', '—': '-', '‒': '-',
+        ' ': ' ', ' ': ' ', ' ': ' ',
+        ''': "'", ''': "'",
+        '"': '"', '"': '"',
+        'ﬁ': 'fi', 'ﬂ': 'fl',
+    }
+    for orig, repl in reemplazos.items():
+        texto = texto.replace(orig, repl)
+    return texto
+
+
 def es_linea_direccion(texto: str) -> bool:
     L = safe_str(texto).upper().strip()
     return any(L.startswith(p) or (f" {p}" in L[:60]) for p in PREFIJOS_DIRECCION)
@@ -443,8 +457,8 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict) -> dict:
                 texto_lineal += safe_extract_text(page, layout=False) + "\n"
                 texto_visual  += safe_extract_text(page, layout=True)  + "\n"
 
-        texto_lineal   = safe_str(texto_lineal)
-        texto_visual   = safe_str(texto_visual)
+        texto_lineal   = _normalizar_unicode(safe_str(texto_lineal))
+        texto_visual   = _normalizar_unicode(safe_str(texto_visual))
         texto_completo = texto_lineal + "\n" + texto_visual
 
         if len(texto_completo.strip()) < 50:
