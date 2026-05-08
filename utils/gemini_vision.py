@@ -204,11 +204,25 @@ PASO 1 — IDENTIFICAR LAYOUT VISUAL
   • ENCABEZADO  : bloque EMISOR arriba, bloque RECEPTOR separado por línea
   Registra el formato en razonamiento.layout_detectado.
 
-PASO 2 — LOCALIZAR BLOQUES EMISOR / RECEPTOR
-  Busca marcadores: "DATOS DEL EMISOR", "EMISOR:", "DATOS DEL RECEPTOR",
-  "RECEPTOR:", "ADQUIRIENTE:", "CLIENTE:", "PROVEEDOR:", "SUJETO RETENIDO:".
-  En formato 2-columnas: EMISOR está arriba-izquierda, RECEPTOR arriba-derecha.
-  Registra en razonamiento.bloque_emisor y razonamiento.bloque_receptor.
+PASO 2 — LOCALIZAR VISUALMENTE LOS RECUADROS DE EMISOR / RECEPTOR
+  Identifica visualmente los recuadros físicos (delimitados por bordes, líneas o
+  agrupación espacial) que corresponden al EMISOR y al RECEPTOR en el documento.
+  • Formato 2-COLUMNAS : recuadro EMISOR en la parte superior-izquierda;
+                          recuadro RECEPTOR en la parte superior-derecha.
+  • Formato ENCABEZADO : bloque EMISOR arriba; RECEPTOR debajo, separado por
+                          línea horizontal o espacio en blanco.
+  • Formato TICKET     : busca los marcadores textuales "EMISOR:", "RECEPTOR:",
+                          "DATOS DEL EMISOR", "DATOS DEL RECEPTOR",
+                          "ADQUIRIENTE:", "CLIENTE:", "PROVEEDOR:".
+
+  ⚠️ REGLA ESPACIAL CRÍTICA: extrae el NOMBRE del recuadro RECEPTOR basándote
+  en su UBICACIÓN FÍSICA, NO en el texto de la etiqueta. Las etiquetas como
+  "RAZÓN SOCIAL", "NIT:", "NRC:" son parte del DISEÑO FIJO del DTE — aparecen
+  en todos los documentos y jamás son el valor a extraer. El valor siempre
+  está DESPUÉS del ":" de cada etiqueta.
+
+  Registra en razonamiento.bloque_emisor y razonamiento.bloque_receptor la
+  ubicación detectada y los primeros 80 caracteres del bloque identificado.
 
 PASO 3 — EXTRAER VALORES (NUNCA ETIQUETAS)
   ⚠️ REGLA ABSOLUTA: el VALOR es lo que aparece DESPUÉS del ":" en cada campo.

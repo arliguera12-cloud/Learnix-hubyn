@@ -297,11 +297,35 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
     if not file_bytes or len(file_bytes) < 512:
         return {"error_fatal": "Archivo vacio o demasiado pequeño."}
 
+    # ── Vision-First: extraer con IA antes de pdfplumber ─────────────────────
+    _nit_emisor_ctx = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
+    _nom_emisor_ctx = safe_str(cliente_activo.get('nombre', '')).strip().upper()
+
+    gemini_correcciones: list[str] = []
+    _vision_campos: dict  = {}
+    _vision_alertas: list = []
+    _vision_audit: dict   = {}
+
+    if vision_disponible():
+        _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+            file_bytes,
+            "ventas",
+            {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
+        )
+        gemini_correcciones = [
+            f"Vision: {a}" for a in _vision_alertas
+        ] if _vision_alertas else (
+            [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+            if _vision_campos else []
+        )
+
     try:
         try:
             texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
         except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
-            return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+            if not _vision_campos.get("num_control"):
+                return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+            texto_lineal = texto_visual = ""
         except Exception as e:
             if "password" in str(e).lower() or "encrypt" in str(e).lower():
                 return {"error_fatal": "PDF protegido con contraseña. Desbloquéalo antes de subir."}
@@ -309,7 +333,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
 
         texto_completo = texto_lineal + "\n" + texto_visual
 
-        if len(texto_completo.strip()) < 50:
+        if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
             return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
 
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
@@ -504,41 +528,18 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 )
             nom_cli = nombre_encontrado if nombre_encontrado else "SIN NOMBRE"
 
-        # ── Extracción multimodal con Gemini Vision (primera pasada) ─────────
-        gemini_correcciones: list[str] = []
-        _vision_campos: dict  = {}
-        _vision_alertas: list = []
-        _vision_audit: dict   = {}
+        # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
+        if _vision_campos.get("fecha"):
+            fecha   = _vision_campos["fecha"]
+        if _vision_campos.get("nom_cli"):
+            nom_cli = _vision_campos["nom_cli"]
+        if _vision_campos.get("nit_cli"):
+            nit_cli = _vision_campos["nit_cli"]
+        if _vision_campos.get("dui_cli"):
+            dui_cli = _vision_campos["dui_cli"]
 
-        _nit_emisor_ctx = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
-        _nom_emisor_ctx = safe_str(cliente_activo.get('nombre', '')).strip().upper()
-
-        if vision_disponible():
-            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
-                file_bytes,
-                "ventas",
-                {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
-            )
-            # Aplica resultados de Vision con prioridad sobre regex
-            if _vision_campos.get("fecha"):
-                fecha   = _vision_campos["fecha"]
-            if _vision_campos.get("nom_cli"):
-                nom_cli = _vision_campos["nom_cli"]
-            if _vision_campos.get("nit_cli"):
-                nit_cli = _vision_campos["nit_cli"]
-            if _vision_campos.get("dui_cli"):
-                dui_cli = _vision_campos["dui_cli"]
-            # Montos de Vision (solo si los campos regex quedaron en 0)
-            # Los montos del regex siguen siendo la fuente primaria por precisión
-            gemini_correcciones = [
-                f"Vision: {a}" for a in _vision_alertas
-            ] if _vision_alertas else (
-                [f"Vision extrajo {len(_vision_campos)} campo(s)"]
-                if _vision_campos else []
-            )
-
-        elif gemini_disponible():
-            # Fallback: verificación textual con Gemini cuando Vision no disponible
+        if not _vision_campos and gemini_disponible():
+            # Fallback textual solo cuando Vision no está disponible
             _campos_act = {
                 "fecha"  : fecha,
                 "nom_cli": nom_cli,
@@ -688,6 +689,19 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     encontrado = True
                 elif total == 0.0 and gravadas > 0 and debito > 0:
                     total = round(gravadas + debito + exentas + no_sujetas, 2)
+
+        # ── Completar montos desde Vision cuando regex obtuvo 0 ──────────────
+        if _vision_campos:
+            if _vision_campos.get("gravadas") and gravadas == 0.0:
+                gravadas = round(float(_vision_campos["gravadas"]), 2)
+            if _vision_campos.get("iva") and debito == 0.0:
+                debito = round(float(_vision_campos["iva"]), 2)
+            if _vision_campos.get("total") and total == 0.0:
+                total = round(float(_vision_campos["total"]), 2)
+            if _vision_campos.get("exentas") and exentas == 0.0:
+                exentas = round(float(_vision_campos["exentas"]), 2)
+            if _vision_campos.get("no_sujetas") and no_sujetas == 0.0:
+                no_sujetas = round(float(_vision_campos["no_sujetas"]), 2)
 
         return {
             "fecha"         : fecha,

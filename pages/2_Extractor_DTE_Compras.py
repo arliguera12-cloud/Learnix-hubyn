@@ -348,11 +348,35 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
     if not file_bytes or len(file_bytes) < 512:
         return {"error_fatal": "Archivo vacio o demasiado pequeño."}
 
+    # ── Vision-First: extraer con IA antes de pdfplumber ─────────────────────
+    _nit_rec_ctx = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
+    _nom_rec_ctx = safe_str(cliente_activo.get('nombre', '')).strip().upper()
+
+    gemini_correcciones: list[str] = []
+    _vision_campos: dict  = {}
+    _vision_alertas: list = []
+    _vision_audit: dict   = {}
+
+    if vision_disponible():
+        _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+            file_bytes,
+            "compras",
+            {"nit": _nit_rec_ctx, "nombre": _nom_rec_ctx},
+        )
+        gemini_correcciones = [
+            f"Vision: {a}" for a in _vision_alertas
+        ] if _vision_alertas else (
+            [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+            if _vision_campos else []
+        )
+
     try:
         try:
             texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
         except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
-            return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+            if not _vision_campos.get("num_control"):
+                return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+            texto_lineal = texto_visual = ""
         except Exception as e:
             if "password" in str(e).lower() or "encrypt" in str(e).lower():
                 return {"error_fatal": "PDF protegido con contraseña. Desbloquéalo antes de subir."}
@@ -360,7 +384,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
 
         texto_completo = texto_lineal + "\n" + texto_visual
 
-        if len(texto_completo.strip()) < 50:
+        if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
             return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
 
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
@@ -542,30 +566,16 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             nit_prov = ""
             nom_prov = ""
 
-        # ── Extracción multimodal con Gemini Vision (primera pasada) ─────────
-        gemini_correcciones: list[str] = []
-        _vision_campos: dict  = {}
-        _vision_alertas: list = []
-        _vision_audit: dict   = {}
+        # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
+        if _vision_campos.get("fecha"):
+            fecha    = _vision_campos["fecha"]
+        if _vision_campos.get("nom_prov"):
+            nom_prov = _vision_campos["nom_prov"]
+        if _vision_campos.get("nit_prov"):
+            nit_prov = _vision_campos["nit_prov"]
 
-        if vision_disponible():
-            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
-                file_bytes,
-                "compras",
-                {"nit": nit_receptor, "nombre": nom_receptor},
-            )
-            if _vision_campos.get("fecha"):
-                fecha    = _vision_campos["fecha"]
-            if _vision_campos.get("nom_prov"):
-                nom_prov = _vision_campos["nom_prov"]
-            if _vision_campos.get("nit_prov"):
-                nit_prov = _vision_campos["nit_prov"]
-            gemini_correcciones = [f"Vision: {a}" for a in _vision_alertas] if _vision_alertas else (
-                [f"Vision extrajo {len(_vision_campos)} campo(s)"] if _vision_campos else []
-            )
-
-        elif gemini_disponible():
-            # Fallback: verificación textual cuando Vision no está disponible
+        if not _vision_campos and gemini_disponible():
+            # Fallback textual solo cuando Vision no está disponible
             _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "nom_prov": nom_prov}
             _necesita, _ = necesita_verificacion(_campos_act, nit_receptor)
             if _necesita:
@@ -750,6 +760,17 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
         gra = max(gra, 0.0)
         iva = max(iva, 0.0)
         tot = max(tot, 0.0)
+
+        # ── Completar montos desde Vision cuando regex obtuvo 0 ──────────────
+        if _vision_campos:
+            if _vision_campos.get("gravadas") and gra == 0.0:
+                gra = round(float(_vision_campos["gravadas"]), 2)
+            if _vision_campos.get("iva") and iva == 0.0:
+                iva = round(float(_vision_campos["iva"]), 2)
+            if _vision_campos.get("total") and tot == 0.0:
+                tot = round(float(_vision_campos["total"]), 2)
+            if _vision_campos.get("exentas") and exe == 0.0:
+                exe = round(float(_vision_campos["exentas"]), 2)
 
         return {
             "fecha"          : fecha,
