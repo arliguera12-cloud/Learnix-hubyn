@@ -37,6 +37,8 @@ from utils.qa_utils import (
     mostrar_banner_qa,
     mostrar_indicador_vision,
     validar_montos_ventas,
+    clasificar_alerta_compra,
+    estilar_alertas,
 )
 # Alias para compatibilidad con código existente
 limpiar_monto             = _limpiar_monto
@@ -838,7 +840,107 @@ def construir_df_f07_compras(df_in: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────
-# 11. EXPORTAR EXCEL HACIENDA
+# 11. ANEXO 8 — PERCEPCIONES DE IVA (Casilla 163)
+# ─────────────────────────────────────────────
+_TIPOS_VALIDOS_PERCEP = {"03", "05", "06", "12"}
+_CORTE_PERCEP = pd.Timestamp(2022, 1, 1)   # DUI rule: from Jan 2022 onward
+
+
+def _fecha_ts(fecha_str: str) -> pd.Timestamp:
+    """Parses DD/MM/YYYY → Timestamp; returns NaT on failure."""
+    try:
+        p = str(fecha_str).strip().split("/")
+        if len(p) == 3:
+            return pd.Timestamp(int(p[2]), int(p[1]), int(p[0]))
+    except Exception:
+        pass
+    return pd.NaT
+
+
+def construir_df_anexo8_percepciones(df_in: pd.DataFrame) -> pd.DataFrame:
+    """
+    Builds the Anexo 8 (Casilla 163 — IVA Percibido) CSV per DGII Transparencia Fiscal.
+
+    Columns A–I (no headers in final export):
+      A  NIT Agente (14 digits, no dashes) — EMPTY when DUI applies (col H)
+      B  Nombre o Razón Social
+      C  Tipo de Doc: only 03 | 05 | 06 | 12
+      D  Serie = Sello de Recepción
+      E  Número = Código de Generación sin guiones
+      F  Monto Gravado (point decimal, 2 decimals, NO thousands separator)
+      G  IVA Percibido (same format)
+      H  DUI (9 digits, no dashes) — only for natural persons from Jan 2022+; else EMPTY
+      I  Número de Anexo = '8'
+
+    Filters: perc > 0  AND  tipo in {03, 05, 06, 12}.
+    Rows with tipo outside that set are excluded; caller must validate before exporting.
+    """
+    import re as _re
+
+    def _limpio_id(val: str) -> str:
+        return _re.sub(r"[^0-9]", "", str(val or ""))
+
+    def _es_2022_plus(fecha_str: str) -> bool:
+        ts = _fecha_ts(fecha_str)
+        return ts is not pd.NaT and ts >= _CORTE_PERCEP
+
+    # Filter rows eligible for Anexo 8
+    mask = (
+        df_in.get("perc", pd.Series(dtype=float)).fillna(0) > 0
+    ) & (
+        df_in["tipo"].astype(str).isin(_TIPOS_VALIDOS_PERCEP)
+    )
+    df   = df_in[mask].copy().reset_index(drop=True)
+
+    if df.empty:
+        return pd.DataFrame(columns=["A","B","C","D","E","F","G","H","I"])
+
+    nit_raw = df["nit_prov"].astype(str).apply(_limpio_id)
+    dui_raw = df.get("dui_prov", pd.Series([""] * len(df))).astype(str).apply(_limpio_id)
+    fechas  = df["fecha"].astype(str)
+
+    col_a, col_h = [], []
+    for nit, dui, fecha in zip(nit_raw, dui_raw, fechas):
+        tiene_dui      = len(dui) == 9
+        periodo_valido = _es_2022_plus(fecha)
+        # DGII rule: If Jan 2022+ and natural person (DUI available) → col A empty, col H = DUI
+        if periodo_valido and tiene_dui:
+            col_a.append("")
+            col_h.append(dui)
+        else:
+            col_a.append(nit if len(nit) == 14 else nit)
+            col_h.append("")
+
+    df_out = pd.DataFrame()
+    df_out["A"] = col_a
+    df_out["B"] = df["nom_prov"].astype(str)
+    df_out["C"] = df["tipo"].astype(str)
+    df_out["D"] = df.get("sello", pd.Series([""] * len(df))).astype(str)
+    df_out["E"] = df.get("gen_sin_guiones", pd.Series([""] * len(df))).astype(str)
+    # Numeric columns: plain float, NO thousands separator
+    df_out["F"] = df["gra"].apply(lambda v: round(float(v or 0), 2))
+    df_out["G"] = df.get("perc", pd.Series([0.0] * len(df))).apply(lambda v: round(float(v or 0), 2))
+    df_out["H"] = col_h
+    df_out["I"] = "8"
+    return df_out
+
+
+def to_csv_anexo8(df_a8: pd.DataFrame) -> bytes:
+    """
+    Exports the Anexo 8 DataFrame to CSV:
+    - No header row
+    - Numeric columns (F, G) formatted as NNNN.NN (no thousands, point decimal)
+    - UTF-8 encoding
+    """
+    df_exp = df_a8.copy()
+    for col in ("F", "G"):
+        if col in df_exp.columns:
+            df_exp[col] = df_exp[col].apply(lambda v: f"{v:.2f}")
+    return df_exp.to_csv(index=False, header=False).encode("utf-8")
+
+
+# ─────────────────────────────────────────────
+# 12. EXPORTAR EXCEL HACIENDA
 # ─────────────────────────────────────────────
 def to_excel_hacienda_compras(df: pd.DataFrame) -> bytes:
     output = BytesIO()
@@ -1634,20 +1736,30 @@ if not st.session_state.db_compras.empty:
     )
     st.markdown("")
 
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Libro F-07 Compras (Anexo 3)",
         "🔍 Auditoría Completa",
         "📈 Resumen por Proveedor",
+        "📋 Anexo 8 — Percepciones",
     ])
 
     # ── Tab 1: F-07 ───────────────────────────────────────────────────────────
     with tab1:
         if not df_filtrado.empty:
-            df_f07    = construir_df_f07_compras(df_filtrado)
+            df_f07 = construir_df_f07_compras(df_filtrado)
+            # Visual alerts: computed from source df (shares same index order)
+            df_f07.insert(0, "_alerta", df_filtrado.apply(clasificar_alerta_compra, axis=1).values)
             COLS_NUM  = [c for c in df_f07.columns if df_f07[c].dtype == float]
 
+            n_alertas = (df_f07["_alerta"].str.startswith("⚠️")).sum()
+            if n_alertas:
+                st.warning(
+                    f"⚠️ **{n_alertas} fila(s) con Error de Cuadre Legal** — "
+                    "IVA ≠ 13% o Sello vacío. Ver columna `_alerta`.",
+                    icon=None,
+                )
             st.dataframe(
-                df_f07.style.format({c: "{:,.2f}" for c in COLS_NUM}),
+                estilar_alertas(df_f07, "_alerta").format({c: "{:,.2f}" for c in COLS_NUM}),
                 hide_index=True,
                 use_container_width=True,
             )
@@ -1697,13 +1809,15 @@ if not st.session_state.db_compras.empty:
         COLS_NUM_AUD = ['exe','gra','iva','ret','perc','tot','fovial','cotrans']
         cols_fmt     = {c: "{:,.2f}" for c in COLS_NUM_AUD if c in df_filtrado.columns}
 
+        df_aud = df_filtrado[cols_disp].copy()
+        df_aud.insert(0, "_alerta", df_filtrado.apply(clasificar_alerta_compra, axis=1).values)
         st.dataframe(
-            df_filtrado[cols_disp].style.format(cols_fmt),
+            estilar_alertas(df_aud, "_alerta").format(cols_fmt),
             use_container_width=True,
             hide_index=True,
         )
 
-        # Mini-descarga de auditoría en CSV
+        # Mini-descarga de auditoría en CSV (sin columna _alerta)
         csv_bytes = df_filtrado[cols_disp].to_csv(index=False).encode("utf-8")
         st.download_button(
             "📄 Descargar Auditoría CSV",
@@ -1748,6 +1862,68 @@ if not st.session_state.db_compras.empty:
             col_r4.metric("Exentas/NS",     f"${df_filtrado['exe'].sum():,.2f}")
         else:
             st.info("Sin datos para mostrar con el filtro actual.")
+
+    # ── Tab 4: Anexo 8 — Percepciones de IVA ─────────────────────────────────
+    with tab4:
+        st.markdown("#### 📋 Anexo 8 — Percepciones de IVA (Casilla 163)")
+        st.caption(
+            "Solo se incluyen documentos con **IVA Percibido > $0** y Tipo 03, 05, 06 o 12. "
+            "El archivo final no lleva encabezados."
+        )
+
+        df_a8 = construir_df_anexo8_percepciones(df_filtrado)
+
+        if df_a8.empty:
+            st.info(
+                "ℹ️ No hay percepciones de IVA registradas. "
+                "Verifica que los PDFs con percepción hayan sido procesados y que el campo "
+                "`perc` (IVA Percibido) tenga valor > $0."
+            )
+        else:
+            # Bloqueo de exportación: tipos inválidos para Anexo 8
+            tipos_invalidos_a8 = set(
+                df_filtrado.loc[
+                    df_filtrado.get("perc", 0) > 0,
+                    "tipo"
+                ].unique()
+            ) - _TIPOS_VALIDOS_PERCEP
+            if tipos_invalidos_a8:
+                st.error(
+                    f"🚫 **Exportación bloqueada** — Tipo(s) de documento no permitido(s) "
+                    f"en Anexo 8: `{', '.join(sorted(tipos_invalidos_a8))}`. "
+                    "Solo se permiten: 03, 05, 06, 12."
+                )
+
+            # Preview table
+            COLS_NUM_A8 = ["F", "G"]
+            st.dataframe(
+                df_a8.style.format({c: "{:.2f}" for c in COLS_NUM_A8}),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+            # Summary
+            col_s1, col_s2, col_s3 = st.columns(3)
+            col_s1.metric("Documentos",      f"{len(df_a8)}")
+            col_s2.metric("Monto Gravado",   f"${df_a8['F'].sum():,.2f}")
+            col_s3.metric("IVA Percibido",   f"${df_a8['G'].sum():,.2f}")
+
+            st.markdown("---")
+            if not tipos_invalidos_a8:
+                csv_a8 = to_csv_anexo8(df_a8)
+                nombre_base = safe_str(cliente.get("nombre", "")).replace(" ", "_")
+                st.download_button(
+                    "📥 Descargar Anexo 8 CSV (para Hacienda)",
+                    data=csv_a8,
+                    file_name=f"Anexo8_Percepciones_{nombre_base}.csv",
+                    mime="text/csv",
+                    type="primary",
+                )
+                st.caption(
+                    "ℹ️ **Columna A**: NIT (vacío si persona natural con DUI desde ene 2022). "
+                    "**Columna D**: Sello de Recepción. **Columna E**: UUID sin guiones. "
+                    "**Columna I**: '8' (número de anexo)."
+                )
 
 else:
     # ── Estado vacío ──────────────────────────────────────────────────────────

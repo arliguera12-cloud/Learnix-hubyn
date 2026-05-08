@@ -320,6 +320,61 @@ def _llamar_gemini(
     return None
 
 
+# ─── Normalización de montos de la IA ────────────────────────────────────────
+
+def normalizar_monto_ia(raw) -> float | None:
+    """
+    Normalizes a monetary string from Gemini JSON output to a clean float.
+
+    Handles ambiguous separators from providers with European/mixed formats:
+      "1.500,00"  → 1500.00   (dot=thousands, comma=decimal)
+      "1,500.00"  → 1500.00   (comma=thousands, dot=decimal)
+      "1500,00"   → 1500.00   (comma as decimal separator)
+      "60.177"    → 60.177    (3-decimal warning: possible thousands ambiguity)
+
+    Arithmetic validation: caller should verify gravadas + iva ≈ total (±$0.01).
+    If mismatch is detected, re-run extraction treating separators differently.
+
+    Returns None for null/empty/non-numeric input.
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s or s.lower() in ("null", "none", ""):
+        return None
+
+    if "," in s and "." in s:
+        # Both separators present: determine which is the decimal mark
+        # European "1.500,00" → dot before comma → dot=thousands
+        if s.index(".") < s.index(","):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            # American "1,500.00" → comma before dot → comma=thousands
+            s = s.replace(",", "")
+    elif "," in s:
+        parts = s.split(",")
+        # "1,500" (thousands) vs "1500,00" (decimal)
+        if len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit():
+            s = s.replace(",", "")   # comma is thousands separator
+        else:
+            s = s.replace(",", ".")  # comma is decimal separator
+
+    try:
+        val = float(s)
+        # Warn on 3+ decimal places: possible thousands-separator ambiguity
+        if "." in s:
+            dec_part = s.split(".", 1)[1]
+            if len(dec_part) >= 3:
+                log.warning(
+                    "Monto IA con %d decimales: '%s' → %.4f — "
+                    "verifique si el punto es separador de miles",
+                    len(dec_part), raw, val,
+                )
+        return val
+    except (ValueError, TypeError):
+        return None
+
+
 # ─── Contexto fiscal y reglas CoT compartidas ────────────────────────────────
 
 _CONTEXTO_FISCAL = """

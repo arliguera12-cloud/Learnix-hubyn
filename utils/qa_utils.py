@@ -116,6 +116,86 @@ _VALIDADORES_MONTOS = {
 }
 
 
+# ─── Indicadores de alerta por fila ──────────────────────────────────────────
+
+def clasificar_alerta_compra(row) -> str:
+    """
+    Returns '⚠️ Error de cuadre legal — {razones}' or '✅' for a compra row.
+    Checks: IVA ≈ gra × 13% (±$0.01) and sello de recepción not empty.
+    row can be a pd.Series or dict with keys: gra, iva, sello.
+    """
+    d     = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    gra   = _monto(d.get("gra", 0))
+    iva   = _monto(d.get("iva", 0))
+    sello = str(d.get("sello", "")).strip()
+
+    razones: list[str] = []
+    if gra > 0 and iva > 0:
+        iva_calc = round(gra * 0.13, 2)
+        if abs(iva - iva_calc) > 0.01:
+            razones.append(f"IVA ${iva:.2f} ≠ {gra:.2f}×13%=${iva_calc:.2f}")
+    if not sello:
+        razones.append("Sello vacío")
+
+    return f"⚠️ Error de cuadre legal — {'; '.join(razones)}" if razones else "✅"
+
+
+def clasificar_alerta_venta(row) -> str:
+    """
+    Returns '⚠️ Error de cuadre legal — {razones}' or '✅' for a venta row.
+    Checks: débito ≈ gravadas × 13% (±$0.01, only for tipos 03/05/06) and sello not empty.
+    row can be a pd.Series or dict with keys: gravadas, debito, sello, tipo.
+    """
+    d      = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    grav   = _monto(d.get("gravadas", 0))
+    debito = _monto(d.get("debito", 0))
+    sello  = str(d.get("sello", "")).strip()
+    tipo   = str(d.get("tipo", ""))
+
+    razones: list[str] = []
+    if tipo in ("03", "05", "06") and grav > 0 and debito > 0:
+        deb_calc = round(grav * 0.13, 2)
+        if abs(debito - deb_calc) > 0.01:
+            razones.append(f"IVA ${debito:.2f} ≠ {grav:.2f}×13%=${deb_calc:.2f}")
+    if not sello:
+        razones.append("Sello vacío")
+
+    return f"⚠️ Error de cuadre legal — {'; '.join(razones)}" if razones else "✅"
+
+
+def estilar_alertas(df: "pd.DataFrame", col_alerta: str = "_alerta") -> "pd.io.formats.style.Styler":
+    """
+    Applies row background coloring to a DataFrame based on a pre-computed alert column.
+
+    Color scheme:
+      IVA + Sello  → red    (#3D1212 bg / #FFCDD2 text)
+      IVA only     → orange (#2D1A0A bg / #FFE0B2 text)
+      Sello only   → blue   (#0E1A2D bg / #BBDEFB text)
+      No alert     → default styling
+
+    The col_alerta column must already exist in df (computed via clasificar_alerta_*).
+    Returns a Styler with the background applied AND numeric columns hidden from the
+    alert column (use .format(...) chained after this call as needed).
+    """
+    import pandas as pd
+
+    def _hl(row: "pd.Series"):
+        val = str(row[col_alerta]) if col_alerta in row.index else ""
+        if "⚠️" not in val:
+            return [""] * len(row)
+        has_iva   = "IVA"   in val
+        has_sello = "Sello" in val
+        if has_iva and has_sello:
+            css = "background-color: #3D1212; color: #FFCDD2"
+        elif has_iva:
+            css = "background-color: #2D1A0A; color: #FFE0B2"
+        else:
+            css = "background-color: #0E1A2D; color: #BBDEFB"
+        return [css] * len(row)
+
+    return df.style.apply(_hl, axis=1)
+
+
 # ─── Campos inválidos por tipo de DTE ────────────────────────────────────────
 
 def campos_invalidos_dte(tipo_dte: str, campos: dict) -> set[str]:
