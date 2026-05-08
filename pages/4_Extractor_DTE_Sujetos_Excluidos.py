@@ -1,3 +1,4 @@
+import functools
 import streamlit as st
 import pdfplumber
 import pandas as pd
@@ -9,6 +10,7 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
+from utils.concurrent_processor import leer_y_procesar_lote
 from utils.pdf_utils import (
     safe_str,
     normalizar_unicode,
@@ -604,25 +606,38 @@ with st.sidebar:
             estado_txt = st.empty()
             total      = len(nuevos)
 
-            for idx, f in enumerate(nuevos):
-                estado_txt.caption(f"⏳ {idx+1}/{total}: `{f.name}`")
-                res = extraer_sujetos_nativo(f.read(), cliente)
+            # ── Pre-lectura en hilo principal ───────────────────────────────────
+            nombres_y_bytes: list[tuple[str, bytes]] = [(f.name, f.read()) for f in nuevos]
+            estado_txt.caption(
+                f"⏳ Enviando {total} archivos en paralelo a Gemini..."
+            )
 
+            # ── Extracción paralela ─────────────────────────────────────────────
+            fn_extraer = functools.partial(extraer_sujetos_nativo, cliente_activo=cliente)
+
+            def _progreso_suj(comp: int, tot: int, fname: str) -> None:
+                bar.progress(comp / tot)
+                estado_txt.caption(f"⏳ {comp}/{tot} completados — `{fname}`")
+
+            resultados = leer_y_procesar_lote(
+                nombres_y_bytes, fn_extraer, progreso_cb=_progreso_suj,
+            )
+
+            # ── Clasificación secuencial ────────────────────────────────────────
+            for fname, _fb, res in resultados:
                 if "error" in res:
-                    errores.append(f"❌ `{f.name}` — {res['error']}")
+                    errores.append(f"❌ `{fname}` — {res['error']}")
                 elif "error_tipo" in res:
-                    errores.append(f"⚠️ `{f.name}` — {res['error_tipo']}")
+                    errores.append(f"⚠️ `{fname}` — {res['error_tipo']}")
                 else:
-                    res["archivo"] = f.name
-                    # QA gate: flag documentos que requieren revisión
+                    res["archivo"] = fname
                     _qa_alertas = validar_montos_sujetos(res)
                     _v_audit    = res.get("_vision_audit", {})
                     _confianza  = _v_audit.get("confianza", 100) if _v_audit else 100
                     res["_revision"] = "⚠️" if (_qa_alertas or _confianza < 65) else "✅"
                     extracted.append(res)
 
-                st.session_state.archivos_suj.append(f.name)
-                bar.progress((idx + 1) / total)
+                st.session_state.archivos_suj.append(fname)
 
             estado_txt.empty()
 

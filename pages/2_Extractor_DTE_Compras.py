@@ -1,3 +1,4 @@
+import functools
 import streamlit as st
 import pdfplumber
 import pandas as pd
@@ -11,6 +12,7 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
+from utils.concurrent_processor import leer_y_procesar_lote
 from utils.pdf_utils import (
     safe_str as _safe_str,
     safe_extract_text as _safe_extract_text,
@@ -1013,33 +1015,42 @@ with st.sidebar:
 
             bar          = st.progress(0)
             txt_progreso = st.empty()
-            t_inicio     = time.time()
             total_arch   = len(nuevos)
 
-            for idx, f in enumerate(nuevos):
-                if idx > 0 and idx % 50 == 0:
-                    gc.collect()
-
-                if idx > 0:
-                    elapsed   = time.time() - t_inicio
-                    remaining = int((elapsed / idx) * (total_arch - idx))
-                    m_t, s_t  = divmod(remaining, 60)
-                    txt_progreso.caption(
-                        f"⏳ {idx+1}/{total_arch} — Restante: {m_t:02d}:{s_t:02d}"
-                    )
-                else:
-                    txt_progreso.caption(f"⏳ Procesando 1 de {total_arch}...")
-
-                file_bytes = f.read()
-
-                if len(file_bytes) < 512:
+            # ── Pre-lectura en hilo principal (UploadedFile no es thread-safe) ──
+            nombres_y_bytes_validos : list[tuple[str, bytes]] = []
+            for f in nuevos:
+                fb = f.read()
+                if len(fb) < 512:
                     corruptos.append(f.name)
                     st.session_state.archivos_comp.append(f.name)
-                    bar.progress((idx + 1) / total_arch)
-                    continue
+                else:
+                    nombres_y_bytes_validos.append((f.name, fb))
 
-                res = extraer_compra_nativo_pro(file_bytes, cliente, proveedores_db=_proveedores_db_cache)
+            bar.progress(0)
+            txt_progreso.caption(
+                f"⏳ Enviando {len(nombres_y_bytes_validos)} archivos en paralelo a Gemini..."
+            )
 
+            # ── Extracción paralela ─────────────────────────────────────────────
+            fn_extraer = functools.partial(
+                extraer_compra_nativo_pro,
+                cliente_activo=cliente,
+                proveedores_db=_proveedores_db_cache,
+            )
+
+            def _progreso_compras(comp: int, tot: int, fname: str) -> None:
+                bar.progress(comp / tot)
+                txt_progreso.caption(f"⏳ {comp}/{tot} completados — `{fname}`")
+
+            resultados = leer_y_procesar_lote(
+                nombres_y_bytes_validos,
+                fn_extraer,
+                progreso_cb=_progreso_compras,
+            )
+
+            # ── Clasificación secuencial en hilo principal ──────────────────────
+            for fname, file_bytes, res in resultados:
                 cod_gen  = safe_str(res.get('gen', ''))
                 num_ctrl = safe_str(res.get('num_control', ''))
                 dup_id   = cod_gen or num_ctrl
@@ -1062,14 +1073,14 @@ with st.sidebar:
                 )
 
                 if "error_tipo" in res:
-                    invalidos.append(f.name)
+                    invalidos.append(fname)
                 elif dup_memoria or dup_lote:
-                    duplicados.append(f.name)
+                    duplicados.append(fname)
                 elif "error_fatal" in res:
-                    corruptos.append(f.name)
+                    corruptos.append(fname)
                 elif "error_extraccion" in res:
                     st.session_state.cola_revision.append({
-                        "archivo": f.name,
+                        "archivo": fname,
                         "bytes"  : file_bytes,
                         "datos"  : datos_revision_vacio(res["error_extraccion"]),
                     })
@@ -1081,29 +1092,29 @@ with st.sidebar:
                         or not safe_str(res.get('fecha', '')).strip()
                         or not nom_res
                     )
-
                     if va_revision:
                         st.session_state.cola_revision.append({
-                            "archivo": f.name,
+                            "archivo": fname,
                             "bytes"  : file_bytes,
                             "datos"  : res,
                         })
                     else:
                         if res.get('iva_calc'):
-                            iva_calc_files.append(f.name)
+                            iva_calc_files.append(fname)
                         if res.get("es_nuevo") and (res.get("nit_prov") or res.get("dui_prov")):
                             id_prov = res.get("nit_prov") or res.get("dui_prov")
                             nuevos_proveedores[id_prov] = res["nom_prov"]
                             guardar_proveedor_rapido(id_prov, res["nom_prov"])
-                        res["archivo"] = f.name
+                        res["archivo"] = fname
                         for col in ['gen_sin_guiones','num_control_raw','sello',
                                     'dui_prov','fovial','cotrans']:
                             if col not in res:
                                 res[col] = ""
                         extracted.append(res)
 
-                st.session_state.archivos_comp.append(f.name)
-                bar.progress((idx + 1) / total_arch)
+                st.session_state.archivos_comp.append(fname)
+
+            gc.collect()
 
             txt_progreso.success(f"✅ {total_arch} facturas escaneadas.")
 

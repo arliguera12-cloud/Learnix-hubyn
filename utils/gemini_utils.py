@@ -13,6 +13,7 @@ import os
 import re
 import json
 import logging
+import threading
 import time
 import requests
 import streamlit as st
@@ -32,6 +33,7 @@ _BACKOFF_DELAYS = [2, 4, 8]   # seconds per retry attempt
 # ─── Estado del módulo ────────────────────────────────────────────────────────
 _ultimo_error: str = ""
 _ultimo_audit: dict = {}          # audit del último documento procesado
+_audit_lock   = threading.Lock()  # protege escrituras concurrentes al audit log
 
 
 # ─── API key & disponibilidad ─────────────────────────────────────────────────
@@ -623,23 +625,25 @@ def _extraer_campos_corregidos(
     campos_corr: dict = {}
     excluir = {nit_contexto} if nit_contexto else set()
 
-    # Guardar audit en estado del módulo y en session_state
+    # Guardar audit en estado del módulo y en session_state (thread-safe)
     auditoria = resultado.get("auditoria_ia", {})
     razonamiento = resultado.get("razonamiento", {})
-    _ultimo_audit = {
+    audit_entry = {
         **auditoria,
         "razonamiento": razonamiento,
         "tipo_dte"    : tipo_dte,
     }
-    try:
-        if "gemini_audit_log" not in st.session_state:
-            st.session_state.gemini_audit_log = []
-        st.session_state.gemini_audit_log.append(_ultimo_audit)
-        # Conservar solo los últimos 50 audits en sesión
-        if len(st.session_state.gemini_audit_log) > 50:
-            st.session_state.gemini_audit_log = st.session_state.gemini_audit_log[-50:]
-    except Exception:
-        pass
+    with _audit_lock:
+        global _ultimo_audit
+        _ultimo_audit = audit_entry
+        try:
+            if "gemini_audit_log" not in st.session_state:
+                st.session_state.gemini_audit_log = []
+            st.session_state.gemini_audit_log.append(audit_entry)
+            if len(st.session_state.gemini_audit_log) > 50:
+                st.session_state.gemini_audit_log = st.session_state.gemini_audit_log[-50:]
+        except Exception:
+            pass
 
     # Validar fecha
     fecha_ok = _validar_fecha(resultado.get("fecha"), campos_actuales.get("fecha", ""))
