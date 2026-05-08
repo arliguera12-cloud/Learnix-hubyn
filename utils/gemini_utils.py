@@ -338,7 +338,14 @@ _CONTEXTO_FISCAL = """
 ║  UUID : XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (32 hex + guiones)     ║
 ╚══════════════════════════════════════════════════════════════════════╝
 REGLA CRÍTICA: El NIT del EMISOR NUNCA puede ser igual al del RECEPTOR.
-REGLA CRÍTICA: IVA siempre es el 13% de las ventas gravadas.
+REGLAS MATEMÁTICAS DGII (Art. 54 IVA / Art. 72 C.T.):
+  IVA (DTE-03/05/06)  = Ventas Gravadas × 13%             (tolerancia ±$0.02)
+  Retención (DTE-07)  = Monto Sujeto × 1%                 (tolerancia ±$0.02)
+  Retención (DTE-14)  = Base Compras × 10%                 (tolerancia ±$0.02)
+  Líquido (DTE-14)    = Base Compras − Retención Renta     (= Base × 0.90)
+IDENTIFICACIÓN DUAL (Compras / Sujetos Excluidos):
+  El emisor/sujeto puede ser persona natural con DUI (9 dígitos) en lugar de NIT (14 dígitos).
+  Si no hay NIT de 14 dígitos, busca DUI de 9 dígitos. Nunca dejes la identificación vacía.
 """
 
 _INSTRUCCIONES_COT = """
@@ -382,6 +389,10 @@ PASO 4 ▶ AUTO-VALIDACIÓN (si falla, vuelve a buscar)
     ✗ NIT no tiene EXACTAMENTE 14 dígitos (después de eliminar guiones/espacios)
     ✗ DUI no tiene EXACTAMENTE 9 dígitos
     ✗ Fecha no cumple DD/MM/YYYY con día 1-31, mes 1-12, año 2020-2030
+  Validación matemática DGII (cuando aplique):
+    ✗ IVA ≠ Gravadas × 0.13 (±$0.02)           → documenta discrepancia
+    ✗ Retención DTE-07 ≠ Base × 0.01 (±$0.02)  → documenta discrepancia
+    ✗ Retención DTE-14 ≠ Base × 0.10 (±$0.02)  → documenta discrepancia
   Si el valor es inválido, documenta "INVÁLIDO: [razón]" y busca nuevamente.
   Registra el resultado en razonamiento.autovalidacion.
 
@@ -433,6 +444,8 @@ TEXTO COMPLETO DEL PDF:
 CAMPOS A VERIFICAR Y CORREGIR:
   • fecha    : Fecha de EMISIÓN del DTE en formato DD/MM/YYYY
   • nit_prov : NIT del EMISOR (14 dígitos); NO puede ser {nit_receptor}
+              Si el emisor es persona natural sin NIT, busca su DUI de 9 dígitos y
+              colócalo en nit_prov — nunca dejes la identificación del emisor vacía.
   • nom_prov : Razón social del EMISOR; NO puede ser "{nom_receptor}" ni metadata
 
 Devuelve el JSON siguiendo exactamente el responseSchema definido.
@@ -537,6 +550,11 @@ CAMPOS EXTRAÍDOS POR REGEX — PUEDEN CONTENER ERRORES:
 
   ⚠️  Los sujetos excluidos suelen ser personas naturales (DUI de 9 dígitos).
       Si el sujeto es persona jurídica, tendrá NIT de 14 dígitos.
+  ⚠️  NUNCA dejes la identificación del sujeto vacía: si hay un número de 9 dígitos
+      úsalo como dui_sujeto; si hay 14 dígitos úsalo como nit_sujeto.
+  ⚠️  Fórmulas DGII para DTE-14 (Art. 72 C.T.):
+        Retención ISR = Base Compras × 10%
+        Líquido       = Base Compras − Retención ISR  (= Base × 0.90)
 
 TEXTO COMPLETO DEL PDF:
 {texto_pdf[:3500]}
@@ -546,8 +564,9 @@ TEXTO COMPLETO DEL PDF:
 CAMPOS A VERIFICAR Y CORREGIR:
   • fecha      : Fecha de EMISIÓN en formato DD/MM/YYYY
   • nom_sujeto : Nombre del sujeto excluido; NO puede ser "{nom_cliente}"
-  • nit_sujeto : NIT del sujeto (14 dígitos), si es persona jurídica
-  • dui_sujeto : DUI del sujeto (9 dígitos), si es persona natural
+  • nit_sujeto : NIT del sujeto (14 dígitos), si es persona jurídica; null si no aplica
+  • dui_sujeto : DUI del sujeto (9 dígitos), si es persona natural; null si no aplica
+                 Al menos uno de nit_sujeto o dui_sujeto debe estar presente.
 
 Devuelve el JSON siguiendo el responseSchema. Usa null para campos ya correctos."""
 
@@ -648,6 +667,9 @@ def _extraer_campos_corregidos(
             campos_corr["nom_prov"] = nom
         nit = _validar_nit(resultado.get("nit_prov"), campos_actuales.get("nit_prov", ""), excluir)
         if nit and len(nit) == 14:
+            campos_corr["nit_prov"] = nit
+        elif nit and len(nit) == 9:
+            # DUI fallback: provider is a natural person without NIT
             campos_corr["nit_prov"] = nit
 
     elif tipo_dte == "retenciones":

@@ -118,6 +118,7 @@ _SCHEMAS: dict[str, dict] = {
             "sello_recepcion"  : {"type": "STRING"},
             "nom_emisor"       : {"type": "STRING"},
             "nit_emisor"       : {"type": "STRING"},
+            "dui_emisor"       : {"type": "STRING"},
             "gravadas"         : {"type": "NUMBER"},
             "exentas"          : {"type": "NUMBER"},
             "no_sujetas"       : {"type": "NUMBER"},
@@ -186,10 +187,11 @@ IDENTIFICADORES FISCALES:
   NRC : 1-7 dígitos (solo contribuyentes inscritos en IVA)
   UUID: formato XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (32 hex con guiones)
 
-REGLAS MATEMÁTICAS CRÍTICAS:
-  IVA (DTE-03/05/06) = Ventas Gravadas × 13%   (tolerancia ±$0.02)
-  Retención (DTE-07) = Monto Sujeto × 1%        (tolerancia ±$0.02)
-  Retención (DTE-14) = Base Compras × 10%        (tolerancia ±$0.02)
+REGLAS MATEMÁTICAS CRÍTICAS (Art. 54 IVA / Art. 72 C.T.):
+  IVA (DTE-03/05/06)  = Ventas Gravadas × 13%              (tolerancia ±$0.02)
+  Retención (DTE-07)  = Monto Sujeto × 1%                  (tolerancia ±$0.02)
+  Retención (DTE-14)  = Base Compras × 10%                  (tolerancia ±$0.02)
+  Líquido (DTE-14)    = Base Compras − Retención Renta      (= Base × 0.90)
 """
 
 _INSTRUCCIONES_ESPACIALES = """
@@ -202,11 +204,14 @@ PASO 1 — IDENTIFICAR LAYOUT VISUAL
   • TICKET      : datos en columna única, "etiqueta: valor" en la misma línea
   • 2-COLUMNAS  : EMISOR (izquierda) y RECEPTOR (derecha) en el encabezado
   • ENCABEZADO  : bloque EMISOR arriba, bloque RECEPTOR separado por línea
+  Analiza la estructura de 2 columnas o encabezado/pie de página para diferenciar
+  al Emisor del Receptor por su POSICIÓN FÍSICA en el documento.
   Registra el formato en razonamiento.layout_detectado.
 
 PASO 2 — LOCALIZAR VISUALMENTE LOS RECUADROS DE EMISOR / RECEPTOR
-  Identifica visualmente los recuadros físicos (delimitados por bordes, líneas o
-  agrupación espacial) que corresponden al EMISOR y al RECEPTOR en el documento.
+  Analiza visualmente la estructura espacial del documento.
+  Identifica los recuadros físicos (bordes, líneas, agrupación espacial) que
+  corresponden al EMISOR y al RECEPTOR.
   • Formato 2-COLUMNAS : recuadro EMISOR en la parte superior-izquierda;
                           recuadro RECEPTOR en la parte superior-derecha.
   • Formato ENCABEZADO : bloque EMISOR arriba; RECEPTOR debajo, separado por
@@ -215,11 +220,10 @@ PASO 2 — LOCALIZAR VISUALMENTE LOS RECUADROS DE EMISOR / RECEPTOR
                           "DATOS DEL EMISOR", "DATOS DEL RECEPTOR",
                           "ADQUIRIENTE:", "CLIENTE:", "PROVEEDOR:".
 
-  ⚠️ REGLA ESPACIAL CRÍTICA: extrae el NOMBRE del recuadro RECEPTOR basándote
-  en su UBICACIÓN FÍSICA, NO en el texto de la etiqueta. Las etiquetas como
-  "RAZÓN SOCIAL", "NIT:", "NRC:" son parte del DISEÑO FIJO del DTE — aparecen
-  en todos los documentos y jamás son el valor a extraer. El valor siempre
-  está DESPUÉS del ":" de cada etiqueta.
+  ⚠️ REGLA ESPACIAL CRÍTICA: Diferencia al Emisor del Receptor por su ubicación
+  física en la página, NO por el texto de la etiqueta. Las etiquetas como
+  "RAZÓN SOCIAL", "NIT:", "NRC:" son parte del diseño fijo del DTE y jamás son
+  el valor a extraer. El valor siempre está DESPUÉS del ":" de cada etiqueta.
 
   Registra en razonamiento.bloque_emisor y razonamiento.bloque_receptor la
   ubicación detectada y los primeros 80 caracteres del bloque identificado.
@@ -233,9 +237,17 @@ PASO 3 — EXTRAER VALORES (NUNCA ETIQUETAS)
 
   Para NÚMEROS: solo dígitos y punto decimal. Elimina "$", "US", comas de miles.
   Para FECHAS: formato DD/MM/YYYY (ej: "15/03/2025"). Busca "Fecha de Emisión:".
-  Para SELLO: cadena alfanumérica sin guiones, 30-40 chars.
+  Para SELLO DE RECEPCIÓN (Ministerio de Hacienda): busca una cadena alfanumérica
+    de 30-40 caracteres sin guiones, ubicada típicamente en la zona inferior del
+    documento cerca del código QR o de la leyenda "Sello de Recepción". Es distinta
+    del UUID (codigo_generacion). Nunca dejes sello_recepcion vacío si hay una
+    cadena alfanumérica larga visible en esa zona.
   Para UUID (codigo_generacion): XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (36 chars).
   Para num_control: formato DTE-XX-XXXX-XXXXXXXXX (con guiones).
+  Para NIT/DUI del Emisor en compras:
+    • Busca primero NIT de 14 dígitos. Si no encuentras NIT, busca DUI de 9 dígitos.
+    • Nunca dejes la identificación del emisor vacía si hay un número de 9 o 14
+      dígitos presente en el bloque del Emisor.
 
 PASO 4 — AUTO-VALIDAR Y GENERAR ALERTAS
   Verifica cada campo extraído:
@@ -243,8 +255,10 @@ PASO 4 — AUTO-VALIDAR Y GENERAR ALERTAS
   • DUI ≠  9 dígitos → alerta "DUI inválido: {valor extraído}"
   • Nombre contiene texto de etiqueta → alerta "Nombre parece etiqueta: {valor}"
   • IVA del doc ≠ gravadas × 13% (±$0.02) → alerta "IVA no coincide: doc={X} calc={Y}"
-  • Retención DTE-07 ≠ base × 1% (±$0.02) → alerta "Retención 1% incorrecta"
-  • Retención DTE-14 ≠ base × 10% (±$0.02) → alerta "Retención renta 10% incorrecta"
+  • Retención DTE-07 ≠ base × 1% (±$0.02) → alerta "Retención 1% incorrecta: doc={X} calc={Y}"
+  • Retención DTE-14 ≠ base × 10% (±$0.02) → alerta "Retención renta 10% incorrecta: doc={X} calc={Y}"
+  • Líquido DTE-14 ≠ base × 90% (±$0.02) → alerta "Líquido incorrecto: esperado={Y}"
+  • identificación emisor/sujeto vacía con número visible → alerta "Identificación no capturada"
   Lista vacía [] si no hay alertas.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -267,9 +281,13 @@ _ROLES: dict[str, str] = {
     ),
     "compras": (
         "El RECEPTOR es el cliente activo del sistema (quien compra y recibe el crédito).\n"
-        "El EMISOR es el PROVEEDOR/VENDEDOR — extrae su nombre y NIT.\n"
+        "El EMISOR es el PROVEEDOR/VENDEDOR — extrae su nombre e identificación.\n"
         "• El NIT del emisor NUNCA puede ser igual al NIT del cliente activo.\n"
-        "• Si nom_emisor coincide con el nombre del receptor → está mal extraído."
+        "• Si nom_emisor coincide con el nombre del receptor → está mal extraído.\n"
+        "• Identificación dual: busca primero NIT de 14 dígitos (nit_emisor).\n"
+        "  Si no localizas un NIT de 14 dígitos, busca el DUI de 9 dígitos (dui_emisor).\n"
+        "  Nunca dejes la identificación del emisor vacía si hay un número de 9 o 14\n"
+        "  dígitos presente en el bloque del Emisor."
     ),
     "retenciones": (
         "El AGENTE RETENEDOR (quien emite el DTE-07) es el cliente activo.\n"
@@ -306,9 +324,10 @@ _CAMPOS: dict[str, str] = {
         "• fecha             : DD/MM/YYYY\n"
         "• num_control       : Número de control DTE completo\n"
         "• codigo_generacion : UUID del documento\n"
-        "• sello_recepcion   : Sello del MH\n"
+        "• sello_recepcion   : Sello del MH (alfanumérico 30-40 chars, cerca del QR)\n"
         "• nom_emisor        : Nombre/Razón social del PROVEEDOR (bloque EMISOR)\n"
-        "• nit_emisor        : NIT del PROVEEDOR (14 dígitos)\n"
+        "• nit_emisor        : NIT del PROVEEDOR (14 dígitos) — preferir sobre DUI\n"
+        "• dui_emisor        : DUI del PROVEEDOR (9 dígitos) — solo si no hay NIT de 14\n"
         "• gravadas, exentas, no_sujetas, iva, total : montos en dólares\n"
         "• alertas_fiscales  : lista de problemas ([] si todo OK)"
     ),
@@ -540,36 +559,6 @@ def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict | None) -> dict |
 
         # Non-retryable error (403, 404, JSON parse, connection, timeout)
         return None
-    # Phase 1: with schema
-    result = _http_post(pdf_bytes, prompt, api_key, schema)
-    if result is not None:
-        return result
-
-    # Phase 2: retry without schema on 400 or schema-related errors
-    err = _ultimo_error
-    is_schema_error = (
-        "400" in err
-        or "schema" in err.lower()
-        or "nullable" in err.lower()
-        or "unknown field" in err.lower()
-        or "invalid value" in err.lower()
-    )
-    if schema and is_schema_error:
-        log.warning("Vision Phase 1 failed (%s). Retrying without responseSchema.", err[:80])
-        result = _http_post(pdf_bytes, prompt, api_key, schema=None)
-        if result is not None:
-            # Mark that we ran without schema so the caller knows
-            if isinstance(result, dict) and "auditoria_ia" not in result:
-                result["auditoria_ia"] = {}
-            log.info("Vision Phase 2 (no schema) succeeded.")
-            _ultimo_error = ""
-            return result
-        # Both phases failed — keep the Phase 2 error but mention Phase 1 too
-        if _ultimo_error:
-            _ultimo_error = f"Fase 1: {err} | Fase 2: {_ultimo_error}"
-        else:
-            _ultimo_error = err
-
 
     return None
 
@@ -631,6 +620,11 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
         nit = _limpio_nit(resultado.get("nit_emisor"))
         if len(nit) == 14 and nit != nit_ctx:
             out["nit_prov"] = nit
+        else:
+            # DUI fallback: some providers are individuals without NIT (9-digit DUI)
+            dui = _limpio_nit(resultado.get("dui_emisor"))
+            if len(dui) == 9 and dui != nit_ctx:
+                out["nit_prov"] = dui
 
         for campo in ("gravadas", "exentas", "no_sujetas", "iva", "total"):
             v = _limpio_num(resultado.get(campo))
