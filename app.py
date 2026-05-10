@@ -20,17 +20,16 @@ initial_sidebar_state="collapsed"
 # CREDENCIALES
 # ─────────────────────────────────────────────
 def verificar_credenciales(usuario: str, clave: str) -> bool:
-try:
-
-usr_valido = st.secrets["auth"]["usuario"]
-pwd_valido = st.secrets["auth"]["clave"]
-return usuario.strip().lower() == usr_valido.lower() and clave == pwd_valido
-except (KeyError, FileNotFoundError):
-usr_env = os.environ.get("APP_USUARIO", "")
-pwd_env = os.environ.get("APP_CLAVE",   "")
-if not usr_env or not pwd_env:
-return False
-return usuario.strip().lower() == usr_env.lower() and clave == pwd_env
+    try:
+        usr_valido = st.secrets["auth"]["usuario"]
+        pwd_valido = st.secrets["auth"]["clave"]
+        return usuario.strip().lower() == usr_valido.lower() and clave == pwd_valido
+    except (KeyError, FileNotFoundError):
+        usr_env = os.environ.get("APP_USUARIO", "")
+        pwd_env = os.environ.get("APP_CLAVE",   "")
+        if not usr_env or not pwd_env:
+            return False
+        return usuario.strip().lower() == usr_env.lower() and clave == pwd_env
 
 # ─────────────────────────────────────────────
 # ESTILOS GLOBALES
