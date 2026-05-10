@@ -50,21 +50,30 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 # ─────────────────────────────────────────────
-# PANTALLA DE LOGIN
+# PANTALLA DE LOGIN (SEGURA)
 # ─────────────────────────────────────────────
 if not st.session_state["autenticado"]:
 
-    st.markdown("<div style='height:6vh'></div>", unsafe_allow_html=True)
+    # 1. BLOQUEO TOTAL DEL SIDEBAR Y BOTÓN DE EXPANSIÓN MEDIANTE CSS
+    st.markdown("""
+        <style>
+            [data-testid="stSidebar"] { display: none !important; }
+            [data-testid="collapsedControl"] { display: none !important; }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # 2. ESPACIADO LIMPIO Y ESTRUCTURA CENTRAL
+    st.markdown("<div style='height:8vh'></div>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 1.2, 1])
 
     with col:
         st.markdown('<div class="login-box">', unsafe_allow_html=True)
 
-        # Logo + branding
-        st.markdown('<div class="login-logo">YN</div>', unsafe_allow_html=True)
-        st.markdown('<span class="login-badge">LEARNIX &nbsp;·&nbsp; DTE HUB</span>', unsafe_allow_html=True)
-        st.markdown('<p class="login-title">Bienvenido de nuevo</p>', unsafe_allow_html=True)
-        st.markdown('<p class="login-sub">Ingresa tus credenciales para acceder al sistema.</p>', unsafe_allow_html=True)
+        # 3. LOGO Y BRANDING CENTRADOS
+        st.markdown('<div class="login-logo" style="text-align: center;">YN</div>', unsafe_allow_html=True)
+        st.markdown('<div style="text-align: center; margin-bottom: 20px;"><span class="login-badge">LEARNIX &nbsp;·&nbsp; DTE HUB</span></div>', unsafe_allow_html=True)
+        st.markdown('<p class="login-title" style="text-align: center;">🔒 Acceso Seguro</p>', unsafe_allow_html=True)
+        st.markdown('<p class="login-sub" style="text-align: center;">Ingresa tus credenciales de administrador para continuar.</p>', unsafe_allow_html=True)
 
         # Estado de bloqueo / intentos
         ahora        = time.time()
@@ -84,7 +93,7 @@ if not st.session_state["autenticado"]:
                 color = "#F85149" if restantes <= 1 else "#D29922"
                 icono = "🔴" if restantes <= 1 else "⚠️"
                 st.markdown(
-                    f'<div class="intentos-badge">'
+                    f'<div class="intentos-badge" style="text-align: center; margin-bottom: 15px;">'
                     f'{icono} Intento {intentos_act} de 5 &nbsp;·&nbsp; '
                     f'<strong style="color:{color}">{restantes} restante{"s" if restantes != 1 else ""}</strong>'
                     f'</div>',
@@ -104,7 +113,7 @@ if not st.session_state["autenticado"]:
                     label_visibility="visible"
                 )
 
-                st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
                 submitted = st.form_submit_button(
                     "Iniciar sesión →",
@@ -136,8 +145,15 @@ if not st.session_state["autenticado"]:
                                 f"{'Último intento disponible.' if restantes == 1 else f'{restantes} intentos restantes.'}"
                             )
 
+        # 4. LEYENDA DE SEGURIDAD BANCARIA
         st.markdown(
-            '<p class="login-footer">'
+            '<p style="text-align:center; color:#8b949e; font-size:0.75rem; margin-top:20px; font-weight: 500;">'
+            '🔒 Conexión Segura &nbsp;·&nbsp; Encriptación de Extremo a Extremo'
+            '</p>',
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            '<p class="login-footer" style="text-align:center; margin-top:5px;">'
             'Learnix DTE Hub &nbsp;·&nbsp; El Salvador &nbsp;·&nbsp; '
             'Sistema Tributario Electrónico'
             '</p>',
@@ -145,7 +161,7 @@ if not st.session_state["autenticado"]:
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
-    st.stop()
+    st.stop() # <-- Esto asegura que no se cargue nada más de la app hasta loguearse
 
 # ─────────────────────────────────────────────
 # PÁGINAS (solo si autenticado)
@@ -165,7 +181,7 @@ nav = st.navigation({
 })
 
 # ─────────────────────────────────────────────
-# SIDEBAR — LOGO + CLIENTE ACTIVO
+# SIDEBAR — LOGO + CLIENTE ACTIVO (Solo visible si está logueado)
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown(
@@ -199,7 +215,7 @@ with st.sidebar:
     if not _gemini_secret:
         with st.expander("⚡ IA · Gemini", expanded=False):
             gemini_key = st.text_input(
-                "API Key Gemini 1.5 Flash",
+                "API Key Gemini 2.5 Flash",
                 type="password",
                 value=st.session_state.get("gemini_api_key", ""),
                 placeholder="AIza...",
