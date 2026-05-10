@@ -40,14 +40,14 @@ st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 # SESSION STATE
 # ─────────────────────────────────────────────
 defaults = {
-"autenticado":     False,
-"intentos_login":  0,
-"bloqueado_hasta": 0,
-"confirmar_logout": False,
+    "autenticado":     False,
+    "intentos_login":  0,
+    "bloqueado_hasta": 0,
+    "confirmar_logout": False,
 }
 for k, v in defaults.items():
-if k not in st.session_state:
-st.session_state[k] = v
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 # ─────────────────────────────────────────────
 # PANTALLA DE LOGIN
