@@ -1,3 +1,4 @@
+import functools
 import streamlit as st
 import pdfplumber
 import pandas as pd
@@ -11,6 +12,7 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
+from utils.concurrent_processor import leer_archivos_uploaded, leer_y_procesar_lote
 from utils.pdf_utils import (
     safe_str as _safe_str,
     safe_extract_text as _safe_extract_text,
@@ -297,11 +299,35 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
     if not file_bytes or len(file_bytes) < 512:
         return {"error_fatal": "Archivo vacio o demasiado pequeño."}
 
+    # ── Vision-First: extraer con IA antes de pdfplumber ─────────────────────
+    _nit_emisor_ctx = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
+    _nom_emisor_ctx = safe_str(cliente_activo.get('nombre', '')).strip().upper()
+
+    gemini_correcciones: list[str] = []
+    _vision_campos: dict  = {}
+    _vision_alertas: list = []
+    _vision_audit: dict   = {}
+
+    if vision_disponible():
+        _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+            file_bytes,
+            "ventas",
+            {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
+        )
+        gemini_correcciones = [
+            f"Vision: {a}" for a in _vision_alertas
+        ] if _vision_alertas else (
+            [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+            if _vision_campos else []
+        )
+
     try:
         try:
             texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
         except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
-            return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+            if not _vision_campos.get("num_control"):
+                return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+            texto_lineal = texto_visual = ""
         except Exception as e:
             if "password" in str(e).lower() or "encrypt" in str(e).lower():
                 return {"error_fatal": "PDF protegido con contraseña. Desbloquéalo antes de subir."}
@@ -309,7 +335,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
 
         texto_completo = texto_lineal + "\n" + texto_visual
 
-        if len(texto_completo.strip()) < 50:
+        if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
             return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
 
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
@@ -504,41 +530,18 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 )
             nom_cli = nombre_encontrado if nombre_encontrado else "SIN NOMBRE"
 
-        # ── Extracción multimodal con Gemini Vision (primera pasada) ─────────
-        gemini_correcciones: list[str] = []
-        _vision_campos: dict  = {}
-        _vision_alertas: list = []
-        _vision_audit: dict   = {}
+        # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
+        if _vision_campos.get("fecha"):
+            fecha   = _vision_campos["fecha"]
+        if _vision_campos.get("nom_cli"):
+            nom_cli = _vision_campos["nom_cli"]
+        if _vision_campos.get("nit_cli"):
+            nit_cli = _vision_campos["nit_cli"]
+        if _vision_campos.get("dui_cli"):
+            dui_cli = _vision_campos["dui_cli"]
 
-        _nit_emisor_ctx = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
-        _nom_emisor_ctx = safe_str(cliente_activo.get('nombre', '')).strip().upper()
-
-        if vision_disponible():
-            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
-                file_bytes,
-                "ventas",
-                {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
-            )
-            # Aplica resultados de Vision con prioridad sobre regex
-            if _vision_campos.get("fecha"):
-                fecha   = _vision_campos["fecha"]
-            if _vision_campos.get("nom_cli"):
-                nom_cli = _vision_campos["nom_cli"]
-            if _vision_campos.get("nit_cli"):
-                nit_cli = _vision_campos["nit_cli"]
-            if _vision_campos.get("dui_cli"):
-                dui_cli = _vision_campos["dui_cli"]
-            # Montos de Vision (solo si los campos regex quedaron en 0)
-            # Los montos del regex siguen siendo la fuente primaria por precisión
-            gemini_correcciones = [
-                f"Vision: {a}" for a in _vision_alertas
-            ] if _vision_alertas else (
-                [f"Vision extrajo {len(_vision_campos)} campo(s)"]
-                if _vision_campos else []
-            )
-
-        elif gemini_disponible():
-            # Fallback: verificación textual con Gemini cuando Vision no disponible
+        if not _vision_campos and gemini_disponible():
+            # Fallback textual solo cuando Vision no está disponible
             _campos_act = {
                 "fecha"  : fecha,
                 "nom_cli": nom_cli,
@@ -688,6 +691,19 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     encontrado = True
                 elif total == 0.0 and gravadas > 0 and debito > 0:
                     total = round(gravadas + debito + exentas + no_sujetas, 2)
+
+        # ── Completar montos desde Vision cuando regex obtuvo 0 ──────────────
+        if _vision_campos:
+            if _vision_campos.get("gravadas") and gravadas == 0.0:
+                gravadas = round(float(_vision_campos["gravadas"]), 2)
+            if _vision_campos.get("iva") and debito == 0.0:
+                debito = round(float(_vision_campos["iva"]), 2)
+            if _vision_campos.get("total") and total == 0.0:
+                total = round(float(_vision_campos["total"]), 2)
+            if _vision_campos.get("exentas") and exentas == 0.0:
+                exentas = round(float(_vision_campos["exentas"]), 2)
+            if _vision_campos.get("no_sujetas") and no_sujetas == 0.0:
+                no_sujetas = round(float(_vision_campos["no_sujetas"]), 2)
 
         return {
             "fecha"         : fecha,
@@ -1115,31 +1131,40 @@ with st.sidebar:
 
             bar          = st.progress(0)
             txt_progreso = st.empty()
-            t_inicio     = time.time()
             total_arch   = len(nuevos)
 
-            for idx, f in enumerate(nuevos):
-                if idx > 0 and idx % 50 == 0:
-                    gc.collect()
-
-                if idx > 0:
-                    elapsed   = time.time() - t_inicio
-                    remaining = int((elapsed / idx) * (total_arch - idx))
-                    m_t, s_t  = divmod(remaining, 60)
-                    txt_progreso.caption(f"⏳ {idx+1}/{total_arch} — Restante: {m_t:02d}:{s_t:02d}")
-                else:
-                    txt_progreso.caption(f"⏳ Procesando 1 de {total_arch}...")
-
-                file_bytes = f.read()
-
-                if len(file_bytes) < 512:
+            # ── Pre-lectura en hilo principal (UploadedFile no es thread-safe) ──
+            nombres_y_bytes_validos : list[tuple[str, bytes]] = []
+            for f in nuevos:
+                fb = f.read()
+                if len(fb) < 512:
                     corruptos.append(f.name)
                     st.session_state.archivos_ventas.append(f.name)
-                    bar.progress((idx + 1) / total_arch)
-                    continue
+                else:
+                    nombres_y_bytes_validos.append((f.name, fb))
 
-                res = extraer_venta_nativo_pro(file_bytes, cliente, clientes_db=_clientes_db_cache)
+            bar.progress(0)
+            txt_progreso.caption(
+                f"⏳ Enviando {len(nombres_y_bytes_validos)} archivos en paralelo a Gemini..."
+            )
 
+            # ── Extracción paralela (I/O-bound: Vision + Gemini + pdfplumber) ──
+            fn_extraer = functools.partial(
+                extraer_venta_nativo_pro, cliente_activo=cliente, clientes_db=_clientes_db_cache
+            )
+
+            def _progreso_ventas(comp: int, tot: int, fname: str) -> None:
+                bar.progress(comp / tot)
+                txt_progreso.caption(f"⏳ {comp}/{tot} completados — `{fname}`")
+
+            resultados = leer_y_procesar_lote(
+                nombres_y_bytes_validos,
+                fn_extraer,
+                progreso_cb=_progreso_ventas,
+            )
+
+            # ── Clasificación secuencial en hilo principal ──────────────────────
+            for fname, file_bytes, res in resultados:
                 cod_gen  = safe_str(res.get('gen', ''))
                 num_ctrl = safe_str(res.get('num_control', ''))
                 dup_id   = cod_gen or num_ctrl
@@ -1162,28 +1187,25 @@ with st.sidebar:
                 )
 
                 if "error_tipo" in res:
-                    invalidos.append(f.name)
+                    invalidos.append(fname)
 
                 elif dup_memoria or dup_lote:
-                    duplicados.append(f.name)
+                    duplicados.append(fname)
 
                 elif "error_fatal" in res:
-                    corruptos.append(f.name)
+                    corruptos.append(fname)
 
                 elif "error_extraccion" in res:
                     st.session_state.cola_revision_v.append({
-                        "archivo": f.name,
+                        "archivo": fname,
                         "bytes"  : file_bytes,
                         "datos"  : datos_revision_vacio_ventas(res["error_extraccion"]),
                     })
 
                 else:
-                    nom_res = safe_str(res.get('nom_cli', '')).strip()
+                    nom_res  = safe_str(res.get('nom_cli', '')).strip()
                     tipo_res = safe_str(res.get('tipo', ''))
-                    
-                    # Para consumidor final (01) no es crítico tener nombre
                     requiere_nombre = tipo_res in TIPOS_CONTRIBUYENTES
-                    
                     va_revision = (
                         res.get('total', 0.0) == 0.0
                         or not res.get('num_control')
@@ -1192,23 +1214,24 @@ with st.sidebar:
                     )
                     if va_revision:
                         st.session_state.cola_revision_v.append({
-                            "archivo": f.name,
+                            "archivo": fname,
                             "bytes"  : file_bytes,
                             "datos"  : res,
                         })
                     else:
                         if res.get('iva_calc'):
-                            iva_calc_files.append(f.name)
+                            iva_calc_files.append(fname)
                         if res.get("es_nuevo") and (res.get("nit_cli") or res.get("dui_cli")):
                             id_clave = res.get("nit_cli") or res.get("dui_cli")
                             nom_n    = res["nom_cli"]
                             nuevos_clientes_d[id_clave] = nom_n
                             guardar_cliente_rapido(id_clave, nom_n)
-                        res["archivo"] = f.name
+                        res["archivo"] = fname
                         extracted.append(res)
 
-                st.session_state.archivos_ventas.append(f.name)
-                bar.progress((idx + 1) / total_arch)
+                st.session_state.archivos_ventas.append(fname)
+
+            gc.collect()
 
             txt_progreso.success(f"✅ {total_arch} documentos escaneados.")
 
@@ -1829,7 +1852,13 @@ if not st.session_state.db_ventas.empty:
     with tab3:
         st.write(f"📊 Registros: **{len(df_filtrado)}** de **{len(df)}**")
         df_auditoria = construir_df_f07_ventas_combinado(df_filtrado)
-        st.dataframe(df_auditoria, use_container_width=True, hide_index=True)
+        COLS_NUM_AUD_V = ["Exentas", "No Sujetas", "Gravadas", "Débito", "Total"]
+        cols_fmt_aud   = {c: "{:,.2f}" for c in COLS_NUM_AUD_V if c in df_auditoria.columns}
+        st.dataframe(
+            df_auditoria.style.format(cols_fmt_aud),
+            use_container_width=True,
+            hide_index=True,
+        )
 
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:

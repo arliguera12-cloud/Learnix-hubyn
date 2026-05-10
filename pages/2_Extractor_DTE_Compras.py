@@ -1,3 +1,4 @@
+import functools
 import streamlit as st
 import pdfplumber
 import pandas as pd
@@ -11,6 +12,7 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
+from utils.concurrent_processor import leer_y_procesar_lote
 from utils.pdf_utils import (
     safe_str as _safe_str,
     safe_extract_text as _safe_extract_text,
@@ -348,11 +350,35 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
     if not file_bytes or len(file_bytes) < 512:
         return {"error_fatal": "Archivo vacio o demasiado pequeño."}
 
+    # ── Vision-First: extraer con IA antes de pdfplumber ─────────────────────
+    _nit_rec_ctx = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
+    _nom_rec_ctx = safe_str(cliente_activo.get('nombre', '')).strip().upper()
+
+    gemini_correcciones: list[str] = []
+    _vision_campos: dict  = {}
+    _vision_alertas: list = []
+    _vision_audit: dict   = {}
+
+    if vision_disponible():
+        _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+            file_bytes,
+            "compras",
+            {"nit": _nit_rec_ctx, "nombre": _nom_rec_ctx},
+        )
+        gemini_correcciones = [
+            f"Vision: {a}" for a in _vision_alertas
+        ] if _vision_alertas else (
+            [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+            if _vision_campos else []
+        )
+
     try:
         try:
             texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
         except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
-            return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+            if not _vision_campos.get("num_control"):
+                return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+            texto_lineal = texto_visual = ""
         except Exception as e:
             if "password" in str(e).lower() or "encrypt" in str(e).lower():
                 return {"error_fatal": "PDF protegido con contraseña. Desbloquéalo antes de subir."}
@@ -360,7 +386,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
 
         texto_completo = texto_lineal + "\n" + texto_visual
 
-        if len(texto_completo.strip()) < 50:
+        if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
             return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
 
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
@@ -542,30 +568,16 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             nit_prov = ""
             nom_prov = ""
 
-        # ── Extracción multimodal con Gemini Vision (primera pasada) ─────────
-        gemini_correcciones: list[str] = []
-        _vision_campos: dict  = {}
-        _vision_alertas: list = []
-        _vision_audit: dict   = {}
+        # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
+        if _vision_campos.get("fecha"):
+            fecha    = _vision_campos["fecha"]
+        if _vision_campos.get("nom_prov"):
+            nom_prov = _vision_campos["nom_prov"]
+        if _vision_campos.get("nit_prov"):
+            nit_prov = _vision_campos["nit_prov"]
 
-        if vision_disponible():
-            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
-                file_bytes,
-                "compras",
-                {"nit": nit_receptor, "nombre": nom_receptor},
-            )
-            if _vision_campos.get("fecha"):
-                fecha    = _vision_campos["fecha"]
-            if _vision_campos.get("nom_prov"):
-                nom_prov = _vision_campos["nom_prov"]
-            if _vision_campos.get("nit_prov"):
-                nit_prov = _vision_campos["nit_prov"]
-            gemini_correcciones = [f"Vision: {a}" for a in _vision_alertas] if _vision_alertas else (
-                [f"Vision extrajo {len(_vision_campos)} campo(s)"] if _vision_campos else []
-            )
-
-        elif gemini_disponible():
-            # Fallback: verificación textual cuando Vision no está disponible
+        if not _vision_campos and gemini_disponible():
+            # Fallback textual solo cuando Vision no está disponible
             _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "nom_prov": nom_prov}
             _necesita, _ = necesita_verificacion(_campos_act, nit_receptor)
             if _necesita:
@@ -751,6 +763,17 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
         iva = max(iva, 0.0)
         tot = max(tot, 0.0)
 
+        # ── Completar montos desde Vision cuando regex obtuvo 0 ──────────────
+        if _vision_campos:
+            if _vision_campos.get("gravadas") and gra == 0.0:
+                gra = round(float(_vision_campos["gravadas"]), 2)
+            if _vision_campos.get("iva") and iva == 0.0:
+                iva = round(float(_vision_campos["iva"]), 2)
+            if _vision_campos.get("total") and tot == 0.0:
+                tot = round(float(_vision_campos["total"]), 2)
+            if _vision_campos.get("exentas") and exe == 0.0:
+                exe = round(float(_vision_campos["exentas"]), 2)
+
         return {
             "fecha"          : fecha,
             "tipo"           : tipo,
@@ -815,7 +838,107 @@ def construir_df_f07_compras(df_in: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────
-# 11. EXPORTAR EXCEL HACIENDA
+# 11. ANEXO 8 — PERCEPCIONES DE IVA (Casilla 163)
+# ─────────────────────────────────────────────
+_TIPOS_VALIDOS_PERCEP = {"03", "05", "06", "12"}
+_CORTE_PERCEP = pd.Timestamp(2022, 1, 1)   # DUI rule: from Jan 2022 onward
+
+
+def _fecha_ts(fecha_str: str) -> pd.Timestamp:
+    """Parses DD/MM/YYYY → Timestamp; returns NaT on failure."""
+    try:
+        p = str(fecha_str).strip().split("/")
+        if len(p) == 3:
+            return pd.Timestamp(int(p[2]), int(p[1]), int(p[0]))
+    except Exception:
+        pass
+    return pd.NaT
+
+
+def construir_df_anexo8_percepciones(df_in: pd.DataFrame) -> pd.DataFrame:
+    """
+    Builds the Anexo 8 (Casilla 163 — IVA Percibido) CSV per DGII Transparencia Fiscal.
+
+    Columns A–I (no headers in final export):
+      A  NIT Agente (14 digits, no dashes) — EMPTY when DUI applies (col H)
+      B  Nombre o Razón Social
+      C  Tipo de Doc: only 03 | 05 | 06 | 12
+      D  Serie = Sello de Recepción
+      E  Número = Código de Generación sin guiones
+      F  Monto Gravado (point decimal, 2 decimals, NO thousands separator)
+      G  IVA Percibido (same format)
+      H  DUI (9 digits, no dashes) — only for natural persons from Jan 2022+; else EMPTY
+      I  Número de Anexo = '8'
+
+    Filters: perc > 0  AND  tipo in {03, 05, 06, 12}.
+    Rows with tipo outside that set are excluded; caller must validate before exporting.
+    """
+    import re as _re
+
+    def _limpio_id(val: str) -> str:
+        return _re.sub(r"[^0-9]", "", str(val or ""))
+
+    def _es_2022_plus(fecha_str: str) -> bool:
+        ts = _fecha_ts(fecha_str)
+        return ts is not pd.NaT and ts >= _CORTE_PERCEP
+
+    # Filter rows eligible for Anexo 8
+    mask = (
+        df_in.get("perc", pd.Series(dtype=float)).fillna(0) > 0
+    ) & (
+        df_in["tipo"].astype(str).isin(_TIPOS_VALIDOS_PERCEP)
+    )
+    df   = df_in[mask].copy().reset_index(drop=True)
+
+    if df.empty:
+        return pd.DataFrame(columns=["A","B","C","D","E","F","G","H","I"])
+
+    nit_raw = df["nit_prov"].astype(str).apply(_limpio_id)
+    dui_raw = df.get("dui_prov", pd.Series([""] * len(df))).astype(str).apply(_limpio_id)
+    fechas  = df["fecha"].astype(str)
+
+    col_a, col_h = [], []
+    for nit, dui, fecha in zip(nit_raw, dui_raw, fechas):
+        tiene_dui      = len(dui) == 9
+        periodo_valido = _es_2022_plus(fecha)
+        # DGII rule: If Jan 2022+ and natural person (DUI available) → col A empty, col H = DUI
+        if periodo_valido and tiene_dui:
+            col_a.append("")
+            col_h.append(dui)
+        else:
+            col_a.append(nit if len(nit) == 14 else nit)
+            col_h.append("")
+
+    df_out = pd.DataFrame()
+    df_out["A"] = col_a
+    df_out["B"] = df["nom_prov"].astype(str)
+    df_out["C"] = df["tipo"].astype(str)
+    df_out["D"] = df.get("sello", pd.Series([""] * len(df))).astype(str)
+    df_out["E"] = df.get("gen_sin_guiones", pd.Series([""] * len(df))).astype(str)
+    # Numeric columns: plain float, NO thousands separator
+    df_out["F"] = df["gra"].apply(lambda v: round(float(v or 0), 2))
+    df_out["G"] = df.get("perc", pd.Series([0.0] * len(df))).apply(lambda v: round(float(v or 0), 2))
+    df_out["H"] = col_h
+    df_out["I"] = "8"
+    return df_out
+
+
+def to_csv_anexo8(df_a8: pd.DataFrame) -> bytes:
+    """
+    Exports the Anexo 8 DataFrame to CSV:
+    - No header row
+    - Numeric columns (F, G) formatted as NNNN.NN (no thousands, point decimal)
+    - UTF-8 encoding
+    """
+    df_exp = df_a8.copy()
+    for col in ("F", "G"):
+        if col in df_exp.columns:
+            df_exp[col] = df_exp[col].apply(lambda v: f"{v:.2f}")
+    return df_exp.to_csv(index=False, header=False).encode("utf-8")
+
+
+# ─────────────────────────────────────────────
+# 12. EXPORTAR EXCEL HACIENDA
 # ─────────────────────────────────────────────
 def to_excel_hacienda_compras(df: pd.DataFrame) -> bytes:
     output = BytesIO()
@@ -992,33 +1115,42 @@ with st.sidebar:
 
             bar          = st.progress(0)
             txt_progreso = st.empty()
-            t_inicio     = time.time()
             total_arch   = len(nuevos)
 
-            for idx, f in enumerate(nuevos):
-                if idx > 0 and idx % 50 == 0:
-                    gc.collect()
-
-                if idx > 0:
-                    elapsed   = time.time() - t_inicio
-                    remaining = int((elapsed / idx) * (total_arch - idx))
-                    m_t, s_t  = divmod(remaining, 60)
-                    txt_progreso.caption(
-                        f"⏳ {idx+1}/{total_arch} — Restante: {m_t:02d}:{s_t:02d}"
-                    )
-                else:
-                    txt_progreso.caption(f"⏳ Procesando 1 de {total_arch}...")
-
-                file_bytes = f.read()
-
-                if len(file_bytes) < 512:
+            # ── Pre-lectura en hilo principal (UploadedFile no es thread-safe) ──
+            nombres_y_bytes_validos : list[tuple[str, bytes]] = []
+            for f in nuevos:
+                fb = f.read()
+                if len(fb) < 512:
                     corruptos.append(f.name)
                     st.session_state.archivos_comp.append(f.name)
-                    bar.progress((idx + 1) / total_arch)
-                    continue
+                else:
+                    nombres_y_bytes_validos.append((f.name, fb))
 
-                res = extraer_compra_nativo_pro(file_bytes, cliente, proveedores_db=_proveedores_db_cache)
+            bar.progress(0)
+            txt_progreso.caption(
+                f"⏳ Enviando {len(nombres_y_bytes_validos)} archivos en paralelo a Gemini..."
+            )
 
+            # ── Extracción paralela ─────────────────────────────────────────────
+            fn_extraer = functools.partial(
+                extraer_compra_nativo_pro,
+                cliente_activo=cliente,
+                proveedores_db=_proveedores_db_cache,
+            )
+
+            def _progreso_compras(comp: int, tot: int, fname: str) -> None:
+                bar.progress(comp / tot)
+                txt_progreso.caption(f"⏳ {comp}/{tot} completados — `{fname}`")
+
+            resultados = leer_y_procesar_lote(
+                nombres_y_bytes_validos,
+                fn_extraer,
+                progreso_cb=_progreso_compras,
+            )
+
+            # ── Clasificación secuencial en hilo principal ──────────────────────
+            for fname, file_bytes, res in resultados:
                 cod_gen  = safe_str(res.get('gen', ''))
                 num_ctrl = safe_str(res.get('num_control', ''))
                 dup_id   = cod_gen or num_ctrl
@@ -1041,14 +1173,14 @@ with st.sidebar:
                 )
 
                 if "error_tipo" in res:
-                    invalidos.append(f.name)
+                    invalidos.append(fname)
                 elif dup_memoria or dup_lote:
-                    duplicados.append(f.name)
+                    duplicados.append(fname)
                 elif "error_fatal" in res:
-                    corruptos.append(f.name)
+                    corruptos.append(fname)
                 elif "error_extraccion" in res:
                     st.session_state.cola_revision.append({
-                        "archivo": f.name,
+                        "archivo": fname,
                         "bytes"  : file_bytes,
                         "datos"  : datos_revision_vacio(res["error_extraccion"]),
                     })
@@ -1060,29 +1192,29 @@ with st.sidebar:
                         or not safe_str(res.get('fecha', '')).strip()
                         or not nom_res
                     )
-
                     if va_revision:
                         st.session_state.cola_revision.append({
-                            "archivo": f.name,
+                            "archivo": fname,
                             "bytes"  : file_bytes,
                             "datos"  : res,
                         })
                     else:
                         if res.get('iva_calc'):
-                            iva_calc_files.append(f.name)
+                            iva_calc_files.append(fname)
                         if res.get("es_nuevo") and (res.get("nit_prov") or res.get("dui_prov")):
                             id_prov = res.get("nit_prov") or res.get("dui_prov")
                             nuevos_proveedores[id_prov] = res["nom_prov"]
                             guardar_proveedor_rapido(id_prov, res["nom_prov"])
-                        res["archivo"] = f.name
+                        res["archivo"] = fname
                         for col in ['gen_sin_guiones','num_control_raw','sello',
                                     'dui_prov','fovial','cotrans']:
                             if col not in res:
                                 res[col] = ""
                         extracted.append(res)
 
-                st.session_state.archivos_comp.append(f.name)
-                bar.progress((idx + 1) / total_arch)
+                st.session_state.archivos_comp.append(fname)
+
+            gc.collect()
 
             txt_progreso.success(f"✅ {total_arch} facturas escaneadas.")
 
@@ -1602,18 +1734,18 @@ if not st.session_state.db_compras.empty:
     )
     st.markdown("")
 
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Libro F-07 Compras (Anexo 3)",
         "🔍 Auditoría Completa",
         "📈 Resumen por Proveedor",
+        "📋 Anexo 8 — Percepciones",
     ])
 
     # ── Tab 1: F-07 ───────────────────────────────────────────────────────────
     with tab1:
         if not df_filtrado.empty:
-            df_f07    = construir_df_f07_compras(df_filtrado)
+            df_f07 = construir_df_f07_compras(df_filtrado)
             COLS_NUM  = [c for c in df_f07.columns if df_f07[c].dtype == float]
-
             st.dataframe(
                 df_f07.style.format({c: "{:,.2f}" for c in COLS_NUM}),
                 hide_index=True,
@@ -1716,6 +1848,68 @@ if not st.session_state.db_compras.empty:
             col_r4.metric("Exentas/NS",     f"${df_filtrado['exe'].sum():,.2f}")
         else:
             st.info("Sin datos para mostrar con el filtro actual.")
+
+    # ── Tab 4: Anexo 8 — Percepciones de IVA ─────────────────────────────────
+    with tab4:
+        st.markdown("#### 📋 Anexo 8 — Percepciones de IVA (Casilla 163)")
+        st.caption(
+            "Solo se incluyen documentos con **IVA Percibido > $0** y Tipo 03, 05, 06 o 12. "
+            "El archivo final no lleva encabezados."
+        )
+
+        df_a8 = construir_df_anexo8_percepciones(df_filtrado)
+
+        if df_a8.empty:
+            st.info(
+                "ℹ️ No hay percepciones de IVA registradas. "
+                "Verifica que los PDFs con percepción hayan sido procesados y que el campo "
+                "`perc` (IVA Percibido) tenga valor > $0."
+            )
+        else:
+            # Bloqueo de exportación: tipos inválidos para Anexo 8
+            tipos_invalidos_a8 = set(
+                df_filtrado.loc[
+                    df_filtrado.get("perc", 0) > 0,
+                    "tipo"
+                ].unique()
+            ) - _TIPOS_VALIDOS_PERCEP
+            if tipos_invalidos_a8:
+                st.error(
+                    f"🚫 **Exportación bloqueada** — Tipo(s) de documento no permitido(s) "
+                    f"en Anexo 8: `{', '.join(sorted(tipos_invalidos_a8))}`. "
+                    "Solo se permiten: 03, 05, 06, 12."
+                )
+
+            # Preview table
+            COLS_NUM_A8 = ["F", "G"]
+            st.dataframe(
+                df_a8.style.format({c: "{:.2f}" for c in COLS_NUM_A8}),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+            # Summary
+            col_s1, col_s2, col_s3 = st.columns(3)
+            col_s1.metric("Documentos",      f"{len(df_a8)}")
+            col_s2.metric("Monto Gravado",   f"${df_a8['F'].sum():,.2f}")
+            col_s3.metric("IVA Percibido",   f"${df_a8['G'].sum():,.2f}")
+
+            st.markdown("---")
+            if not tipos_invalidos_a8:
+                csv_a8 = to_csv_anexo8(df_a8)
+                nombre_base = safe_str(cliente.get("nombre", "")).replace(" ", "_")
+                st.download_button(
+                    "📥 Descargar Anexo 8 CSV (para Hacienda)",
+                    data=csv_a8,
+                    file_name=f"Anexo8_Percepciones_{nombre_base}.csv",
+                    mime="text/csv",
+                    type="primary",
+                )
+                st.caption(
+                    "ℹ️ **Columna A**: NIT (vacío si persona natural con DUI desde ene 2022). "
+                    "**Columna D**: Sello de Recepción. **Columna E**: UUID sin guiones. "
+                    "**Columna I**: '8' (número de anexo)."
+                )
 
 else:
     # ── Estado vacío ──────────────────────────────────────────────────────────

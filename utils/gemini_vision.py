@@ -13,6 +13,7 @@ Fix v1.1:
 import base64
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -97,11 +98,11 @@ _SCHEMAS: dict[str, dict] = {
             "nom_receptor"     : {"type": "STRING"},
             "nit_receptor"     : {"type": "STRING"},
             "dui_receptor"     : {"type": "STRING"},
-            "gravadas"         : {"type": "NUMBER"},
-            "exentas"          : {"type": "NUMBER"},
-            "no_sujetas"       : {"type": "NUMBER"},
-            "iva"              : {"type": "NUMBER"},
-            "total"            : {"type": "NUMBER"},
+            "gravadas"         : {"type": "STRING"},
+            "exentas"          : {"type": "STRING"},
+            "no_sujetas"       : {"type": "STRING"},
+            "iva"              : {"type": "STRING"},
+            "total"            : {"type": "STRING"},
             "alertas_fiscales" : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"     : _sub_razonamiento(),
             "auditoria_ia"     : _sub_auditoria(),
@@ -118,11 +119,14 @@ _SCHEMAS: dict[str, dict] = {
             "sello_recepcion"  : {"type": "STRING"},
             "nom_emisor"       : {"type": "STRING"},
             "nit_emisor"       : {"type": "STRING"},
-            "gravadas"         : {"type": "NUMBER"},
-            "exentas"          : {"type": "NUMBER"},
-            "no_sujetas"       : {"type": "NUMBER"},
-            "iva"              : {"type": "NUMBER"},
-            "total"            : {"type": "NUMBER"},
+            "dui_emisor"       : {"type": "STRING"},
+            "gravadas"         : {"type": "STRING"},
+            "exentas"          : {"type": "STRING"},
+            "no_sujetas"       : {"type": "STRING"},
+            "iva"              : {"type": "STRING"},
+            "total"            : {"type": "STRING"},
+            "fovial"           : {"type": "STRING"},
+            "cotrans"          : {"type": "STRING"},
             "alertas_fiscales" : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"     : _sub_razonamiento(),
             "auditoria_ia"     : _sub_auditoria(),
@@ -139,8 +143,8 @@ _SCHEMAS: dict[str, dict] = {
             "sello_recepcion"   : {"type": "STRING"},
             "nom_retenido"      : {"type": "STRING"},
             "nit_retenido"      : {"type": "STRING"},
-            "monto_sujeto"      : {"type": "NUMBER"},
-            "iva_retenido"      : {"type": "NUMBER"},
+            "monto_sujeto"      : {"type": "STRING"},
+            "iva_retenido"      : {"type": "STRING"},
             "alertas_fiscales"  : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"      : _sub_razonamiento(),
             "auditoria_ia"      : _sub_auditoria(),
@@ -158,8 +162,8 @@ _SCHEMAS: dict[str, dict] = {
             "nom_sujeto"        : {"type": "STRING"},
             "nit_sujeto"        : {"type": "STRING"},
             "dui_sujeto"        : {"type": "STRING"},
-            "base_compras"      : {"type": "NUMBER"},
-            "retencion_renta"   : {"type": "NUMBER"},
+            "base_compras"      : {"type": "STRING"},
+            "retencion_renta"   : {"type": "STRING"},
             "alertas_fiscales"  : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"      : _sub_razonamiento(),
             "auditoria_ia"      : _sub_auditoria(),
@@ -186,10 +190,11 @@ IDENTIFICADORES FISCALES:
   NRC : 1-7 dígitos (solo contribuyentes inscritos en IVA)
   UUID: formato XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (32 hex con guiones)
 
-REGLAS MATEMÁTICAS CRÍTICAS:
-  IVA (DTE-03/05/06) = Ventas Gravadas × 13%   (tolerancia ±$0.02)
-  Retención (DTE-07) = Monto Sujeto × 1%        (tolerancia ±$0.02)
-  Retención (DTE-14) = Base Compras × 10%        (tolerancia ±$0.02)
+REGLAS MATEMÁTICAS CRÍTICAS (Art. 54 IVA / Art. 72 C.T.):
+  IVA (DTE-03/05/06)  = Ventas Gravadas × 13%              (tolerancia ±$0.02)
+  Retención (DTE-07)  = Monto Sujeto × 1%                  (tolerancia ±$0.02)
+  Retención (DTE-14)  = Base Compras × 10%                  (tolerancia ±$0.02)
+  Líquido (DTE-14)    = Base Compras − Retención Renta      (= Base × 0.90)
 """
 
 _INSTRUCCIONES_ESPACIALES = """
@@ -202,13 +207,29 @@ PASO 1 — IDENTIFICAR LAYOUT VISUAL
   • TICKET      : datos en columna única, "etiqueta: valor" en la misma línea
   • 2-COLUMNAS  : EMISOR (izquierda) y RECEPTOR (derecha) en el encabezado
   • ENCABEZADO  : bloque EMISOR arriba, bloque RECEPTOR separado por línea
+  Analiza la estructura de 2 columnas o encabezado/pie de página para diferenciar
+  al Emisor del Receptor por su POSICIÓN FÍSICA en el documento.
   Registra el formato en razonamiento.layout_detectado.
 
-PASO 2 — LOCALIZAR BLOQUES EMISOR / RECEPTOR
-  Busca marcadores: "DATOS DEL EMISOR", "EMISOR:", "DATOS DEL RECEPTOR",
-  "RECEPTOR:", "ADQUIRIENTE:", "CLIENTE:", "PROVEEDOR:", "SUJETO RETENIDO:".
-  En formato 2-columnas: EMISOR está arriba-izquierda, RECEPTOR arriba-derecha.
-  Registra en razonamiento.bloque_emisor y razonamiento.bloque_receptor.
+PASO 2 — LOCALIZAR VISUALMENTE LOS RECUADROS DE EMISOR / RECEPTOR
+  Analiza visualmente la estructura espacial del documento.
+  Identifica los recuadros físicos (bordes, líneas, agrupación espacial) que
+  corresponden al EMISOR y al RECEPTOR.
+  • Formato 2-COLUMNAS : recuadro EMISOR en la parte superior-izquierda;
+                          recuadro RECEPTOR en la parte superior-derecha.
+  • Formato ENCABEZADO : bloque EMISOR arriba; RECEPTOR debajo, separado por
+                          línea horizontal o espacio en blanco.
+  • Formato TICKET     : busca los marcadores textuales "EMISOR:", "RECEPTOR:",
+                          "DATOS DEL EMISOR", "DATOS DEL RECEPTOR",
+                          "ADQUIRIENTE:", "CLIENTE:", "PROVEEDOR:".
+
+  ⚠️ REGLA ESPACIAL CRÍTICA: Diferencia al Emisor del Receptor por su ubicación
+  física en la página, NO por el texto de la etiqueta. Las etiquetas como
+  "RAZÓN SOCIAL", "NIT:", "NRC:" son parte del diseño fijo del DTE y jamás son
+  el valor a extraer. El valor siempre está DESPUÉS del ":" de cada etiqueta.
+
+  Registra en razonamiento.bloque_emisor y razonamiento.bloque_receptor la
+  ubicación detectada y los primeros 80 caracteres del bloque identificado.
 
 PASO 3 — EXTRAER VALORES (NUNCA ETIQUETAS)
   ⚠️ REGLA ABSOLUTA: el VALOR es lo que aparece DESPUÉS del ":" en cada campo.
@@ -219,9 +240,19 @@ PASO 3 — EXTRAER VALORES (NUNCA ETIQUETAS)
 
   Para NÚMEROS: solo dígitos y punto decimal. Elimina "$", "US", comas de miles.
   Para FECHAS: formato DD/MM/YYYY (ej: "15/03/2025"). Busca "Fecha de Emisión:".
-  Para SELLO: cadena alfanumérica sin guiones, 30-40 chars.
+  Para SELLO DE RECEPCIÓN (Ministerio de Hacienda): cadena alfanumérica de ~40
+    caracteres (ej: 20264BDE9F3A...). Búscalo EXCLUSIVAMENTE en el ENCABEZADO del
+    documento (parte superior), justo debajo del Código de Generación y del Número
+    de Control. NUNCA lo busques cerca del código QR — ese área puede contener texto
+    no relacionado. Es distinta del UUID (codigo_generacion). Nunca dejes
+    sello_recepcion vacío si hay una cadena alfanumérica larga de ~40 chars en el
+    encabezado.
   Para UUID (codigo_generacion): XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (36 chars).
   Para num_control: formato DTE-XX-XXXX-XXXXXXXXX (con guiones).
+  Para NIT/DUI del Emisor en compras:
+    • Busca primero NIT de 14 dígitos. Si no encuentras NIT, busca DUI de 9 dígitos.
+    • Nunca dejes la identificación del emisor vacía si hay un número de 9 o 14
+      dígitos presente en el bloque del Emisor.
 
 PASO 4 — AUTO-VALIDAR Y GENERAR ALERTAS
   Verifica cada campo extraído:
@@ -229,8 +260,10 @@ PASO 4 — AUTO-VALIDAR Y GENERAR ALERTAS
   • DUI ≠  9 dígitos → alerta "DUI inválido: {valor extraído}"
   • Nombre contiene texto de etiqueta → alerta "Nombre parece etiqueta: {valor}"
   • IVA del doc ≠ gravadas × 13% (±$0.02) → alerta "IVA no coincide: doc={X} calc={Y}"
-  • Retención DTE-07 ≠ base × 1% (±$0.02) → alerta "Retención 1% incorrecta"
-  • Retención DTE-14 ≠ base × 10% (±$0.02) → alerta "Retención renta 10% incorrecta"
+  • Retención DTE-07 ≠ base × 1% (±$0.02) → alerta "Retención 1% incorrecta: doc={X} calc={Y}"
+  • Retención DTE-14 ≠ base × 10% (±$0.02) → alerta "Retención renta 10% incorrecta: doc={X} calc={Y}"
+  • Líquido DTE-14 ≠ base × 90% (±$0.02) → alerta "Líquido incorrecto: esperado={Y}"
+  • identificación emisor/sujeto vacía con número visible → alerta "Identificación no capturada"
   Lista vacía [] si no hay alertas.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -253,9 +286,17 @@ _ROLES: dict[str, str] = {
     ),
     "compras": (
         "El RECEPTOR es el cliente activo del sistema (quien compra y recibe el crédito).\n"
-        "El EMISOR es el PROVEEDOR/VENDEDOR — extrae su nombre y NIT.\n"
+        "El EMISOR es el PROVEEDOR/VENDEDOR — extrae su nombre e identificación.\n"
         "• El NIT del emisor NUNCA puede ser igual al NIT del cliente activo.\n"
-        "• Si nom_emisor coincide con el nombre del receptor → está mal extraído."
+        "• Si nom_emisor coincide con el nombre del receptor → está mal extraído.\n"
+        "• Identificación dual: busca primero NIT de 14 dígitos (nit_emisor).\n"
+        "  Si no localizas un NIT de 14 dígitos, busca el DUI de 9 dígitos (dui_emisor).\n"
+        "  Nunca dejes la identificación del emisor vacía si hay un número de 9 o 14\n"
+        "  dígitos presente en el bloque del Emisor.\n"
+        "• FOVIAL y COTRANS: si el emisor es una gasolinera o distribuidora de\n"
+        "  combustibles, es OBLIGATORIO extraer estos impuestos específicos.\n"
+        "  Asígnalos a las llaves 'fovial' y 'cotrans' del JSON (montos exactos en $).\n"
+        "  NO los sumes al monto Gravado ni al IVA — son campos separados."
     ),
     "retenciones": (
         "El AGENTE RETENEDOR (quien emite el DTE-07) es el cliente activo.\n"
@@ -292,10 +333,17 @@ _CAMPOS: dict[str, str] = {
         "• fecha             : DD/MM/YYYY\n"
         "• num_control       : Número de control DTE completo\n"
         "• codigo_generacion : UUID del documento\n"
-        "• sello_recepcion   : Sello del MH\n"
+        "• sello_recepcion   : Sello del MH (~40 chars alfanumérico, en el ENCABEZADO)\n"
         "• nom_emisor        : Nombre/Razón social del PROVEEDOR (bloque EMISOR)\n"
-        "• nit_emisor        : NIT del PROVEEDOR (14 dígitos)\n"
-        "• gravadas, exentas, no_sujetas, iva, total : montos en dólares\n"
+        "• nit_emisor        : NIT del PROVEEDOR (14 dígitos) — preferir sobre DUI\n"
+        "• dui_emisor        : DUI del PROVEEDOR (9 dígitos) — solo si no hay NIT de 14\n"
+        "• gravadas          : monto gravado en dólares (string exacto del documento)\n"
+        "• exentas           : monto exento (string exacto)\n"
+        "• no_sujetas        : monto no sujeto (string exacto)\n"
+        "• iva               : crédito fiscal IVA (string exacto)\n"
+        "• total             : total del documento (string exacto)\n"
+        "• fovial            : impuesto FOVIAL si el emisor es gasolinera (string exacto, '' si no aplica)\n"
+        "• cotrans           : impuesto COTRANS si el emisor es gasolinera (string exacto, '' si no aplica)\n"
         "• alertas_fiscales  : lista de problemas ([] si todo OK)"
     ),
     "retenciones": (
@@ -572,13 +620,51 @@ def _limpio_nit(raw) -> str:
     return re.sub(r'[^0-9]', '', str(raw or ""))
 
 
-def _limpio_num(raw) -> float | None:
+def _limpiar_monto_vision(raw) -> float:
+    """
+    Robust parser for monetary STRING values returned by Gemini Vision.
+
+    Rules applied in order:
+    1. None / empty / 'null'    → 0.0
+    2. Remove '$', spaces, NBSP
+    3. Comma + point both present:
+         "1,234.56" (comma before dot) → remove comma   → 1234.56
+         "1.234,56" (dot before comma) → dot=thousands  → 1234.56
+    4. Only comma:
+         "60,17"  (≤2 decimal digits) → comma=decimal   → 60.17
+         "1,500"  (3 decimal digits)  → comma=thousands → 1500.0
+    5. Point with exactly 3 decimal digits ("60.177"):
+         → provider typo, truncate to 2 decimals        → 60.17
+    6. Otherwise: direct float conversion.
+
+    Returns 0.0 on any parse failure.
+    """
     if raw is None:
-        return None
+        return 0.0
+    s = str(raw).strip().replace("$", "").replace(" ", "").replace("\xa0", "")
+    if not s or s.lower() in ("null", "none", ""):
+        return 0.0
+
+    if "," in s and "." in s:
+        if s.index(",") < s.index("."):
+            s = s.replace(",", "")           # "1,234.56" → comma=thousands
+        else:
+            s = s.replace(".", "").replace(",", ".")  # "1.234,56" → dot=thousands
+    elif "," in s:
+        parts = s.split(",")
+        if len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit():
+            s = s.replace(",", "")           # "1,500" → comma=thousands
+        else:
+            s = s.replace(",", ".")          # "60,17" → comma=decimal
+
     try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None
+        val = float(s)
+        # Truncate if exactly 3 decimal digits (provider typo: "60.177" → 60.17)
+        if "." in s and len(s.split(".", 1)[1]) == 3:
+            val = math.floor(val * 100) / 100
+        return round(val, 2)
+    except (ValueError, TypeError):
+        return 0.0
 
 
 def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
@@ -605,8 +691,8 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
             out["dui_cli"] = dui
 
         for campo in ("gravadas", "exentas", "no_sujetas", "iva", "total"):
-            v = _limpio_num(resultado.get(campo))
-            if v is not None:
+            v = _limpiar_monto_vision(resultado.get(campo))
+            if v:
                 out[campo] = v
 
     elif tipo_dte == "compras":
@@ -617,11 +703,24 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
         nit = _limpio_nit(resultado.get("nit_emisor"))
         if len(nit) == 14 and nit != nit_ctx:
             out["nit_prov"] = nit
+        else:
+            # DUI fallback: some providers are individuals without NIT (9-digit DUI)
+            dui = _limpio_nit(resultado.get("dui_emisor"))
+            if len(dui) == 9 and dui != nit_ctx:
+                out["nit_prov"] = dui
 
         for campo in ("gravadas", "exentas", "no_sujetas", "iva", "total"):
-            v = _limpio_num(resultado.get(campo))
-            if v is not None:
+            v = _limpiar_monto_vision(resultado.get(campo))
+            if v:
                 out[campo] = v
+
+        fov = _limpiar_monto_vision(resultado.get("fovial"))
+        if fov > 0:
+            out["fovial"] = fov
+
+        cot = _limpiar_monto_vision(resultado.get("cotrans"))
+        if cot > 0:
+            out["cotrans"] = cot
 
     elif tipo_dte == "retenciones":
         nom = _limpio_str(resultado.get("nom_retenido"))
@@ -632,12 +731,12 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
         if len(nit) == 14 and nit != nit_ctx:
             out["nit_prov"] = nit
 
-        base = _limpio_num(resultado.get("monto_sujeto"))
-        if base is not None:
+        base = _limpiar_monto_vision(resultado.get("monto_sujeto"))
+        if base:
             out["base"] = base
 
-        ret = _limpio_num(resultado.get("iva_retenido"))
-        if ret is not None:
+        ret = _limpiar_monto_vision(resultado.get("iva_retenido"))
+        if ret:
             out["ret"] = ret
 
     elif tipo_dte == "sujetos_excluidos":
@@ -653,12 +752,12 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
             if len(dui) == 9:
                 out["id_sujeto"] = dui
 
-        base = _limpio_num(resultado.get("base_compras"))
-        if base is not None:
+        base = _limpiar_monto_vision(resultado.get("base_compras"))
+        if base:
             out["base"] = base
 
-        ret = _limpio_num(resultado.get("retencion_renta"))
-        if ret is not None:
+        ret = _limpiar_monto_vision(resultado.get("retencion_renta"))
+        if ret:
             out["ret"] = ret
 
     return out
