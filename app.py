@@ -21,6 +21,7 @@ initial_sidebar_state="collapsed"
 # ─────────────────────────────────────────────
 def verificar_credenciales(usuario: str, clave: str) -> bool:
 try:
+
 usr_valido = st.secrets["auth"]["usuario"]
 pwd_valido = st.secrets["auth"]["clave"]
 return usuario.strip().lower() == usr_valido.lower() and clave == pwd_valido
