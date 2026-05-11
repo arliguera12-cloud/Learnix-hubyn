@@ -693,7 +693,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 elif total == 0.0 and gravadas > 0 and debito > 0:
                     total = round(gravadas + debito + exentas + no_sujetas, 2)
 
-        # ── Completar montos desde Vision cuando regex obtuvo 0 ──────────────
+        # ── Completar campos desde Vision cuando regex obtuvo vacío/0 ─────────
         if _vision_campos:
             if _vision_campos.get("gravadas") and gravadas == 0.0:
                 gravadas = round(float(_vision_campos["gravadas"]), 2)
@@ -705,6 +705,10 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 exentas = round(float(_vision_campos["exentas"]), 2)
             if _vision_campos.get("no_sujetas") and no_sujetas == 0.0:
                 no_sujetas = round(float(_vision_campos["no_sujetas"]), 2)
+            # Sello: Vision es la fuente primaria (~40 chars); regex como respaldo
+            v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
+            if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
+                sello = v_sello
 
         return {
             "fecha"         : fecha,
@@ -1789,11 +1793,12 @@ if not st.session_state.db_ventas.empty:
     df_fil_contrib = df_filtrado[df_filtrado['anexo'] == '1'].copy()
     df_fil_cons    = df_filtrado[df_filtrado['anexo'] == '2'].copy()
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🟢 Anexo 1 — Contribuyentes",
         "🔵 Anexo 2 — Consumidor Final",
         "🔍 Auditoría Completa",
-        "📈 Resumen por Tipo"
+        "📈 Resumen por Tipo",
+        "⚠️ Alertas",
     ])
 
     with tab1:
@@ -1934,6 +1939,44 @@ if not st.session_state.db_ventas.empty:
                 st.metric("Anexo 2 — Total Consumidor Final", f"${total_cons:,.2f}")
         else:
             st.info("Sin datos para mostrar.")
+
+    with tab5:
+        st.markdown("#### ⚠️ Detalle de Alertas por Documento")
+        if not df_filtrado.empty:
+            filas_alerta = []
+            for _, row in df_filtrado.iterrows():
+                razones = []
+                tipo   = str(row.get("tipo", ""))
+                grav   = float(row.get("gravadas", 0) or 0)
+                debito = float(row.get("debito", 0) or 0)
+                sello  = str(row.get("sello", "") or "").strip()
+                if tipo in ("03", "05", "06") and grav > 0 and debito > 0:
+                    iva_calc = round(grav * 0.13, 2)
+                    if abs(debito - iva_calc) > 0.01:
+                        razones.append(f"IVA ${debito:.2f} ≠ {grav:.2f}×13%=${iva_calc:.2f}")
+                if len(sello) < 30:
+                    razones.append(f"Sello vacío o corto ({len(sello)} chars)")
+                if razones:
+                    filas_alerta.append({
+                        "Archivo"     : str(row.get("archivo", "")),
+                        "Fecha"       : str(row.get("fecha", "")),
+                        "Tipo"        : tipo,
+                        "Num Control" : str(row.get("num_control_raw", row.get("num_control", ""))),
+                        "Cliente"     : str(row.get("nom_cli", "")),
+                        "Sello"       : sello or "(vacío)",
+                        "Alertas"     : " | ".join(razones),
+                    })
+            if filas_alerta:
+                df_alertas = pd.DataFrame(filas_alerta)
+                st.warning(f"⚠️ **{len(df_alertas)} documento(s) requieren revisión**")
+                st.dataframe(df_alertas, hide_index=True, use_container_width=True)
+                csv_al = df_alertas.to_csv(index=False).encode("utf-8")
+                st.download_button("📄 Exportar Alertas CSV", data=csv_al,
+                    file_name="alertas_ventas.csv", mime="text/csv")
+            else:
+                st.success("✅ Todos los documentos pasaron la validación.")
+        else:
+            st.info("Sin datos procesados.")
 
     # ── Botón de descarga principal ────────────────────────────────────────────
     st.markdown("---")
