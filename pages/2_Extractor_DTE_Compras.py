@@ -413,7 +413,15 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             num_control = ctrl.replace("-", "")
 
         if not ctrl:
-            return {"error_tipo": "No se detecto Numero de Control DTE valido."}
+            # Fallback: Vision extrajo num_control pero pdfplumber no lo encontró en texto
+            _vc_ctrl = safe_str(_vision_campos.get("num_control", ""))
+            _m_vc = re.search(r'(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})', _vc_ctrl, re.I)
+            if _m_vc:
+                ctrl        = _m_vc.group(1).upper()
+                tipo        = _m_vc.group(2)
+                num_control = ctrl.replace("-", "")
+            else:
+                return {"error_tipo": "No se detecto Numero de Control DTE valido."}
         if tipo not in TIPOS_VALIDOS_COMPRAS:
             return {
                 "error_tipo": (
@@ -1202,6 +1210,10 @@ with st.sidebar:
 
                 # Regla contable: DTE-01 (Factura consumidor) no es válido en Compras
                 _tipo_res = safe_str(res.get("tipo", ""))
+                # Normalizar: extraer dígitos y formatear como "03" (Gemini puede devolver "CCF", "3")
+                _m_tipo_r = re.search(r'\d+', _tipo_res)
+                if _m_tipo_r:
+                    _tipo_res = _m_tipo_r.group(0).zfill(2)
                 if _tipo_res and _tipo_res not in _TIPOS_ACEPTADOS_COMPRAS and "error_tipo" not in res and "error_fatal" not in res:
                     invalidos.append(fname)
                 elif "error_tipo" in res:

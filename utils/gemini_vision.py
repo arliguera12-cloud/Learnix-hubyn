@@ -239,7 +239,14 @@ REGLA DE ORO #1 — CÓDIGO DE GENERACIÓN (UUID):
   SALTO DE LÍNEA PARA RECONSTRUIR EL UUID COMPLETO DE 36 CARACTERES.
   NUNCA DEVUELVAS UN UUID TRUNCADO, PARTIDO O CON SALTOS DE LÍNEA INCRUSTADOS.
 
-REGLA DE ORO #2 — NIT/DUI DEL PROVEEDOR (¡PELIGRO DE CONFUSIÓN!):
+REGLA DE ORO #2 — TIPO DE DOCUMENTO (CAMPO CRÍTICO):
+  DEVUELVE ÚNICA Y EXCLUSIVAMENTE EL CÓDIGO NUMÉRICO DE 2 DÍGITOS.
+  EJEMPLOS CORRECTOS: "03" para CCF, "01" para Factura, "14" para Sujeto Excluido,
+  "05" para Nota de Crédito, "06" para Nota de Débito, "07" para Retención, "11" para Factura Exenta.
+  ESTÁ PROHIBIDO ESCRIBIR LETRAS, NOMBRES, DESCRIPCIONES O GUIONES EN ESTE CAMPO.
+  MAL: "CCF", "03-Comprobante", "3", "Crédito Fiscal" — BIEN: "03"
+
+REGLA DE ORO #3 — NIT/DUI DEL PROVEEDOR (¡PELIGRO DE CONFUSIÓN!):
   EXTRAE EL NIT O DUI ÚNICAMENTE DE LA CAJA SUPERIOR LLAMADA "DATOS DEL EMISOR"
   (O "SUJETO EXCLUIDO" EN DTE-14).
   ESTÁ ESTRICTAMENTE PROHIBIDO EXTRAER NÚMEROS DE DOCUMENTO DE LA SECCIÓN
@@ -838,8 +845,15 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
     """Maps vision field names to page-expected field names and filters invalid values."""
     out: dict = {}
 
-    # Campos comunes
-    for campo in ("tipo_documento", "fecha", "num_control"):
+    # tipo_documento: forzar código de 2 dígitos (Gemini puede devolver "CCF", "3", "03-CCF")
+    raw_tipo = resultado.get("tipo_documento")
+    if raw_tipo is not None:
+        _m_tipo = re.search(r'\d+', str(raw_tipo))
+        if _m_tipo:
+            out["tipo_documento"] = _m_tipo.group(0).zfill(2)
+
+    # Campos comunes de texto
+    for campo in ("fecha", "num_control"):
         v = _limpio_str(resultado.get(campo))
         if v:
             out[campo] = v
