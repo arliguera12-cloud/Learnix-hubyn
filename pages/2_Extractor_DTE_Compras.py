@@ -37,8 +37,6 @@ from utils.qa_utils import (
     mostrar_banner_qa,
     mostrar_indicador_vision,
     validar_montos_ventas,
-    clasificar_alerta_compra,
-    estilar_alertas,
 )
 # Alias para compatibilidad con código existente
 limpiar_monto             = _limpiar_monto
@@ -1748,19 +1746,8 @@ if not st.session_state.db_compras.empty:
         if not df_filtrado.empty:
             df_f07 = construir_df_f07_compras(df_filtrado)
             COLS_NUM  = [c for c in df_f07.columns if df_f07[c].dtype == float]
-            # Visual alerts: computed from source df (shares same index order)
-            df_f07.insert(0, "_alerta", df_filtrado.apply(clasificar_alerta_compra, axis=1).values)
-            COLS_NUM  = [c for c in df_f07.columns if df_f07[c].dtype == float]
-
-            n_alertas = (df_f07["_alerta"].str.startswith("⚠️")).sum()
-            if n_alertas:
-                st.warning(
-                    f"⚠️ **{n_alertas} fila(s) con Error de Cuadre Legal** — "
-                    "IVA ≠ 13% o Sello vacío. Ver columna `_alerta`.",
-                    icon=None,
-                )
             st.dataframe(
-                estilar_alertas(df_f07, "_alerta").format({c: "{:,.2f}" for c in COLS_NUM}),
+                df_f07.style.format({c: "{:,.2f}" for c in COLS_NUM}),
                 hide_index=True,
                 use_container_width=True,
             )
@@ -1810,15 +1797,13 @@ if not st.session_state.db_compras.empty:
         COLS_NUM_AUD = ['exe','gra','iva','ret','perc','tot','fovial','cotrans']
         cols_fmt     = {c: "{:,.2f}" for c in COLS_NUM_AUD if c in df_filtrado.columns}
 
-        df_aud = df_filtrado[cols_disp].copy()
-        df_aud.insert(0, "_alerta", df_filtrado.apply(clasificar_alerta_compra, axis=1).values)
         st.dataframe(
-            estilar_alertas(df_aud, "_alerta").format(cols_fmt),
+            df_filtrado[cols_disp].style.format(cols_fmt),
             use_container_width=True,
             hide_index=True,
         )
 
-        # Mini-descarga de auditoría en CSV (sin columna _alerta)
+        # Mini-descarga de auditoría en CSV
         csv_bytes = df_filtrado[cols_disp].to_csv(index=False).encode("utf-8")
         st.download_button(
             "📄 Descargar Auditoría CSV",
