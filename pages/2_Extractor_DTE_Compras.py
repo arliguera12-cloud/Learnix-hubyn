@@ -2000,7 +2000,7 @@ if not st.session_state.db_compras.empty:
                 sello  = str(row.get("sello", "") or "").strip()
                 if tipo in ("03", "05", "06") and gra > 0 and iva > 0:
                     iva_calc = round(gra * 0.13, 2)
-                    if abs(iva - iva_calc) > 0.01:
+                    if abs(iva - iva_calc) > 0.05:
                         razones.append(f"IVA ${iva:.2f} ≠ {gra:.2f}×13%=${iva_calc:.2f}")
                 if len(sello) < 30:
                     razones.append(f"Sello vacío o corto ({len(sello)} chars)")

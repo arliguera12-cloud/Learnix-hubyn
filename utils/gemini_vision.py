@@ -124,6 +124,9 @@ _SCHEMAS: dict[str, dict] = {
             "exentas"          : {"type": "STRING"},
             "no_sujetas"       : {"type": "STRING"},
             "iva"              : {"type": "STRING"},
+            "retencion_iva1"   : {"type": "STRING"},
+            "percepcion_iva"   : {"type": "STRING"},
+            "retencion_renta"  : {"type": "STRING"},
             "total"            : {"type": "STRING"},
             "fovial"           : {"type": "STRING"},
             "cotrans"          : {"type": "STRING"},
@@ -176,25 +179,50 @@ _SCHEMAS: dict[str, dict] = {
 # ─── Prompt construction ──────────────────────────────────────────────────────
 
 _CONTEXTO_FISCAL = """
-MARCO LEGAL — SISTEMA DTE EL SALVADOR (DGII / Ministerio de Hacienda)
-  DTE-01  Factura              → Venta a consumidor final (receptor usa DUI, no NIT)
-  DTE-03  CCF                  → Comprobante de Crédito Fiscal entre contribuyentes IVA
-  DTE-05  Nota de Crédito      → Reducción o anulación de DTE-03
-  DTE-06  Nota de Débito       → Cargo adicional sobre DTE-03
-  DTE-07  Comprobante Retención → Agente retiene 1% de IVA sobre monto sujeto
-  DTE-14  Comprobante Liquid.  → Sujeto excluido, retención de renta 10%
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ERES UN AUDITOR CONTABLE EXPERTO EN LA LEY DE IVA Y RENTA DE EL SALVADOR.
+APLICA ESTAS REGLAS PARA CUALQUIER DOCUMENTO DTE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-IDENTIFICADORES FISCALES:
-  NIT : EXACTAMENTE 14 dígitos (ej: 0614-270815-107-7 o 06142708151077)
-  DUI : EXACTAMENTE  9 dígitos  (ej: 04581234-7 o 045812347)
-  NRC : 1-7 dígitos (solo contribuyentes inscritos en IVA)
-  UUID: formato XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (32 hex con guiones)
+CLASIFICACIÓN (TIPOS DTE):
+  DTE-01  Factura Consumidor Final → receptor usa DUI. Inválido en módulo Compras (Anexo F-07).
+  DTE-03  CCF                     → Comprobante de Crédito Fiscal entre contribuyentes IVA
+  DTE-05  Nota de Crédito         → Reducción o anulación de DTE-03
+  DTE-06  Nota de Débito          → Cargo adicional sobre DTE-03
+  DTE-07  Comprobante Retención   → Agente retiene 1% de IVA sobre monto sujeto
+  DTE-14  Sujeto Excluido         → Retención de Renta 10%. El proveedor NO es el Emisor.
 
-REGLAS MATEMÁTICAS CRÍTICAS (Art. 54 IVA / Art. 72 C.T.):
-  IVA (DTE-03/05/06)  = Ventas Gravadas × 13%              (tolerancia ±$0.02)
-  Retención (DTE-07)  = Monto Sujeto × 1%                  (tolerancia ±$0.02)
-  Retención (DTE-14)  = Base Compras × 10%                  (tolerancia ±$0.02)
-  Líquido (DTE-14)    = Base Compras − Retención Renta      (= Base × 0.90)
+IDENTIFICACIÓN (NIT / DUI):
+  NIT : EXACTAMENTE 14 dígitos. Puede venir con guiones — quítalos: 0614-270815-107-7 → 06142708151077
+  DUI : EXACTAMENTE  9 dígitos. Puede venir con guiones — quítalos: 04581234-7 → 045812347
+  NRC : 1-7 dígitos (solo contribuyentes IVA)
+  UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (CON guiones — es el Código de Generación)
+  REGLA NIT/DUI: Si el proveedor es Persona Natural y NO tiene NIT, extrae su DUI del campo
+    numDocumento o dui. Quítale los guiones. Devuélvelo limpio en el campo correspondiente.
+  REGLA DTE-14: El proveedor real NO es el Emisor del documento. Extrae nombre e identificación
+    de la sección "Sujeto Excluido" / sujetoExcluido. Busca su monto de Retención de Renta (10%).
+
+DESGLOSE TRIBUTARIO OBLIGATORIO:
+  IVA 13%          → código tributo 20 o "Impuesto al Valor Agregado". Si no hay Total IVA
+                      explícito, suma los valores de Tributos con código 20.
+  Retención IVA 1% → código 22 o "Retención IVA". Devolver en retencion_iva1.
+  Percepción IVA   → código 23 o "Percepción IVA" (1% o 2%). Devolver en percepcion_iva.
+  FOVIAL ($0.20/gal) → código C3. Solo gasolineras. Devolver en fovial.
+  COTRANS ($0.10/gal)→ código 59. Solo gasolineras. Devolver en cotrans.
+  Retención Renta 10% → solo DTE-14. Devolver en retencion_renta.
+
+SELLO DE RECEPCIÓN:
+  Exactamente ~40 caracteres ALFANUMÉRICOS CONTINUOS SIN guiones (ej: 20264BDE9F3A0C1D...).
+  NUNCA es el UUID (tiene guiones). NUNCA empieza con "DTE-" (eso es Número de Control).
+  Búscalo en TODO el texto, incluso bajo etiquetas como:
+    "Sello de Recepción", "SelloRecibido", "respuestaHacienda.selloRecibido", "responseMH.selloRecibido".
+  Devuelve "" si no lo localizas con certeza — NO inventes el valor.
+
+REGLAS MATEMÁTICAS (tolerancia ±$0.05 para redondeos):
+  IVA (DTE-03/05/06)  = Ventas Gravadas × 13%
+  Retención (DTE-07)  = Monto Sujeto × 1%
+  Retención (DTE-14)  = Base Compras × 10%
+  Líquido (DTE-14)    = Base Compras − Retención Renta  (= Base × 0.90)
 """
 
 _INSTRUCCIONES_ESPACIALES = """

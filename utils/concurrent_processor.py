@@ -161,17 +161,25 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
         else:
             fecha = fecha_raw
 
-        # Identificación del receptor
-        nit_r = re.sub(r"[^0-9]", "", str(receptor.get("nit") or receptor.get("numDocumento") or ""))
-        dui_r = re.sub(r"[^0-9]", "", str(receptor.get("numDocumento") or ""))
+        # Identificación del receptor — strip guiones antes de filtrar dígitos
+        _raw_r = str(
+            receptor.get("nit") or receptor.get("dui") or receptor.get("numDocumento") or ""
+        ).replace("-", "").strip()
+        nit_r = re.sub(r"[^0-9]", "", _raw_r)
+        _raw_dui_r = str(receptor.get("numDocumento") or "").replace("-", "").strip()
+        dui_r = re.sub(r"[^0-9]", "", _raw_dui_r)
 
         # Identificación del emisor (para validación de pertenencia en ventas)
         emisor_v = dte.get("emisor") or {}
-        nit_emisor_v = re.sub(r"[^0-9]", "", str(emisor_v.get("nit") or ""))
+        _raw_emit_v = str(
+            emisor_v.get("nit") or emisor_v.get("dui") or emisor_v.get("numDocumento") or ""
+        ).replace("-", "").strip()
+        nit_emisor_v = re.sub(r"[^0-9]", "", _raw_emit_v)
 
-        # Tributos: IVA, FOVIAL, COTRANS
+        # Tributos: IVA, FOVIAL, COTRANS — proteger contra None
+        tributos_v = resumen.get("tributos") or []
         iva_val = fovial = cotrans = 0.0
-        for t in (resumen.get("tributos") or []):
+        for t in tributos_v:
             cod  = str(t.get("codigo") or "")
             desc = str(t.get("descripcion") or "").upper()
             val  = _safe_float(t.get("valor"))
@@ -257,20 +265,27 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
         if tipo_dte == "14":
             sujeto   = dte.get("sujetoExcluido") or {}
             nom_prov = str(sujeto.get("nombre") or "").upper().strip()
-            id_prov  = re.sub(r"[^0-9]", "", str(sujeto.get("documento") or sujeto.get("nit") or ""))
+            _raw_suj = str(
+                sujeto.get("documento") or sujeto.get("nit") or sujeto.get("dui") or ""
+            ).replace("-", "").strip()
+            id_prov  = re.sub(r"[^0-9]", "", _raw_suj)
         else:
             emisor   = dte.get("emisor") or {}
             nom_prov = str(emisor.get("nombre") or "").upper().strip()
-            id_prov  = re.sub(r"[^0-9]", "", str(
-                emisor.get("nit") or emisor.get("dui") or emisor.get("nrc") or ""
-            ))
+            _raw_em  = str(
+                emisor.get("nit") or emisor.get("dui") or emisor.get("numDocumento") or emisor.get("nrc") or ""
+            ).replace("-", "").strip()
+            id_prov  = re.sub(r"[^0-9]", "", _raw_em)
 
         nit_prov = id_prov if len(id_prov) == 14 else ""
         dui_prov = id_prov if len(id_prov) == 9  else ""
 
         # Identificación del receptor (para validación de pertenencia en compras)
         receptor_c = dte.get("receptor") or {}
-        nit_receptor_c = re.sub(r"[^0-9]", "", str(receptor_c.get("nit") or ""))
+        _raw_rec_c = str(
+            receptor_c.get("nit") or receptor_c.get("dui") or receptor_c.get("numDocumento") or ""
+        ).replace("-", "").strip()
+        nit_receptor_c = re.sub(r"[^0-9]", "", _raw_rec_c)
 
         fecha_raw = str(ident.get("fecEmi") or "")
         if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_raw):
@@ -279,8 +294,9 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
         else:
             fecha = fecha_raw
 
+        tributos_c = resumen.get("tributos") or []
         iva_val = fovial = cotrans = 0.0
-        for t in (resumen.get("tributos") or []):
+        for t in tributos_c:
             cod  = str(t.get("codigo") or "")
             desc = str(t.get("descripcion") or "").upper()
             val  = _safe_float(t.get("valor"))
