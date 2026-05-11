@@ -30,6 +30,16 @@ log = logging.getLogger(__name__)
 MAX_WORKERS: int = 10   # hilos simultáneos — seguro bajo 1,000 RPM
 
 
+def _safe_float(value) -> float:
+    """Convert any value to float, returning 0.0 on any failure."""
+    try:
+        if value is None:
+            return 0.0
+        return float(str(value).replace(",", ".").strip() or 0)
+    except (TypeError, ValueError, AttributeError):
+        return 0.0
+
+
 def leer_archivos_uploaded(archivos: list) -> list[tuple[str, bytes]]:
     """
     Lee los bytes de una lista de UploadedFile de Streamlit en el hilo principal.
@@ -164,7 +174,7 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
         for t in (resumen.get("tributos") or []):
             cod  = str(t.get("codigo") or "")
             desc = str(t.get("descripcion") or "").upper()
-            val  = float(t.get("valor") or 0)
+            val  = _safe_float(t.get("valor"))
             if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
                 iva_val = val
             elif cod == "C3" or "FOVIAL" in desc:
@@ -172,7 +182,7 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
             elif cod == "59" or "COTRANS" in desc:
                 cotrans = val
         if not iva_val:
-            iva_val = float(resumen.get("totalIva") or 0)
+            iva_val = _safe_float(resumen.get("totalIva"))
 
         gen_uuid = str(ident.get("codigoGeneracion") or "")
         num_ctrl = str(ident.get("numeroControl") or "")
@@ -189,13 +199,13 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
             "nom_cli"        : str(receptor.get("nombre") or "CONSUMIDOR FINAL").upper().strip(),
             "nit_cli"        : nit_r if len(nit_r) == 14 else "",
             "dui_cli"        : dui_r if len(dui_r) == 9 else "",
-            "gravadas"       : float(resumen.get("totalGravada") or 0),
-            "exentas"        : float(resumen.get("totalExenta") or 0),
-            "no_sujetas"     : float(resumen.get("totalNoSuj") or 0),
+            "gravadas"       : _safe_float(resumen.get("totalGravada")),
+            "exentas"        : _safe_float(resumen.get("totalExenta")),
+            "no_sujetas"     : _safe_float(resumen.get("totalNoSuj")),
             "debito"         : iva_val,
             "terceros"       : 0.0,
             "deb_terc"       : 0.0,
-            "total"          : float(resumen.get("totalPagar") or 0),
+            "total"          : _safe_float(resumen.get("totalPagar")),
             "fovial"         : fovial,
             "cotrans"        : cotrans,
             "_origen"        : "json_nativo",
@@ -273,7 +283,7 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
         for t in (resumen.get("tributos") or []):
             cod  = str(t.get("codigo") or "")
             desc = str(t.get("descripcion") or "").upper()
-            val  = float(t.get("valor") or 0)
+            val  = _safe_float(t.get("valor"))
             if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
                 iva_val = val
             elif cod == "C3" or "FOVIAL" in desc:
@@ -281,7 +291,7 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
             elif cod == "59" or "COTRANS" in desc:
                 cotrans = val
         if not iva_val:
-            iva_val = float(resumen.get("totalIva") or 0)
+            iva_val = _safe_float(resumen.get("totalIva"))
 
         gen_uuid = str(ident.get("codigoGeneracion") or "")
         num_ctrl = str(ident.get("numeroControl") or "")
@@ -298,13 +308,13 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
             "nom_prov"       : nom_prov,
             "nit_prov"       : nit_prov,
             "dui_prov"       : dui_prov,
-            "gra"            : float(resumen.get("totalGravada") or 0),
-            "exe"            : float(resumen.get("totalExenta") or 0),
-            "no_sujetas"     : float(resumen.get("totalNoSuj") or 0),
+            "gra"            : _safe_float(resumen.get("totalGravada")),
+            "exe"            : _safe_float(resumen.get("totalExenta")),
+            "no_sujetas"     : _safe_float(resumen.get("totalNoSuj")),
             "iva"            : iva_val,
             "ret"            : 0.0,
             "perc"           : 0.0,
-            "tot"            : float(resumen.get("totalPagar") or 0),
+            "tot"            : _safe_float(resumen.get("totalPagar")),
             "fovial"         : fovial,
             "cotrans"        : cotrans,
             "_origen"        : "json_nativo",
