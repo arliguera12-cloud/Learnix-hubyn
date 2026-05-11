@@ -1,3 +1,4 @@
+import functools
 import streamlit as st
 import pdfplumber
 import pandas as pd
@@ -9,6 +10,7 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
+from utils.concurrent_processor import leer_y_procesar_lote
 from utils.pdf_utils import (
     safe_str,
     normalizar_unicode,
@@ -170,11 +172,34 @@ def extraer_sello_dte14(texto: str) -> str:
 def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
     if not file_bytes or len(file_bytes) < 512:
         return {"error": "Archivo vacío o corrupto."}
+
+    # ── Vision-First: extraer con IA antes de pdfplumber ─────────────────────
+    _nit_cliente_ctx = limpiar_nit(cliente_activo.get('nit', ''))
+    _nom_cliente_ctx = cliente_activo.get('nombre', '')
+
+    gemini_correcciones: list[str] = []
+    _vision_campos: dict  = {}
+    _vision_alertas: list = []
+    _vision_audit: dict   = {}
+
+    if vision_disponible():
+        _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+            file_bytes,
+            "sujetos_excluidos",
+            {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
+        )
+        gemini_correcciones = [
+            f"Vision: {a}" for a in _vision_alertas
+        ] if _vision_alertas else (
+            [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+            if _vision_campos else []
+        )
+
     try:
         texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
         texto_completo = texto_lineal + "\n" + texto_visual
 
-        if len(texto_completo.strip()) < 50:
+        if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
             return {"error": "PDF de imagen — sin texto extraíble."}
 
         t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
@@ -266,36 +291,20 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         if base > 0 and ret == 0:
             ret = round(base * 0.10, 2)
 
-        # ── Extracción multimodal con Gemini Vision ───────────────────────────
-        gemini_correcciones: list[str] = []
-        _vision_campos: dict  = {}
-        _vision_alertas: list = []
-        _vision_audit: dict   = {}
+        # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
+        if _vision_campos.get("fecha"):
+            fecha = _vision_campos["fecha"]
+        if _vision_campos.get("nom_sujeto"):
+            nom_sujeto = _vision_campos["nom_sujeto"]
+        if _vision_campos.get("id_sujeto"):
+            id_sujeto = _vision_campos["id_sujeto"]
+        if _vision_campos.get("base") and base == 0.0:
+            base = float(_vision_campos["base"])
+        if _vision_campos.get("ret") and ret == 0.0:
+            ret = float(_vision_campos["ret"])
 
-        _nom_cliente = cliente_activo.get('nombre', '')
-
-        if vision_disponible():
-            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
-                file_bytes,
-                "sujetos_excluidos",
-                {"nit": nit_cliente, "nombre": _nom_cliente},
-            )
-            if _vision_campos.get("fecha"):
-                fecha = _vision_campos["fecha"]
-            if _vision_campos.get("nom_sujeto"):
-                nom_sujeto = _vision_campos["nom_sujeto"]
-            if _vision_campos.get("id_sujeto"):
-                id_sujeto = _vision_campos["id_sujeto"]
-            if _vision_campos.get("base") and base == 0.0:
-                base = _vision_campos["base"]
-            if _vision_campos.get("ret") and ret == 0.0:
-                ret = _vision_campos["ret"]
-            gemini_correcciones = [f"Vision: {a}" for a in _vision_alertas] if _vision_alertas else (
-                [f"Vision extrajo {len(_vision_campos)} campo(s)"] if _vision_campos else []
-            )
-
-        elif gemini_disponible():
-            # Fallback: verificación textual cuando Vision no está disponible
+        if not _vision_campos and gemini_disponible():
+            # Fallback textual solo cuando Vision no está disponible
             _nit_suj = id_sujeto if len(id_sujeto) == 14 else ""
             _dui_suj = id_sujeto if len(id_sujeto) == 9  else ""
             _campos_act = {
@@ -308,7 +317,7 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
                 texto_lineal,
                 "sujetos_excluidos",
                 _campos_act,
-                {"nit": nit_cliente, "nombre": _nom_cliente},
+                {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
             )
             if _corr_dict.get("fecha"):
                 fecha = _corr_dict["fecha"]
@@ -597,25 +606,38 @@ with st.sidebar:
             estado_txt = st.empty()
             total      = len(nuevos)
 
-            for idx, f in enumerate(nuevos):
-                estado_txt.caption(f"⏳ {idx+1}/{total}: `{f.name}`")
-                res = extraer_sujetos_nativo(f.read(), cliente)
+            # ── Pre-lectura en hilo principal ───────────────────────────────────
+            nombres_y_bytes: list[tuple[str, bytes]] = [(f.name, f.read()) for f in nuevos]
+            estado_txt.caption(
+                f"⏳ Enviando {total} archivos en paralelo a Gemini..."
+            )
 
+            # ── Extracción paralela ─────────────────────────────────────────────
+            fn_extraer = functools.partial(extraer_sujetos_nativo, cliente_activo=cliente)
+
+            def _progreso_suj(comp: int, tot: int, fname: str) -> None:
+                bar.progress(comp / tot)
+                estado_txt.caption(f"⏳ {comp}/{tot} completados — `{fname}`")
+
+            resultados = leer_y_procesar_lote(
+                nombres_y_bytes, fn_extraer, progreso_cb=_progreso_suj,
+            )
+
+            # ── Clasificación secuencial ────────────────────────────────────────
+            for fname, _fb, res in resultados:
                 if "error" in res:
-                    errores.append(f"❌ `{f.name}` — {res['error']}")
+                    errores.append(f"❌ `{fname}` — {res['error']}")
                 elif "error_tipo" in res:
-                    errores.append(f"⚠️ `{f.name}` — {res['error_tipo']}")
+                    errores.append(f"⚠️ `{fname}` — {res['error_tipo']}")
                 else:
-                    res["archivo"] = f.name
-                    # QA gate: flag documentos que requieren revisión
+                    res["archivo"] = fname
                     _qa_alertas = validar_montos_sujetos(res)
                     _v_audit    = res.get("_vision_audit", {})
                     _confianza  = _v_audit.get("confianza", 100) if _v_audit else 100
                     res["_revision"] = "⚠️" if (_qa_alertas or _confianza < 65) else "✅"
                     extracted.append(res)
 
-                st.session_state.archivos_suj.append(f.name)
-                bar.progress((idx + 1) / total)
+                st.session_state.archivos_suj.append(fname)
 
             estado_txt.empty()
 

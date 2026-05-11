@@ -127,6 +127,11 @@ _SCHEMAS: dict[str, dict] = {
             "total"            : {"type": "STRING"},
             "fovial"           : {"type": "STRING"},
             "cotrans"          : {"type": "STRING"},
+            "gravadas"         : {"type": "NUMBER"},
+            "exentas"          : {"type": "NUMBER"},
+            "no_sujetas"       : {"type": "NUMBER"},
+            "iva"              : {"type": "NUMBER"},
+            "total"            : {"type": "NUMBER"},
             "alertas_fiscales" : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"     : _sub_razonamiento(),
             "auditoria_ia"     : _sub_auditoria(),
@@ -247,6 +252,11 @@ PASO 3 — EXTRAER VALORES (NUNCA ETIQUETAS)
     no relacionado. Es distinta del UUID (codigo_generacion). Nunca dejes
     sello_recepcion vacío si hay una cadena alfanumérica larga de ~40 chars en el
     encabezado.
+  Para SELLO DE RECEPCIÓN (Ministerio de Hacienda): busca una cadena alfanumérica
+    de 30-40 caracteres sin guiones, ubicada típicamente en la zona inferior del
+    documento cerca del código QR o de la leyenda "Sello de Recepción". Es distinta
+    del UUID (codigo_generacion). Nunca dejes sello_recepcion vacío si hay una
+    cadena alfanumérica larga visible en esa zona.
   Para UUID (codigo_generacion): XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (36 chars).
   Para num_control: formato DTE-XX-XXXX-XXXXXXXXX (con guiones).
   Para NIT/DUI del Emisor en compras:
@@ -297,6 +307,7 @@ _ROLES: dict[str, str] = {
         "  combustibles, es OBLIGATORIO extraer estos impuestos específicos.\n"
         "  Asígnalos a las llaves 'fovial' y 'cotrans' del JSON (montos exactos en $).\n"
         "  NO los sumes al monto Gravado ni al IVA — son campos separados."
+        "  dígitos presente en el bloque del Emisor."
     ),
     "retenciones": (
         "El AGENTE RETENEDOR (quien emite el DTE-07) es el cliente activo.\n"
@@ -344,6 +355,11 @@ _CAMPOS: dict[str, str] = {
         "• total             : total del documento (string exacto)\n"
         "• fovial            : impuesto FOVIAL si el emisor es gasolinera (string exacto, '' si no aplica)\n"
         "• cotrans           : impuesto COTRANS si el emisor es gasolinera (string exacto, '' si no aplica)\n"
+        "• sello_recepcion   : Sello del MH (alfanumérico 30-40 chars, cerca del QR)\n"
+        "• nom_emisor        : Nombre/Razón social del PROVEEDOR (bloque EMISOR)\n"
+        "• nit_emisor        : NIT del PROVEEDOR (14 dígitos) — preferir sobre DUI\n"
+        "• dui_emisor        : DUI del PROVEEDOR (9 dígitos) — solo si no hay NIT de 14\n"
+        "• gravadas, exentas, no_sujetas, iva, total : montos en dólares\n"
         "• alertas_fiscales  : lista de problemas ([] si todo OK)"
     ),
     "retenciones": (
@@ -574,36 +590,6 @@ def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict | None) -> dict |
 
         # Non-retryable error (403, 404, JSON parse, connection, timeout)
         return None
-    # Phase 1: with schema
-    result = _http_post(pdf_bytes, prompt, api_key, schema)
-    if result is not None:
-        return result
-
-    # Phase 2: retry without schema on 400 or schema-related errors
-    err = _ultimo_error
-    is_schema_error = (
-        "400" in err
-        or "schema" in err.lower()
-        or "nullable" in err.lower()
-        or "unknown field" in err.lower()
-        or "invalid value" in err.lower()
-    )
-    if schema and is_schema_error:
-        log.warning("Vision Phase 1 failed (%s). Retrying without responseSchema.", err[:80])
-        result = _http_post(pdf_bytes, prompt, api_key, schema=None)
-        if result is not None:
-            # Mark that we ran without schema so the caller knows
-            if isinstance(result, dict) and "auditoria_ia" not in result:
-                result["auditoria_ia"] = {}
-            log.info("Vision Phase 2 (no schema) succeeded.")
-            _ultimo_error = ""
-            return result
-        # Both phases failed — keep the Phase 2 error but mention Phase 1 too
-        if _ultimo_error:
-            _ultimo_error = f"Fase 1: {err} | Fase 2: {_ultimo_error}"
-        else:
-            _ultimo_error = err
-
 
     return None
 
