@@ -13,6 +13,7 @@ Fix v1.1:
 import base64
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -97,11 +98,11 @@ _SCHEMAS: dict[str, dict] = {
             "nom_receptor"     : {"type": "STRING"},
             "nit_receptor"     : {"type": "STRING"},
             "dui_receptor"     : {"type": "STRING"},
-            "gravadas"         : {"type": "NUMBER"},
-            "exentas"          : {"type": "NUMBER"},
-            "no_sujetas"       : {"type": "NUMBER"},
-            "iva"              : {"type": "NUMBER"},
-            "total"            : {"type": "NUMBER"},
+            "gravadas"         : {"type": "STRING"},
+            "exentas"          : {"type": "STRING"},
+            "no_sujetas"       : {"type": "STRING"},
+            "iva"              : {"type": "STRING"},
+            "total"            : {"type": "STRING"},
             "alertas_fiscales" : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"     : _sub_razonamiento(),
             "auditoria_ia"     : _sub_auditoria(),
@@ -119,6 +120,13 @@ _SCHEMAS: dict[str, dict] = {
             "nom_emisor"       : {"type": "STRING"},
             "nit_emisor"       : {"type": "STRING"},
             "dui_emisor"       : {"type": "STRING"},
+            "gravadas"         : {"type": "STRING"},
+            "exentas"          : {"type": "STRING"},
+            "no_sujetas"       : {"type": "STRING"},
+            "iva"              : {"type": "STRING"},
+            "total"            : {"type": "STRING"},
+            "fovial"           : {"type": "STRING"},
+            "cotrans"          : {"type": "STRING"},
             "gravadas"         : {"type": "NUMBER"},
             "exentas"          : {"type": "NUMBER"},
             "no_sujetas"       : {"type": "NUMBER"},
@@ -140,8 +148,8 @@ _SCHEMAS: dict[str, dict] = {
             "sello_recepcion"   : {"type": "STRING"},
             "nom_retenido"      : {"type": "STRING"},
             "nit_retenido"      : {"type": "STRING"},
-            "monto_sujeto"      : {"type": "NUMBER"},
-            "iva_retenido"      : {"type": "NUMBER"},
+            "monto_sujeto"      : {"type": "STRING"},
+            "iva_retenido"      : {"type": "STRING"},
             "alertas_fiscales"  : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"      : _sub_razonamiento(),
             "auditoria_ia"      : _sub_auditoria(),
@@ -159,8 +167,8 @@ _SCHEMAS: dict[str, dict] = {
             "nom_sujeto"        : {"type": "STRING"},
             "nit_sujeto"        : {"type": "STRING"},
             "dui_sujeto"        : {"type": "STRING"},
-            "base_compras"      : {"type": "NUMBER"},
-            "retencion_renta"   : {"type": "NUMBER"},
+            "base_compras"      : {"type": "STRING"},
+            "retencion_renta"   : {"type": "STRING"},
             "alertas_fiscales"  : {"type": "ARRAY", "items": {"type": "STRING"}},
             "razonamiento"      : _sub_razonamiento(),
             "auditoria_ia"      : _sub_auditoria(),
@@ -237,6 +245,13 @@ PASO 3 — EXTRAER VALORES (NUNCA ETIQUETAS)
 
   Para NÚMEROS: solo dígitos y punto decimal. Elimina "$", "US", comas de miles.
   Para FECHAS: formato DD/MM/YYYY (ej: "15/03/2025"). Busca "Fecha de Emisión:".
+  Para SELLO DE RECEPCIÓN (Ministerio de Hacienda): cadena alfanumérica de ~40
+    caracteres (ej: 20264BDE9F3A...). Búscalo EXCLUSIVAMENTE en el ENCABEZADO del
+    documento (parte superior), justo debajo del Código de Generación y del Número
+    de Control. NUNCA lo busques cerca del código QR — ese área puede contener texto
+    no relacionado. Es distinta del UUID (codigo_generacion). Nunca dejes
+    sello_recepcion vacío si hay una cadena alfanumérica larga de ~40 chars en el
+    encabezado.
   Para SELLO DE RECEPCIÓN (Ministerio de Hacienda): busca una cadena alfanumérica
     de 30-40 caracteres sin guiones, ubicada típicamente en la zona inferior del
     documento cerca del código QR o de la leyenda "Sello de Recepción". Es distinta
@@ -287,6 +302,11 @@ _ROLES: dict[str, str] = {
         "• Identificación dual: busca primero NIT de 14 dígitos (nit_emisor).\n"
         "  Si no localizas un NIT de 14 dígitos, busca el DUI de 9 dígitos (dui_emisor).\n"
         "  Nunca dejes la identificación del emisor vacía si hay un número de 9 o 14\n"
+        "  dígitos presente en el bloque del Emisor.\n"
+        "• FOVIAL y COTRANS: si el emisor es una gasolinera o distribuidora de\n"
+        "  combustibles, es OBLIGATORIO extraer estos impuestos específicos.\n"
+        "  Asígnalos a las llaves 'fovial' y 'cotrans' del JSON (montos exactos en $).\n"
+        "  NO los sumes al monto Gravado ni al IVA — son campos separados."
         "  dígitos presente en el bloque del Emisor."
     ),
     "retenciones": (
@@ -324,6 +344,17 @@ _CAMPOS: dict[str, str] = {
         "• fecha             : DD/MM/YYYY\n"
         "• num_control       : Número de control DTE completo\n"
         "• codigo_generacion : UUID del documento\n"
+        "• sello_recepcion   : Sello del MH (~40 chars alfanumérico, en el ENCABEZADO)\n"
+        "• nom_emisor        : Nombre/Razón social del PROVEEDOR (bloque EMISOR)\n"
+        "• nit_emisor        : NIT del PROVEEDOR (14 dígitos) — preferir sobre DUI\n"
+        "• dui_emisor        : DUI del PROVEEDOR (9 dígitos) — solo si no hay NIT de 14\n"
+        "• gravadas          : monto gravado en dólares (string exacto del documento)\n"
+        "• exentas           : monto exento (string exacto)\n"
+        "• no_sujetas        : monto no sujeto (string exacto)\n"
+        "• iva               : crédito fiscal IVA (string exacto)\n"
+        "• total             : total del documento (string exacto)\n"
+        "• fovial            : impuesto FOVIAL si el emisor es gasolinera (string exacto, '' si no aplica)\n"
+        "• cotrans           : impuesto COTRANS si el emisor es gasolinera (string exacto, '' si no aplica)\n"
         "• sello_recepcion   : Sello del MH (alfanumérico 30-40 chars, cerca del QR)\n"
         "• nom_emisor        : Nombre/Razón social del PROVEEDOR (bloque EMISOR)\n"
         "• nit_emisor        : NIT del PROVEEDOR (14 dígitos) — preferir sobre DUI\n"
@@ -575,13 +606,51 @@ def _limpio_nit(raw) -> str:
     return re.sub(r'[^0-9]', '', str(raw or ""))
 
 
-def _limpio_num(raw) -> float | None:
+def _limpiar_monto_vision(raw) -> float:
+    """
+    Robust parser for monetary STRING values returned by Gemini Vision.
+
+    Rules applied in order:
+    1. None / empty / 'null'    → 0.0
+    2. Remove '$', spaces, NBSP
+    3. Comma + point both present:
+         "1,234.56" (comma before dot) → remove comma   → 1234.56
+         "1.234,56" (dot before comma) → dot=thousands  → 1234.56
+    4. Only comma:
+         "60,17"  (≤2 decimal digits) → comma=decimal   → 60.17
+         "1,500"  (3 decimal digits)  → comma=thousands → 1500.0
+    5. Point with exactly 3 decimal digits ("60.177"):
+         → provider typo, truncate to 2 decimals        → 60.17
+    6. Otherwise: direct float conversion.
+
+    Returns 0.0 on any parse failure.
+    """
     if raw is None:
-        return None
+        return 0.0
+    s = str(raw).strip().replace("$", "").replace(" ", "").replace("\xa0", "")
+    if not s or s.lower() in ("null", "none", ""):
+        return 0.0
+
+    if "," in s and "." in s:
+        if s.index(",") < s.index("."):
+            s = s.replace(",", "")           # "1,234.56" → comma=thousands
+        else:
+            s = s.replace(".", "").replace(",", ".")  # "1.234,56" → dot=thousands
+    elif "," in s:
+        parts = s.split(",")
+        if len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit():
+            s = s.replace(",", "")           # "1,500" → comma=thousands
+        else:
+            s = s.replace(",", ".")          # "60,17" → comma=decimal
+
     try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None
+        val = float(s)
+        # Truncate if exactly 3 decimal digits (provider typo: "60.177" → 60.17)
+        if "." in s and len(s.split(".", 1)[1]) == 3:
+            val = math.floor(val * 100) / 100
+        return round(val, 2)
+    except (ValueError, TypeError):
+        return 0.0
 
 
 def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
@@ -608,8 +677,8 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
             out["dui_cli"] = dui
 
         for campo in ("gravadas", "exentas", "no_sujetas", "iva", "total"):
-            v = _limpio_num(resultado.get(campo))
-            if v is not None:
+            v = _limpiar_monto_vision(resultado.get(campo))
+            if v:
                 out[campo] = v
 
     elif tipo_dte == "compras":
@@ -627,9 +696,17 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
                 out["nit_prov"] = dui
 
         for campo in ("gravadas", "exentas", "no_sujetas", "iva", "total"):
-            v = _limpio_num(resultado.get(campo))
-            if v is not None:
+            v = _limpiar_monto_vision(resultado.get(campo))
+            if v:
                 out[campo] = v
+
+        fov = _limpiar_monto_vision(resultado.get("fovial"))
+        if fov > 0:
+            out["fovial"] = fov
+
+        cot = _limpiar_monto_vision(resultado.get("cotrans"))
+        if cot > 0:
+            out["cotrans"] = cot
 
     elif tipo_dte == "retenciones":
         nom = _limpio_str(resultado.get("nom_retenido"))
@@ -640,12 +717,12 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
         if len(nit) == 14 and nit != nit_ctx:
             out["nit_prov"] = nit
 
-        base = _limpio_num(resultado.get("monto_sujeto"))
-        if base is not None:
+        base = _limpiar_monto_vision(resultado.get("monto_sujeto"))
+        if base:
             out["base"] = base
 
-        ret = _limpio_num(resultado.get("iva_retenido"))
-        if ret is not None:
+        ret = _limpiar_monto_vision(resultado.get("iva_retenido"))
+        if ret:
             out["ret"] = ret
 
     elif tipo_dte == "sujetos_excluidos":
@@ -661,12 +738,12 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
             if len(dui) == 9:
                 out["id_sujeto"] = dui
 
-        base = _limpio_num(resultado.get("base_compras"))
-        if base is not None:
+        base = _limpiar_monto_vision(resultado.get("base_compras"))
+        if base:
             out["base"] = base
 
-        ret = _limpio_num(resultado.get("retencion_renta"))
-        if ret is not None:
+        ret = _limpiar_monto_vision(resultado.get("retencion_renta"))
+        if ret:
             out["ret"] = ret
 
     return out

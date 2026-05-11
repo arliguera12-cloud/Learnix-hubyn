@@ -1747,6 +1747,7 @@ if not st.session_state.db_compras.empty:
     with tab1:
         if not df_filtrado.empty:
             df_f07 = construir_df_f07_compras(df_filtrado)
+            COLS_NUM  = [c for c in df_f07.columns if df_f07[c].dtype == float]
             # Visual alerts: computed from source df (shares same index order)
             df_f07.insert(0, "_alerta", df_filtrado.apply(clasificar_alerta_compra, axis=1).values)
             COLS_NUM  = [c for c in df_f07.columns if df_f07[c].dtype == float]

@@ -1165,6 +1165,16 @@ with st.sidebar:
                 progreso_cb=_progreso_ventas,
             )
 
+            def _progreso_ventas(comp: int, tot: int, fname: str) -> None:
+                bar.progress(comp / tot)
+                txt_progreso.caption(f"⏳ {comp}/{tot} completados — `{fname}`")
+
+            resultados = leer_y_procesar_lote(
+                nombres_y_bytes_validos,
+                fn_extraer,
+                progreso_cb=_progreso_ventas,
+            )
+
             # ── Clasificación secuencial en hilo principal ──────────────────────
             for fname, file_bytes, res in resultados:
                 cod_gen  = safe_str(res.get('gen', ''))
@@ -1862,6 +1872,10 @@ if not st.session_state.db_ventas.empty:
     with tab3:
         st.write(f"📊 Registros: **{len(df_filtrado)}** de **{len(df)}**")
         df_auditoria = construir_df_f07_ventas_combinado(df_filtrado)
+        COLS_NUM_AUD_V = ["Exentas", "No Sujetas", "Gravadas", "Débito", "Total"]
+        cols_fmt_aud   = {c: "{:,.2f}" for c in COLS_NUM_AUD_V if c in df_auditoria.columns}
+        st.dataframe(
+            df_auditoria.style.format(cols_fmt_aud),
         df_auditoria.insert(0, "_alerta", df_filtrado.apply(clasificar_alerta_venta, axis=1).values)
         n_alertas_aud = (df_auditoria["_alerta"].str.startswith("⚠️")).sum()
         if n_alertas_aud:
