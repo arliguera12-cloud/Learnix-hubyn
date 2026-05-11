@@ -227,6 +227,29 @@ REGLAS MATEMÁTICAS (tolerancia ±$0.05 para redondeos):
 
 _INSTRUCCIONES_ESPACIALES = """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️  REGLAS DE ORO — LEE ANTES DE EXTRAER CUALQUIER CAMPO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+REGLA DE ORO #1 — CÓDIGO DE GENERACIÓN (UUID):
+  EL UUID TIENE EXACTAMENTE 36 CARACTERES CON GUIONES
+  (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX).
+  ALGUNOS EMISORES (FARMACIAS, ETC.) LO IMPRIMEN PARTIDO EN DOS LÍNEAS CONSECUTIVAS.
+  SI VES UN FRAGMENTO QUE PARECE LA PRIMERA MITAD DE UN UUID EN UNA LÍNEA Y LA
+  SEGUNDA MITAD EN LA LÍNEA SIGUIENTE, DEBES UNIR AMBAS PARTES ELIMINANDO EL
+  SALTO DE LÍNEA PARA RECONSTRUIR EL UUID COMPLETO DE 36 CARACTERES.
+  NUNCA DEVUELVAS UN UUID TRUNCADO, PARTIDO O CON SALTOS DE LÍNEA INCRUSTADOS.
+
+REGLA DE ORO #2 — NIT/DUI DEL PROVEEDOR (¡PELIGRO DE CONFUSIÓN!):
+  EXTRAE EL NIT O DUI ÚNICAMENTE DE LA CAJA SUPERIOR LLAMADA "DATOS DEL EMISOR"
+  (O "SUJETO EXCLUIDO" EN DTE-14).
+  ESTÁ ESTRICTAMENTE PROHIBIDO EXTRAER NÚMEROS DE DOCUMENTO DE LA SECCIÓN
+  INFERIOR DE FIRMAS, RESPONSABLE, EXTENSIÓN O "ENTREGADO POR".
+  LOS RESPONSABLES Y FIRMANTES AL FINAL DEL DOCUMENTO TIENEN NIT/DUI PROPIOS
+  QUE NO CORRESPONDEN AL PROVEEDOR — IGNÓRALOS COMPLETAMENTE.
+  SI HAY UN NÚMERO LARGO DE 14 DÍGITOS AL FINAL DE LA PÁGINA EN UNA SECCIÓN DE
+  FIRMAS, NO ES EL NIT DEL EMISOR.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ANÁLISIS VISUAL — 4 PASOS OBLIGATORIOS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -816,10 +839,17 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
     out: dict = {}
 
     # Campos comunes
-    for campo in ("tipo_documento", "fecha", "num_control", "codigo_generacion"):
+    for campo in ("tipo_documento", "fecha", "num_control"):
         v = _limpio_str(resultado.get(campo))
         if v:
             out[campo] = v
+
+    # UUID: limpieza forzada de saltos de línea incrustados (farmacias con UUID partido)
+    uuid_raw = resultado.get("codigo_generacion")
+    if uuid_raw is not None:
+        uuid_clean = str(uuid_raw).replace("\n", "").replace("\r", "").replace(" ", "").strip()
+        if uuid_clean and uuid_clean.lower() not in ("null", "none", ""):
+            out["codigo_generacion"] = uuid_clean
 
     sello_v = _limpio_sello(resultado.get("sello_recepcion"))
     if sello_v:
