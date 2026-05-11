@@ -121,8 +121,8 @@ _VALIDADORES_MONTOS = {
 def clasificar_alerta_compra(row) -> str:
     """
     Returns '⚠️ Error de cuadre legal — {razones}' or '✅' for a compra row.
-    Checks: IVA ≈ gra × 13% (±$0.01) and sello de recepción not empty.
-    row can be a pd.Series or dict with keys: gra, iva, sello.
+    Checks: IVA ≈ gra × 13% (±$0.05) and sello de recepción not empty.
+    Tolerancia ±$0.05 para cubrir redondeos de farmacias y tickets fiscales.
     """
     d     = row.to_dict() if hasattr(row, "to_dict") else dict(row)
     gra   = _monto(d.get("gra", 0))
