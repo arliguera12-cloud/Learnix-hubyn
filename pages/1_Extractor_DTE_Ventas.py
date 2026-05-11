@@ -38,6 +38,7 @@ from utils.qa_utils import (
     requiere_revision_manual,
     validar_montos_ventas,
     calcular_estatus_venta,
+    razones_revisar_venta,
 )
 
 # ─────────────────────────────────────────────
@@ -1840,12 +1841,32 @@ if not st.session_state.db_ventas.empty:
     df_fil_contrib = df_filtrado[df_filtrado['anexo'] == '1'].copy()
     df_fil_cons    = df_filtrado[df_filtrado['anexo'] == '2'].copy()
 
+    # ── Métricas resumen ─────────────────────────────────────────────────────
+    if not df_filtrado.empty:
+        _vm1, _vm2, _vm3, _vm4 = st.columns(4)
+        with _vm1:
+            st.metric("📤 Documentos", n_fil)
+        with _vm2:
+            _grav_tot = df_filtrado["gravadas"].sum() if "gravadas" in df_filtrado.columns else 0.0
+            st.metric("📦 Ventas Gravadas", f"${_grav_tot:,.2f}")
+        with _vm3:
+            _deb_tot = df_filtrado["debito"].sum() if "debito" in df_filtrado.columns else 0.0
+            st.metric("🧾 Débito Fiscal (IVA)", f"${_deb_tot:,.2f}")
+        with _vm4:
+            _vtot = df_filtrado["total"].sum() if "total" in df_filtrado.columns else 0.0
+            st.metric("💰 Total Ventas", f"${_vtot:,.2f}")
+    st.markdown("")
+
+    _n_contrib = len(df_fil_contrib)
+    _n_cons    = len(df_fil_cons)
+    _n_rev_v   = int((df_filtrado.apply(calcular_estatus_venta, axis=1) == "🔴 Revisar").sum()) if not df_filtrado.empty else 0
+    _alerta_lbl_v = f"⚠️ Alertas ({_n_rev_v})" if _n_rev_v else "✅ Alertas"
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "🟢 Anexo 1 — Contribuyentes",
-        "🔵 Anexo 2 — Consumidor Final",
+        f"🟢 Anexo 1 — Contribuyentes ({_n_contrib})",
+        f"🔵 Anexo 2 — Consumidor Final ({_n_cons})",
         "🔍 Auditoría Completa",
         "📈 Resumen por Tipo",
-        "⚠️ Alertas",
+        _alerta_lbl_v,
     ])
 
     with tab1:
@@ -1989,29 +2010,45 @@ if not st.session_state.db_ventas.empty:
 
     with tab5:
         st.markdown("#### ⚠️ Detalle de Alertas por Documento")
+
         if not df_filtrado.empty:
+            # Validación de período: detectar si hay docs de más de un mes
+            if "fecha" in df_filtrado.columns:
+                def _mes_anio_v(f):
+                    try:
+                        p = str(f).strip().split("/")
+                        return f"{p[1]}/{p[2]}" if len(p) == 3 else None
+                    except Exception:
+                        return None
+                periodos_v = df_filtrado["fecha"].apply(_mes_anio_v).dropna().unique()
+                if len(periodos_v) > 1:
+                    st.warning(
+                        f"⚠️ **Alerta de período**: Los documentos abarcan {len(periodos_v)} meses "
+                        f"({', '.join(sorted(periodos_v))}). El F-07 debe presentarse por mes."
+                    )
+
+            # Nota informativa sobre NC (DTE-05) en Ventas
+            n_nc_v = (df_filtrado["tipo"] == "05").sum() if "tipo" in df_filtrado.columns else 0
+            if n_nc_v > 0:
+                st.info(
+                    f"ℹ️ **{n_nc_v} Nota(s) de Crédito (DTE-05)** en este período: "
+                    "reducen el débito fiscal IVA declarado. Asegúrate de que corresponden "
+                    "a un CCF (DTE-03) previamente emitido."
+                )
+
             filas_alerta = []
             for _, row in df_filtrado.iterrows():
-                razones = []
-                tipo   = str(row.get("tipo", ""))
-                grav   = float(row.get("gravadas", 0) or 0)
-                debito = float(row.get("debito", 0) or 0)
-                sello  = str(row.get("sello", "") or "").strip()
-                if tipo in ("03", "05", "06") and grav > 0 and debito > 0:
-                    iva_calc = round(grav * 0.13, 2)
-                    if abs(debito - iva_calc) > 0.05:
-                        razones.append(f"IVA ${debito:.2f} ≠ {grav:.2f}×13%=${iva_calc:.2f}")
-                if len(sello) < 30:
-                    razones.append(f"Sello vacío o corto ({len(sello)} chars)")
-                if razones:
+                motivo = razones_revisar_venta(row)
+                if motivo:
+                    sello = str(row.get("sello", "") or "").strip()
                     filas_alerta.append({
                         "Archivo"     : str(row.get("archivo", "")),
                         "Fecha"       : str(row.get("fecha", "")),
-                        "Tipo"        : tipo,
+                        "Tipo"        : str(row.get("tipo", "")),
                         "Num Control" : str(row.get("num_control_raw", row.get("num_control", ""))),
                         "Cliente"     : str(row.get("nom_cli", "")),
                         "Sello"       : sello or "(vacío)",
-                        "Alertas"     : " | ".join(razones),
+                        "Motivo"      : motivo,
                     })
             if filas_alerta:
                 df_alertas = pd.DataFrame(filas_alerta)

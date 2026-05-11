@@ -38,6 +38,7 @@ from utils.qa_utils import (
     mostrar_indicador_vision,
     validar_montos_ventas,
     calcular_estatus_compra,
+    razones_revisar_compra,
 )
 # Alias para compatibilidad con código existente
 limpiar_monto             = _limpiar_monto
@@ -72,7 +73,7 @@ cliente = st.session_state.cliente_activo
 # ─────────────────────────────────────────────
 MAX_VALORES_LOOP = 40
 
-TIPOS_VALIDOS_COMPRAS = {"03", "05", "06", "11", "14"}
+TIPOS_VALIDOS_COMPRAS = {"03", "05", "06", "11"}
 
 SKIP_LINEAS = re.compile(
     r'^(?:DOCUMENTO|TRIBUTARIO|ELECTR[OÓ]NICO|ELECTRONICO|COMPROBANTE|'
@@ -816,10 +817,12 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
 # ─────────────────────────────────────────────
 # 10. CONSTRUCCIÓN DEL DATAFRAME F-07 COMPRAS
 # ─────────────────────────────────────────────
+_CLASE_MAP_COMPRAS = {"03": "1", "05": "4", "06": "3", "11": "2"}
+
 def construir_df_f07_compras(df_in: pd.DataFrame) -> pd.DataFrame:
     df_out = pd.DataFrame()
     df_out["A. Fecha Emisión"]           = df_in["fecha"]
-    df_out["B. Clase Documento"]         = "4"
+    df_out["B. Clase Documento"]         = df_in["tipo"].astype(str).map(_CLASE_MAP_COMPRAS).fillna("1")
     df_out["C. Tipo Documento"]          = df_in["tipo"]
     df_out["D. Num Documento (UUID)"]    = df_in["gen_sin_guiones"].astype(str)
     df_out["E. NIT/NRC Proveedor"]       = df_in["nit_prov"].astype(str)
@@ -1173,7 +1176,7 @@ with st.sidebar:
             resultados = resultados_json + resultados_pdf
 
             # ── Clasificación secuencial en hilo principal ──────────────────────
-            _TIPOS_ACEPTADOS_COMPRAS = {"03", "05", "06", "11", "14"}
+            _TIPOS_ACEPTADOS_COMPRAS = {"03", "05", "06", "11"}
             for fname, file_bytes, res in resultados:
                 cod_gen  = safe_str(res.get('gen', ''))
                 num_ctrl = safe_str(res.get('num_control', ''))
@@ -1804,14 +1807,30 @@ if not st.session_state.db_compras.empty:
         f'<div class="results-badge"><span class="cnt">{n_fil}</span> de {n_tot} registros{badge_extra}</div>',
         unsafe_allow_html=True
     )
+    # ── Métricas resumen ─────────────────────────────────────────────────────
+    if not df_filtrado.empty:
+        _m1, _m2, _m3, _m4 = st.columns(4)
+        with _m1:
+            st.metric("📥 Documentos", n_fil)
+        with _m2:
+            _gra_tot = df_filtrado["gra"].sum() if "gra" in df_filtrado.columns else 0.0
+            st.metric("📦 Compras Gravadas", f"${_gra_tot:,.2f}")
+        with _m3:
+            _iva_tot = df_filtrado["iva"].sum() if "iva" in df_filtrado.columns else 0.0
+            st.metric("🧾 Crédito Fiscal (IVA)", f"${_iva_tot:,.2f}")
+        with _m4:
+            _tot_tot = df_filtrado["tot"].sum() if "tot" in df_filtrado.columns else 0.0
+            st.metric("💰 Total Compras", f"${_tot_tot:,.2f}")
     st.markdown("")
 
+    _n_revisar = int((df_filtrado.apply(calcular_estatus_compra, axis=1) == "🔴 Revisar").sum()) if not df_filtrado.empty else 0
+    _alerta_lbl = f"⚠️ Alertas ({_n_revisar})" if _n_revisar else "✅ Alertas"
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Libro F-07 Compras (Anexo 3)",
+        f"📊 F-07 Compras ({n_fil})",
         "🔍 Auditoría Completa",
         "📈 Resumen por Proveedor",
         "📋 Anexo 8 — Percepciones",
-        "⚠️ Alertas",
+        _alerta_lbl,
     ])
 
     # ── Tab 1: F-07 ───────────────────────────────────────────────────────────
@@ -1990,29 +2009,45 @@ if not st.session_state.db_compras.empty:
     # ── Tab 5: Alertas ────────────────────────────────────────────────────────
     with tab5:
         st.markdown("#### ⚠️ Detalle de Alertas por Documento")
+
         if not df_filtrado.empty:
+            # Validación de período: detectar si hay docs de más de un mes
+            if "fecha" in df_filtrado.columns:
+                def _mes_anio(f):
+                    try:
+                        p = str(f).strip().split("/")
+                        return f"{p[1]}/{p[2]}" if len(p) == 3 else None
+                    except Exception:
+                        return None
+                periodos = df_filtrado["fecha"].apply(_mes_anio).dropna().unique()
+                if len(periodos) > 1:
+                    st.warning(
+                        f"⚠️ **Alerta de período**: Los documentos abarcan {len(periodos)} meses "
+                        f"({', '.join(sorted(periodos))}). El F-07 debe presentarse por mes."
+                    )
+
+            # Nota informativa sobre NC
+            n_nc = (df_filtrado["tipo"] == "05").sum() if "tipo" in df_filtrado.columns else 0
+            if n_nc > 0:
+                st.info(
+                    f"ℹ️ **{n_nc} Nota(s) de Crédito (DTE-05)** en este período: "
+                    "reducen el crédito fiscal IVA. Verificar que el proveedor haya emitido "
+                    "el DTE-05 en respuesta a un CCF previo."
+                )
+
             filas_alerta = []
             for _, row in df_filtrado.iterrows():
-                razones = []
-                tipo   = str(row.get("tipo", ""))
-                gra    = float(row.get("gra", 0) or 0)
-                iva    = float(row.get("iva", 0) or 0)
-                sello  = str(row.get("sello", "") or "").strip()
-                if tipo in ("03", "05", "06") and gra > 0 and iva > 0:
-                    iva_calc = round(gra * 0.13, 2)
-                    if abs(iva - iva_calc) > 0.05:
-                        razones.append(f"IVA ${iva:.2f} ≠ {gra:.2f}×13%=${iva_calc:.2f}")
-                if len(sello) < 30:
-                    razones.append(f"Sello vacío o corto ({len(sello)} chars)")
-                if razones:
+                motivo = razones_revisar_compra(row)
+                if motivo:
+                    sello = str(row.get("sello", "") or "").strip()
                     filas_alerta.append({
                         "Archivo"    : str(row.get("archivo", "")),
                         "Fecha"      : str(row.get("fecha", "")),
-                        "Tipo"       : tipo,
+                        "Tipo"       : str(row.get("tipo", "")),
                         "Num Control": str(row.get("num_control_raw", row.get("num_control", ""))),
                         "Proveedor"  : str(row.get("nom_prov", "")),
                         "Sello"      : sello or "(vacío)",
-                        "Alertas"    : " | ".join(razones),
+                        "Motivo"     : motivo,
                     })
             if filas_alerta:
                 df_alertas = pd.DataFrame(filas_alerta)
@@ -2037,7 +2072,7 @@ else:
         <h3 style="color:#6AB040 !important;">📂 Sin documentos cargados</h3>
         <p style="color:#3A5830 !important;">
             Usa el panel lateral para cargar y procesar PDFs de compras.<br>
-            Acepta: CCF (03), NC (05), ND (06), Factura (01/11), Suj. Excluido (14)
+            Acepta: CCF (03), NC (05), ND (06), Factura exenta (11)
         </p>
     </div>
     """, unsafe_allow_html=True)

@@ -377,8 +377,9 @@ def mostrar_indicador_vision(
 def calcular_estatus_venta(row) -> str:
     """
     Returns '🔴 Revisar' or '🟢 OK' for a ventas row.
-    Checks: IVA ≈ gravadas×13% (±$0.05, tipos 03/05/06) and sello ≥ 30 chars.
-    Tolerancia ±$0.05 para cubrir redondeos de farmacias y tickets fiscales.
+    - DTE-03/05/06: débito ≈ gravadas×13% (±$0.05) y sello ≥ 30 chars
+    - DTE-01: solo valida sello
+    - DTE-05 (NC): siempre OK si tiene sello (reduce débito, no genera)
     """
     d      = row.to_dict() if hasattr(row, "to_dict") else dict(row)
     grav   = _monto(d.get("gravadas", 0))
@@ -386,7 +387,7 @@ def calcular_estatus_venta(row) -> str:
     sello  = str(d.get("sello", "") or "").strip()
     tipo   = str(d.get("tipo", ""))
 
-    if tipo in ("03", "05", "06") and grav > 0 and debito > 0:
+    if tipo == "03" and grav > 0 and debito > 0:
         if abs(debito - round(grav * 0.13, 2)) > 0.05:
             return "🔴 Revisar"
     if len(sello) < 30:
@@ -397,17 +398,54 @@ def calcular_estatus_venta(row) -> str:
 def calcular_estatus_compra(row) -> str:
     """
     Returns '🔴 Revisar' or '🟢 OK' for a compra row.
-    Checks: IVA ≈ gra×13% (±$0.05) and sello ≥ 30 chars.
-    Tolerancia ±$0.05 para cubrir redondeos de farmacias y tickets fiscales.
+    - DTE-03: iva ≈ gra×13% (±$0.05) y sello ≥ 30 chars
+    - DTE-05 (NC): reduce crédito — solo valida sello
+    - DTE-06 (ND): aumenta crédito — valida IVA 13% y sello
+    - DTE-11 (Factura exenta): solo valida sello
     """
     d     = row.to_dict() if hasattr(row, "to_dict") else dict(row)
     gra   = _monto(d.get("gra", 0))
     iva   = _monto(d.get("iva", 0))
     sello = str(d.get("sello", "") or "").strip()
+    tipo  = str(d.get("tipo", ""))
 
-    if gra > 0 and iva > 0:
+    if tipo in ("03", "06") and gra > 0 and iva > 0:
         if abs(iva - round(gra * 0.13, 2)) > 0.05:
             return "🔴 Revisar"
     if len(sello) < 30:
         return "🔴 Revisar"
     return "🟢 OK"
+
+
+def razones_revisar_venta(row) -> str:
+    """Devuelve string con el/los motivos de 🔴 Revisar, o '' si todo OK."""
+    d      = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    grav   = _monto(d.get("gravadas", 0))
+    debito = _monto(d.get("debito", 0))
+    sello  = str(d.get("sello", "") or "").strip()
+    tipo   = str(d.get("tipo", ""))
+    razones = []
+    if tipo == "03" and grav > 0 and debito > 0:
+        iva_calc = round(grav * 0.13, 2)
+        if abs(debito - iva_calc) > 0.05:
+            razones.append(f"IVA ${debito:.2f} ≠ {grav:.2f}×13%=${iva_calc:.2f}")
+    if len(sello) < 30:
+        razones.append(f"Sello vacío o corto ({len(sello)} chars)")
+    return " | ".join(razones)
+
+
+def razones_revisar_compra(row) -> str:
+    """Devuelve string con el/los motivos de 🔴 Revisar, o '' si todo OK."""
+    d     = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    gra   = _monto(d.get("gra", 0))
+    iva   = _monto(d.get("iva", 0))
+    sello = str(d.get("sello", "") or "").strip()
+    tipo  = str(d.get("tipo", ""))
+    razones = []
+    if tipo in ("03", "06") and gra > 0 and iva > 0:
+        iva_calc = round(gra * 0.13, 2)
+        if abs(iva - iva_calc) > 0.05:
+            razones.append(f"IVA ${iva:.2f} ≠ {gra:.2f}×13%=${iva_calc:.2f}")
+    if len(sello) < 30:
+        razones.append(f"Sello vacío o corto ({len(sello)} chars)")
+    return " | ".join(razones)
