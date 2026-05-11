@@ -131,9 +131,15 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
     except Exception as exc:
         return {"error_fatal": f"JSON inválido: {exc}"}
 
-    ident    = data.get("identificacion") or {}
-    receptor = data.get("receptor") or {}
-    resumen  = data.get("resumen") or {}
+    # Sello vive en la raíz del envoltorio de Hacienda
+    sello_raiz = str(data.get("selloRecibido") or "").strip()
+
+    # Los datos del DTE vienen dentro de dteJson; fallback a la raíz por compatibilidad
+    dte = data.get("dteJson") or data
+
+    ident    = dte.get("identificacion") or {}
+    receptor = dte.get("receptor") or {}
+    resumen  = dte.get("resumen") or {}
 
     # Fecha: YYYY-MM-DD → DD/MM/YYYY
     fecha_raw = str(ident.get("fecEmi") or "")
@@ -165,6 +171,9 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
     gen_uuid = str(ident.get("codigoGeneracion") or "")
     num_ctrl = str(ident.get("numeroControl") or "")
 
+    # Sello: preferir raíz del envoltorio; caer en identificacion si está vacío
+    sello = sello_raiz or str(ident.get("selloRecibido") or "").strip()
+
     return {
         "tipo"           : str(ident.get("tipoDte") or ""),
         "fecha"          : fecha,
@@ -172,7 +181,7 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
         "num_control_raw": num_ctrl,
         "gen"            : gen_uuid,
         "gen_sin_guiones": gen_uuid.replace("-", ""),
-        "sello"          : str(ident.get("selloRecibido") or "").strip(),
+        "sello"          : sello,
         "nom_cli"        : str(receptor.get("nombre") or "CONSUMIDOR FINAL").upper().strip(),
         "nit_cli"        : nit_r if len(nit_r) == 14 else "",
         "dui_cli"        : dui_r if len(dui_r) == 9 else "",
@@ -210,9 +219,15 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
     except Exception as exc:
         return {"error_fatal": f"JSON inválido: {exc}"}
 
-    ident   = data.get("identificacion") or {}
-    emisor  = data.get("emisor") or {}
-    resumen = data.get("resumen") or {}
+    # Sello vive en la raíz del envoltorio de Hacienda
+    sello_raiz = str(data.get("selloRecibido") or "").strip()
+
+    # Los datos del DTE vienen dentro de dteJson; fallback a la raíz por compatibilidad
+    dte = data.get("dteJson") or data
+
+    ident   = dte.get("identificacion") or {}
+    emisor  = dte.get("emisor") or {}
+    resumen = dte.get("resumen") or {}
 
     fecha_raw = str(ident.get("fecEmi") or "")
     if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_raw):
@@ -241,6 +256,9 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
     gen_uuid = str(ident.get("codigoGeneracion") or "")
     num_ctrl = str(ident.get("numeroControl") or "")
 
+    # Sello: preferir raíz del envoltorio; caer en identificacion si está vacío
+    sello = sello_raiz or str(ident.get("selloRecibido") or "").strip()
+
     return {
         "tipo"           : str(ident.get("tipoDte") or ""),
         "fecha"          : fecha,
@@ -248,7 +266,7 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
         "num_control_raw": num_ctrl,
         "gen"            : gen_uuid,
         "gen_sin_guiones": gen_uuid.replace("-", ""),
-        "sello"          : str(ident.get("selloRecibido") or "").strip(),
+        "sello"          : sello,
         "nom_prov"       : str(emisor.get("nombre") or "").upper().strip(),
         "nit_prov"       : nit_e if len(nit_e) == 14 else "",
         "dui_prov"       : dui_e if len(dui_e) == 9 else "",
