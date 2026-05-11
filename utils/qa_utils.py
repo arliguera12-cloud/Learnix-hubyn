@@ -132,7 +132,7 @@ def clasificar_alerta_compra(row) -> str:
     razones: list[str] = []
     if gra > 0 and iva > 0:
         iva_calc = round(gra * 0.13, 2)
-        if abs(iva - iva_calc) > 0.01:
+        if abs(iva - iva_calc) > 0.05:
             razones.append(f"IVA ${iva:.2f} ≠ {gra:.2f}×13%=${iva_calc:.2f}")
     if not sello:
         razones.append("Sello vacío")
@@ -143,8 +143,8 @@ def clasificar_alerta_compra(row) -> str:
 def clasificar_alerta_venta(row) -> str:
     """
     Returns '⚠️ Error de cuadre legal — {razones}' or '✅' for a venta row.
-    Checks: débito ≈ gravadas × 13% (±$0.01, only for tipos 03/05/06) and sello not empty.
-    row can be a pd.Series or dict with keys: gravadas, debito, sello, tipo.
+    Checks: débito ≈ gravadas × 13% (±$0.05, only for tipos 03/05/06) and sello not empty.
+    Tolerancia ±$0.05 para cubrir redondeos de farmacias y tickets fiscales.
     """
     d      = row.to_dict() if hasattr(row, "to_dict") else dict(row)
     grav   = _monto(d.get("gravadas", 0))
@@ -155,7 +155,7 @@ def clasificar_alerta_venta(row) -> str:
     razones: list[str] = []
     if tipo in ("03", "05", "06") and grav > 0 and debito > 0:
         deb_calc = round(grav * 0.13, 2)
-        if abs(debito - deb_calc) > 0.01:
+        if abs(debito - deb_calc) > 0.05:
             razones.append(f"IVA ${debito:.2f} ≠ {grav:.2f}×13%=${deb_calc:.2f}")
     if not sello:
         razones.append("Sello vacío")
@@ -377,8 +377,8 @@ def mostrar_indicador_vision(
 def calcular_estatus_venta(row) -> str:
     """
     Returns '🔴 Revisar' or '🟢 OK' for a ventas row.
-    Checks: IVA ≈ gravadas×13% (±$0.01, tipos 03/05/06) and sello ≥ 30 chars.
-    Accepts raw session_state df rows with columns: tipo, gravadas, debito, sello.
+    Checks: IVA ≈ gravadas×13% (±$0.05, tipos 03/05/06) and sello ≥ 30 chars.
+    Tolerancia ±$0.05 para cubrir redondeos de farmacias y tickets fiscales.
     """
     d      = row.to_dict() if hasattr(row, "to_dict") else dict(row)
     grav   = _monto(d.get("gravadas", 0))
@@ -387,7 +387,7 @@ def calcular_estatus_venta(row) -> str:
     tipo   = str(d.get("tipo", ""))
 
     if tipo in ("03", "05", "06") and grav > 0 and debito > 0:
-        if abs(debito - round(grav * 0.13, 2)) > 0.01:
+        if abs(debito - round(grav * 0.13, 2)) > 0.05:
             return "🔴 Revisar"
     if len(sello) < 30:
         return "🔴 Revisar"
@@ -397,8 +397,8 @@ def calcular_estatus_venta(row) -> str:
 def calcular_estatus_compra(row) -> str:
     """
     Returns '🔴 Revisar' or '🟢 OK' for a compra row.
-    Checks: IVA ≈ gra×13% (±$0.01) and sello ≥ 30 chars.
-    Accepts raw session_state df rows with columns: gra, iva, sello.
+    Checks: IVA ≈ gra×13% (±$0.05) and sello ≥ 30 chars.
+    Tolerancia ±$0.05 para cubrir redondeos de farmacias y tickets fiscales.
     """
     d     = row.to_dict() if hasattr(row, "to_dict") else dict(row)
     gra   = _monto(d.get("gra", 0))
@@ -406,7 +406,7 @@ def calcular_estatus_compra(row) -> str:
     sello = str(d.get("sello", "") or "").strip()
 
     if gra > 0 and iva > 0:
-        if abs(iva - round(gra * 0.13, 2)) > 0.01:
+        if abs(iva - round(gra * 0.13, 2)) > 0.05:
             return "🔴 Revisar"
     if len(sello) < 30:
         return "🔴 Revisar"

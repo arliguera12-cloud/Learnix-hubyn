@@ -245,9 +245,12 @@ PASO 3 — EXTRAER VALORES (NUNCA ETIQUETAS)
     Reglas de identificación:
     • NUNCA es el UUID/Código de Generación: el UUID tiene guiones (XXXXXXXX-XXXX-...).
     • NUNCA es el Número de Control: empieza con "DTE-".
-    • Búscalo explícitamente junto al texto "Sello de Recepción" o "Sello Recibido".
+    • Búscalo junto al texto "Sello de Recepción", "Sello Recibido", "SelloRecibido",
+      "respuestaHacienda" o "responseMH" — puede aparecer en cualquiera de estas secciones.
     • Si hay varias cadenas largas, elige la de exactamente ~40 chars sin guiones.
     • Devuelve "" (vacío) si no lo localizas con certeza — no inventes el valor.
+  Para IVA: Si no existe un campo "Total IVA" explícito, búscalo en la sección
+    Tributos bajo el código "20" o la descripción "Impuesto al Valor Agregado".
   Para UUID (codigo_generacion): XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (36 chars).
   Para num_control: formato DTE-XX-XXXX-XXXXXXXXX (con guiones).
   Para NIT/DUI del Emisor en compras:
@@ -290,15 +293,19 @@ _ROLES: dict[str, str] = {
         "El EMISOR es el PROVEEDOR/VENDEDOR — extrae su nombre e identificación.\n"
         "• El NIT del emisor NUNCA puede ser igual al NIT del cliente activo.\n"
         "• Si nom_emisor coincide con el nombre del receptor → está mal extraído.\n"
-        "• Identificación dual: busca primero NIT de 14 dígitos (nit_emisor).\n"
-        "  Si no localizas un NIT de 14 dígitos, busca el DUI de 9 dígitos (dui_emisor).\n"
+        "• Identificación del proveedor — REGLA DUAL:\n"
+        "  1. Busca primero NIT de 14 dígitos (nit_emisor).\n"
+        "  2. Si el emisor es Persona Natural sin NIT, extrae su DUI de 9 dígitos (dui_emisor).\n"
         "  Nunca dejes la identificación del emisor vacía si hay un número de 9 o 14\n"
         "  dígitos presente en el bloque del Emisor.\n"
+        "• DTE-14 (Comprobante de Liquidación / Sujeto Excluido): el proveedor NO es el\n"
+        "  Emisor del documento (ese es el comprador). El proveedor real es el SUJETO\n"
+        "  EXCLUIDO — busca su nombre e identificación en la sección 'Sujeto Excluido'\n"
+        "  o 'sujetoExcluido'. Extrae su DUI o NIT desde ese bloque, no del bloque Emisor.\n"
         "• FOVIAL y COTRANS: si el emisor es una gasolinera o distribuidora de\n"
         "  combustibles, es OBLIGATORIO extraer estos impuestos específicos.\n"
         "  Asígnalos a las llaves 'fovial' y 'cotrans' del JSON (montos exactos en $).\n"
         "  NO los sumes al monto Gravado ni al IVA — son campos separados."
-        "  dígitos presente en el bloque del Emisor."
     ),
     "retenciones": (
         "El AGENTE RETENEDOR (quien emite el DTE-07) es el cliente activo.\n"
