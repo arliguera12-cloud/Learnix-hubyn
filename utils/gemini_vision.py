@@ -845,6 +845,67 @@ def _buscar_sello_forzado(pdf_bytes: bytes) -> str:
         return ""
 
 
+_OCR_CORRECCIONES: dict[str, str] = {
+    "O": "0",   # letra O → cero
+    "Q": "0",   # Q → cero
+    "I": "1",   # I → uno
+    "L": "1",   # L → uno
+    "S": "5",   # S → cinco
+    "Z": "2",   # Z → dos
+    "G": "6",   # G → seis
+    "B": "8",   # B → ocho
+    "T": "7",   # T → siete
+}
+
+
+def _corregir_uuid_ocr(raw32: str) -> str:
+    """
+    Aplica correcciones OCR al string de 32 chars hexadecimales y
+    reconstruye el UUID con guiones en posiciones 8-4-4-4-12.
+    Letras que no sean A-F después de corrección → '0' por seguridad.
+    """
+    v = raw32.upper()
+    for mal, bien in _OCR_CORRECCIONES.items():
+        v = v.replace(mal, bien)
+    v = re.sub(r'[^0-9A-F]', '0', v)   # cualquier residuo → 0
+    return f"{v[:8]}-{v[8:12]}-{v[12:16]}-{v[16:20]}-{v[20:]}"
+
+
+def _buscar_uuid_tesseract(pdf_bytes: bytes) -> str:
+    """
+    Plan C — OCR con Tesseract sobre la primera página del PDF.
+    Requiere: PyMuPDF (fitz), Pillow, pytesseract + tesseract-ocr instalado.
+    Aplica la misma regex permisiva y corrección OCR de _corregir_uuid_ocr().
+    """
+    try:
+        import fitz
+        from PIL import Image
+        import pytesseract
+
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(2.5, 2.5), colorspace=fitz.csRGB)
+        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        doc.close()
+
+        # Modo PSM 6 (bloque de texto uniforme) con lista blanca hexadecimal + OCR
+        config = r"--psm 6 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-"
+        texto  = pytesseract.image_to_string(img, lang="spa", config=config).upper()
+
+        m = re.search(
+            r'([0-9A-Z]{8}-?[0-9A-Z]{4}-?[0-9A-Z]{4}-?[0-9A-Z]{4}-?[0-9A-Z]{12})',
+            texto,
+        )
+        if m:
+            raw32 = m.group(0).replace("-", "")
+            if len(raw32) == 32:
+                return _corregir_uuid_ocr(raw32)
+    except ImportError:
+        log.debug("_buscar_uuid_tesseract: fitz, PIL o pytesseract no disponible")
+    except Exception as exc:
+        log.warning("_buscar_uuid_tesseract: %s", exc)
+    return ""
+
+
 def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
     """Maps vision field names to page-expected field names and filters invalid values."""
     out: dict = {}
@@ -862,29 +923,22 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
         if v:
             out[campo] = v
 
-    # UUID: rescate de OCR — O→0, extracción de patrón 8-4-4-4-12, limpieza de saltos
+    # UUID: regex permisiva [0-9A-Z] + corrección OCR agresiva + reconstrucción 8-4-4-4-12
     uuid_raw = resultado.get("codigo_generacion")
     if uuid_raw is not None:
-        # 1) Normalizar: quitar saltos/espacios, corregir OCR clásico, mayúsculas
         uuid_str = (
             str(uuid_raw)
             .replace("\n", "").replace("\r", "").replace(" ", "")
             .upper()
-            .replace("O", "0")   # 'O' (letra) → '0' (cero)
-            .replace("I", "1")   # 'I' (letra) → '1' (uno)
         )
-        # 2) Patrón con guiones opcionales — rescata UUIDs pegados o sin guiones
         _m_uuid = re.search(
-            r'([0-9A-F]{8}-?[0-9A-F]{4}-?[0-9A-F]{4}-?[0-9A-F]{4}-?[0-9A-F]{12})',
+            r'([0-9A-Z]{8}-?[0-9A-Z]{4}-?[0-9A-Z]{4}-?[0-9A-Z]{4}-?[0-9A-Z]{12})',
             uuid_str,
         )
         if _m_uuid:
-            raw32 = _m_uuid.group(0).replace("-", "")
-            if len(raw32) == 32 and raw32.lower() not in ("null", "none"):
-                # Reconstruir con guiones en las posiciones correctas 8-4-4-4-12
-                out["codigo_generacion"] = (
-                    f"{raw32[:8]}-{raw32[8:12]}-{raw32[12:16]}-{raw32[16:20]}-{raw32[20:]}"
-                )
+            uuid_sucio = _m_uuid.group(0).replace("-", "")
+            if len(uuid_sucio) == 32 and uuid_sucio.lower() not in ("null", "none"):
+                out["codigo_generacion"] = _corregir_uuid_ocr(uuid_sucio)
 
     sello_v = _limpio_sello(resultado.get("sello_recepcion"))
     if sello_v:
@@ -1031,6 +1085,13 @@ def extraer_dte_con_vision(
     }
 
     campos = _mapear_campos(resultado, tipo_dte, nit_ctx)
+
+    # Plan C — Tesseract si Gemini no extrajo el UUID
+    if not campos.get("codigo_generacion"):
+        uuid_ocr = _buscar_uuid_tesseract(pdf_bytes)
+        if uuid_ocr:
+            campos["codigo_generacion"] = uuid_ocr
+            log.info("UUID rescatado con Tesseract: %s…", uuid_ocr[:13])
 
     # Segunda llamada focalizada si el sello no fue extraído en el primer pase
     if not campos.get("sello_recepcion"):
