@@ -41,6 +41,7 @@ from utils.qa_utils import (
     razones_revisar_venta,
     validar_periodo_ventas,
 )
+from utils.qr_reader import extraer_datos_qr as _extraer_qr
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -711,6 +712,22 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
             if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
                 sello = v_sello
+
+        # ── QR ES EL REY: sobreescribe gen/ctrl si el QR encontró datos ─────────
+        try:
+            _qr = _extraer_qr(file_bytes)
+            if _qr.get("codigo_generacion"):
+                gen = _qr["codigo_generacion"].upper()
+                gen_sin_guiones = gen.replace("-", "")
+            if _qr.get("num_control") and not ctrl:
+                _qc = _qr["num_control"].upper()
+                _mq = re.search(r'DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18}', _qc, re.I)
+                if _mq:
+                    ctrl        = _qc
+                    tipo        = _mq.group(1)
+                    num_control = ctrl.replace("-", "")
+        except Exception:
+            pass
 
         return {
             "fecha"         : fecha,

@@ -865,16 +865,26 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
     # UUID: rescate de OCR — O→0, extracción de patrón 8-4-4-4-12, limpieza de saltos
     uuid_raw = resultado.get("codigo_generacion")
     if uuid_raw is not None:
-        # 1) Normalizar: quitar saltos/espacios, convertir O→0 (error OCR), mayúsculas
-        uuid_str = str(uuid_raw).replace("\n", "").replace("\r", "").replace(" ", "").upper()
-        uuid_str = uuid_str.replace("O", "0")
-        # 2) Extraer patrón UUID incluso si está pegado a texto (regex permisiva A-Z para tolerar OCR)
+        # 1) Normalizar: quitar saltos/espacios, corregir OCR clásico, mayúsculas
+        uuid_str = (
+            str(uuid_raw)
+            .replace("\n", "").replace("\r", "").replace(" ", "")
+            .upper()
+            .replace("O", "0")   # 'O' (letra) → '0' (cero)
+            .replace("I", "1")   # 'I' (letra) → '1' (uno)
+        )
+        # 2) Patrón con guiones opcionales — rescata UUIDs pegados o sin guiones
         _m_uuid = re.search(
-            r'[0-9A-Z]{8}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{12}',
+            r'([0-9A-F]{8}-?[0-9A-F]{4}-?[0-9A-F]{4}-?[0-9A-F]{4}-?[0-9A-F]{12})',
             uuid_str,
         )
-        if _m_uuid and _m_uuid.group(0).lower() not in ("null", "none", ""):
-            out["codigo_generacion"] = _m_uuid.group(0)
+        if _m_uuid:
+            raw32 = _m_uuid.group(0).replace("-", "")
+            if len(raw32) == 32 and raw32.lower() not in ("null", "none"):
+                # Reconstruir con guiones en las posiciones correctas 8-4-4-4-12
+                out["codigo_generacion"] = (
+                    f"{raw32[:8]}-{raw32[8:12]}-{raw32[12:16]}-{raw32[16:20]}-{raw32[20:]}"
+                )
 
     sello_v = _limpio_sello(resultado.get("sello_recepcion"))
     if sello_v:
