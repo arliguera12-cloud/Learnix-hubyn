@@ -230,14 +230,18 @@ _INSTRUCCIONES_ESPACIALES = """
 ⚠️  REGLAS DE ORO — LEE ANTES DE EXTRAER CUALQUIER CAMPO
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-REGLA DE ORO #1 — CÓDIGO DE GENERACIÓN (UUID):
+REGLA DE ORO #1 — CÓDIGO DE GENERACIÓN (UUID — RESCATE DE OCR):
   EL UUID TIENE EXACTAMENTE 36 CARACTERES CON GUIONES
-  (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX).
+  (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX). ES ESTRICTAMENTE HEXADECIMAL:
+  SOLO DÍGITOS 0-9 Y LETRAS A-F (mayúsculas o minúsculas).
+  ¡CORRIGE ERRORES DE ESCÁNER!:
+    • Si el OCR leyó la letra "O" (oh) en lugar del número "0" (cero), REEMPLÁZALA POR "0".
+    • Busca el patrón 8-4-4-4-12 en TODO el documento, incluso si está pegado a otras
+      palabras (ej. "CodigoGeneracio0F3F7B2A-1A2B-..."). Extrae SOLO los 36 caracteres.
   ALGUNOS EMISORES (FARMACIAS, ETC.) LO IMPRIMEN PARTIDO EN DOS LÍNEAS CONSECUTIVAS.
-  SI VES UN FRAGMENTO QUE PARECE LA PRIMERA MITAD DE UN UUID EN UNA LÍNEA Y LA
-  SEGUNDA MITAD EN LA LÍNEA SIGUIENTE, DEBES UNIR AMBAS PARTES ELIMINANDO EL
-  SALTO DE LÍNEA PARA RECONSTRUIR EL UUID COMPLETO DE 36 CARACTERES.
-  NUNCA DEVUELVAS UN UUID TRUNCADO, PARTIDO O CON SALTOS DE LÍNEA INCRUSTADOS.
+  SI VES FRAGMENTOS PARCIALES DEL UUID EN LÍNEAS CONSECUTIVAS, ÚNELOS ELIMINANDO
+  EL SALTO DE LÍNEA PARA RECONSTRUIR EL UUID COMPLETO DE 36 CARACTERES.
+  NUNCA DEVUELVAS UN UUID TRUNCADO, PARTIDO, PEGADO A TEXTO O CON SALTOS DE LÍNEA.
 
 REGLA DE ORO #2 — TIPO DE DOCUMENTO (CAMPO CRÍTICO):
   DEVUELVE ÚNICA Y EXCLUSIVAMENTE EL CÓDIGO NUMÉRICO DE 2 DÍGITOS.
@@ -858,12 +862,19 @@ def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
         if v:
             out[campo] = v
 
-    # UUID: limpieza forzada de saltos de línea incrustados (farmacias con UUID partido)
+    # UUID: rescate de OCR — O→0, extracción de patrón 8-4-4-4-12, limpieza de saltos
     uuid_raw = resultado.get("codigo_generacion")
     if uuid_raw is not None:
-        uuid_clean = str(uuid_raw).replace("\n", "").replace("\r", "").replace(" ", "").strip()
-        if uuid_clean and uuid_clean.lower() not in ("null", "none", ""):
-            out["codigo_generacion"] = uuid_clean
+        # 1) Normalizar: quitar saltos/espacios, convertir O→0 (error OCR), mayúsculas
+        uuid_str = str(uuid_raw).replace("\n", "").replace("\r", "").replace(" ", "").upper()
+        uuid_str = uuid_str.replace("O", "0")
+        # 2) Extraer patrón UUID incluso si está pegado a texto (regex permisiva A-Z para tolerar OCR)
+        _m_uuid = re.search(
+            r'[0-9A-Z]{8}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{12}',
+            uuid_str,
+        )
+        if _m_uuid and _m_uuid.group(0).lower() not in ("null", "none", ""):
+            out["codigo_generacion"] = _m_uuid.group(0)
 
     sello_v = _limpio_sello(resultado.get("sello_recepcion"))
     if sello_v:
