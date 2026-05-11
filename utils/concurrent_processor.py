@@ -131,15 +131,23 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
     except Exception as exc:
         return {"error_fatal": f"JSON inválido: {exc}"}
 
-    # Sello vive en la raíz del envoltorio de Hacienda
-    sello_raiz = str(data.get("selloRecibido") or "").strip()
-
     # Los datos del DTE vienen dentro de dteJson; fallback a la raíz por compatibilidad
     dte = data.get("dteJson") or data
 
     ident    = dte.get("identificacion") or {}
     receptor = dte.get("receptor") or {}
     resumen  = dte.get("resumen") or {}
+
+    # Sello nómada: puede estar en varios niveles del envoltorio o del DTE
+    def _ss(v): return re.sub(r"\s+", "", str(v or "")).strip()
+    sello = (
+        _ss(data.get("selloRecibido"))
+        or _ss(dte.get("selloRecibido"))
+        or _ss((dte.get("respuestaHacienda") or {}).get("selloRecibido"))
+        or _ss((dte.get("responseMH") or {}).get("selloRecibido"))
+        or _ss(ident.get("SelloRecibido"))
+        or _ss(ident.get("selloRecibido"))
+    )
 
     # Fecha: YYYY-MM-DD → DD/MM/YYYY
     fecha_raw = str(ident.get("fecEmi") or "")
@@ -159,7 +167,7 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
         cod  = str(t.get("codigo") or "")
         desc = str(t.get("descripcion") or "").upper()
         val  = float(t.get("valor") or 0)
-        if cod == "20" or "IVA" in desc:
+        if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
             iva_val = val
         elif cod == "C3" or "FOVIAL" in desc:
             fovial = val
@@ -170,9 +178,6 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
 
     gen_uuid = str(ident.get("codigoGeneracion") or "")
     num_ctrl = str(ident.get("numeroControl") or "")
-
-    # Sello: preferir raíz del envoltorio; caer en identificacion si está vacío
-    sello = sello_raiz or str(ident.get("selloRecibido") or "").strip()
 
     return {
         "tipo"           : str(ident.get("tipoDte") or ""),
@@ -219,15 +224,38 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
     except Exception as exc:
         return {"error_fatal": f"JSON inválido: {exc}"}
 
-    # Sello vive en la raíz del envoltorio de Hacienda
-    sello_raiz = str(data.get("selloRecibido") or "").strip()
-
     # Los datos del DTE vienen dentro de dteJson; fallback a la raíz por compatibilidad
     dte = data.get("dteJson") or data
 
     ident   = dte.get("identificacion") or {}
-    emisor  = dte.get("emisor") or {}
     resumen = dte.get("resumen") or {}
+
+    # Sello nómada: puede estar en varios niveles del envoltorio o del DTE
+    def _ss(v): return re.sub(r"\s+", "", str(v or "")).strip()
+    sello = (
+        _ss(data.get("selloRecibido"))
+        or _ss(dte.get("selloRecibido"))
+        or _ss((dte.get("respuestaHacienda") or {}).get("selloRecibido"))
+        or _ss((dte.get("responseMH") or {}).get("selloRecibido"))
+        or _ss(ident.get("SelloRecibido"))
+        or _ss(ident.get("selloRecibido"))
+    )
+
+    # Proveedor: emisor por defecto; para DTE-14, usar sujetoExcluido
+    tipo_dte = str(ident.get("tipoDte") or "")
+    if tipo_dte == "14":
+        sujeto   = dte.get("sujetoExcluido") or {}
+        nom_prov = str(sujeto.get("nombre") or "").upper().strip()
+        id_prov  = re.sub(r"[^0-9]", "", str(sujeto.get("documento") or sujeto.get("nit") or ""))
+    else:
+        emisor   = dte.get("emisor") or {}
+        nom_prov = str(emisor.get("nombre") or "").upper().strip()
+        id_prov  = re.sub(r"[^0-9]", "", str(
+            emisor.get("nit") or emisor.get("dui") or emisor.get("nrc") or ""
+        ))
+
+    nit_prov = id_prov if len(id_prov) == 14 else ""
+    dui_prov = id_prov if len(id_prov) == 9  else ""
 
     fecha_raw = str(ident.get("fecEmi") or "")
     if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_raw):
@@ -236,15 +264,12 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
     else:
         fecha = fecha_raw
 
-    nit_e = re.sub(r"[^0-9]", "", str(emisor.get("nit") or ""))
-    dui_e = re.sub(r"[^0-9]", "", str(emisor.get("numDocumento") or ""))
-
     iva_val = fovial = cotrans = 0.0
     for t in (resumen.get("tributos") or []):
         cod  = str(t.get("codigo") or "")
         desc = str(t.get("descripcion") or "").upper()
         val  = float(t.get("valor") or 0)
-        if cod == "20" or "IVA" in desc:
+        if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
             iva_val = val
         elif cod == "C3" or "FOVIAL" in desc:
             fovial = val
@@ -256,20 +281,17 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
     gen_uuid = str(ident.get("codigoGeneracion") or "")
     num_ctrl = str(ident.get("numeroControl") or "")
 
-    # Sello: preferir raíz del envoltorio; caer en identificacion si está vacío
-    sello = sello_raiz or str(ident.get("selloRecibido") or "").strip()
-
     return {
-        "tipo"           : str(ident.get("tipoDte") or ""),
+        "tipo"           : tipo_dte,
         "fecha"          : fecha,
         "num_control"    : num_ctrl,
         "num_control_raw": num_ctrl,
         "gen"            : gen_uuid,
         "gen_sin_guiones": gen_uuid.replace("-", ""),
         "sello"          : sello,
-        "nom_prov"       : str(emisor.get("nombre") or "").upper().strip(),
-        "nit_prov"       : nit_e if len(nit_e) == 14 else "",
-        "dui_prov"       : dui_e if len(dui_e) == 9 else "",
+        "nom_prov"       : nom_prov,
+        "nit_prov"       : nit_prov,
+        "dui_prov"       : dui_prov,
         "gra"            : float(resumen.get("totalGravada") or 0),
         "exe"            : float(resumen.get("totalExenta") or 0),
         "no_sujetas"     : float(resumen.get("totalNoSuj") or 0),
