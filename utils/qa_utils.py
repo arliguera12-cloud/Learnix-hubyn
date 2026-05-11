@@ -372,3 +372,42 @@ def mostrar_indicador_vision(
     elif campos_vision:
         n = len([v for v in campos_vision.values() if v is not None])
         target.caption(f"⚡ Vision extrajo {n} campo(s) — sin alertas fiscales")
+
+
+def calcular_estatus_venta(row) -> str:
+    """
+    Returns '🔴 Revisar' or '🟢 OK' for a ventas row.
+    Checks: IVA ≈ gravadas×13% (±$0.01, tipos 03/05/06) and sello ≥ 30 chars.
+    Accepts raw session_state df rows with columns: tipo, gravadas, debito, sello.
+    """
+    d      = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    grav   = _monto(d.get("gravadas", 0))
+    debito = _monto(d.get("debito", 0))
+    sello  = str(d.get("sello", "") or "").strip()
+    tipo   = str(d.get("tipo", ""))
+
+    if tipo in ("03", "05", "06") and grav > 0 and debito > 0:
+        if abs(debito - round(grav * 0.13, 2)) > 0.01:
+            return "🔴 Revisar"
+    if len(sello) < 30:
+        return "🔴 Revisar"
+    return "🟢 OK"
+
+
+def calcular_estatus_compra(row) -> str:
+    """
+    Returns '🔴 Revisar' or '🟢 OK' for a compra row.
+    Checks: IVA ≈ gra×13% (±$0.01) and sello ≥ 30 chars.
+    Accepts raw session_state df rows with columns: gra, iva, sello.
+    """
+    d     = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    gra   = _monto(d.get("gra", 0))
+    iva   = _monto(d.get("iva", 0))
+    sello = str(d.get("sello", "") or "").strip()
+
+    if gra > 0 and iva > 0:
+        if abs(iva - round(gra * 0.13, 2)) > 0.01:
+            return "🔴 Revisar"
+    if len(sello) < 30:
+        return "🔴 Revisar"
+    return "🟢 OK"

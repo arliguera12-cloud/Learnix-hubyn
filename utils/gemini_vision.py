@@ -240,18 +240,14 @@ PASO 3 — EXTRAER VALORES (NUNCA ETIQUETAS)
 
   Para NÚMEROS: solo dígitos y punto decimal. Elimina "$", "US", comas de miles.
   Para FECHAS: formato DD/MM/YYYY (ej: "15/03/2025"). Busca "Fecha de Emisión:".
-  Para SELLO DE RECEPCIÓN (Ministerio de Hacienda): cadena alfanumérica de ~40
-    caracteres (ej: 20264BDE9F3A...). Búscalo EXCLUSIVAMENTE en el ENCABEZADO del
-    documento (parte superior), justo debajo del Código de Generación y del Número
-    de Control. NUNCA lo busques cerca del código QR — ese área puede contener texto
-    no relacionado. Es distinta del UUID (codigo_generacion). Nunca dejes
-    sello_recepcion vacío si hay una cadena alfanumérica larga de ~40 chars en el
-    encabezado.
-  Para SELLO DE RECEPCIÓN (Ministerio de Hacienda): busca una cadena alfanumérica
-    de 30-40 caracteres sin guiones, ubicada típicamente en la zona inferior del
-    documento cerca del código QR o de la leyenda "Sello de Recepción". Es distinta
-    del UUID (codigo_generacion). Nunca dejes sello_recepcion vacío si hay una
-    cadena alfanumérica larga visible en esa zona.
+  Para SELLO DE RECEPCIÓN: Es ESTRICTAMENTE una cadena alfanumérica de EXACTAMENTE
+    40 caracteres CONTINUOS SIN guiones ni espacios (ej: "20264BDE9F3A0C1D...").
+    Reglas de identificación:
+    • NUNCA es el UUID/Código de Generación: el UUID tiene guiones (XXXXXXXX-XXXX-...).
+    • NUNCA es el Número de Control: empieza con "DTE-".
+    • Búscalo explícitamente junto al texto "Sello de Recepción" o "Sello Recibido".
+    • Si hay varias cadenas largas, elige la de exactamente ~40 chars sin guiones.
+    • Devuelve "" (vacío) si no lo localizas con certeza — no inventes el valor.
   Para UUID (codigo_generacion): XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (36 chars).
   Para num_control: formato DTE-XX-XXXX-XXXXXXXXX (con guiones).
   Para NIT/DUI del Emisor en compras:
@@ -327,7 +323,7 @@ _CAMPOS: dict[str, str] = {
         "• fecha             : DD/MM/YYYY (campo 'Fecha de Emisión')\n"
         "• num_control       : Número de control DTE completo con guiones\n"
         "• codigo_generacion : UUID del documento (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)\n"
-        "• sello_recepcion   : Sello del MH (alfanumérico 30-40 chars, sin guiones)\n"
+        "• sello_recepcion   : Sello MH — cadena alfanumérica de ~40 chars SIN guiones, junto al texto 'Sello de Recepción'\n"
         "• nom_receptor      : Nombre/Razón social del COMPRADOR (del bloque RECEPTOR)\n"
         "• nit_receptor      : NIT del receptor (14 dígitos, si aplica)\n"
         "• dui_receptor      : DUI del receptor (9 dígitos, consumidores finales)\n"
@@ -339,7 +335,7 @@ _CAMPOS: dict[str, str] = {
         "• fecha             : DD/MM/YYYY\n"
         "• num_control       : Número de control DTE completo\n"
         "• codigo_generacion : UUID del documento\n"
-        "• sello_recepcion   : Sello del MH (~40 chars alfanumérico, en el ENCABEZADO)\n"
+        "• sello_recepcion   : Sello MH — cadena alfanumérica de ~40 chars SIN guiones, junto al texto 'Sello de Recepción'\n"
         "• nom_emisor        : Nombre/Razón social del PROVEEDOR (bloque EMISOR)\n"
         "• nit_emisor        : NIT del PROVEEDOR (14 dígitos) — preferir sobre DUI\n"
         "• dui_emisor        : DUI del PROVEEDOR (9 dígitos) — solo si no hay NIT de 14\n"
@@ -350,7 +346,6 @@ _CAMPOS: dict[str, str] = {
         "• total             : total del documento (string exacto)\n"
         "• fovial            : impuesto FOVIAL si el emisor es gasolinera (string exacto, '' si no aplica)\n"
         "• cotrans           : impuesto COTRANS si el emisor es gasolinera (string exacto, '' si no aplica)\n"
-        "• sello_recepcion   : Sello del MH (alfanumérico 30-40 chars, cerca del QR)\n"
         "• nom_emisor        : Nombre/Razón social del PROVEEDOR (bloque EMISOR)\n"
         "• nit_emisor        : NIT del PROVEEDOR (14 dígitos) — preferir sobre DUI\n"
         "• dui_emisor        : DUI del PROVEEDOR (9 dígitos) — solo si no hay NIT de 14\n"

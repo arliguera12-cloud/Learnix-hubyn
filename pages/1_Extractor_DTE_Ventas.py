@@ -12,7 +12,7 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
-from utils.concurrent_processor import leer_archivos_uploaded, leer_y_procesar_lote
+from utils.concurrent_processor import leer_archivos_uploaded, leer_y_procesar_lote, procesar_json_nativo_ventas
 from utils.pdf_utils import (
     safe_str as _safe_str,
     safe_extract_text as _safe_extract_text,
@@ -37,6 +37,7 @@ from utils.qa_utils import (
     mostrar_indicador_vision,
     requiere_revision_manual,
     validar_montos_ventas,
+    calcular_estatus_venta,
 )
 
 # ─────────────────────────────────────────────
@@ -1103,8 +1104,8 @@ with st.sidebar:
     st.divider()
 
     archivos = st.file_uploader(
-        "Arrastra PDFs de ventas",
-        type="pdf",
+        "Arrastra PDFs o JSONs de ventas",
+        type=["pdf", "json"],
         accept_multiple_files=True,
         key=str(st.session_state.ventas_uploader)
     )
@@ -1135,20 +1136,35 @@ with st.sidebar:
 
             # ── Pre-lectura en hilo principal (UploadedFile no es thread-safe) ──
             nombres_y_bytes_validos : list[tuple[str, bytes]] = []
+            nombres_y_bytes_json    : list[tuple[str, bytes]] = []
             for f in nuevos:
                 fb = f.read()
-                if len(fb) < 512:
-                    corruptos.append(f.name)
-                    st.session_state.archivos_ventas.append(f.name)
+                if f.name.lower().endswith(".json"):
+                    if len(fb) < 10:
+                        corruptos.append(f.name)
+                        st.session_state.archivos_ventas.append(f.name)
+                    else:
+                        nombres_y_bytes_json.append((f.name, fb))
                 else:
-                    nombres_y_bytes_validos.append((f.name, fb))
+                    if len(fb) < 512:
+                        corruptos.append(f.name)
+                        st.session_state.archivos_ventas.append(f.name)
+                    else:
+                        nombres_y_bytes_validos.append((f.name, fb))
 
             bar.progress(0)
             txt_progreso.caption(
-                f"⏳ Enviando {len(nombres_y_bytes_validos)} archivos en paralelo a Gemini..."
+                f"⏳ Enviando {len(nombres_y_bytes_validos)} PDF(s) y "
+                f"{len(nombres_y_bytes_json)} JSON(s) a procesar..."
             )
 
-            # ── Extracción paralela (I/O-bound: Vision + Gemini + pdfplumber) ──
+            # ── JSON nativo: procesar sin Gemini ────────────────────────────────
+            resultados_json: list[tuple[str, bytes, dict]] = [
+                (fname, fb, procesar_json_nativo_ventas(fb))
+                for fname, fb in nombres_y_bytes_json
+            ]
+
+            # ── PDFs: extracción paralela con Gemini Vision ──────────────────────
             fn_extraer = functools.partial(
                 extraer_venta_nativo_pro, cliente_activo=cliente, clientes_db=_clientes_db_cache
             )
@@ -1157,21 +1173,13 @@ with st.sidebar:
                 bar.progress(comp / tot)
                 txt_progreso.caption(f"⏳ {comp}/{tot} completados — `{fname}`")
 
-            resultados = leer_y_procesar_lote(
+            resultados_pdf = leer_y_procesar_lote(
                 nombres_y_bytes_validos,
                 fn_extraer,
                 progreso_cb=_progreso_ventas,
             )
 
-            def _progreso_ventas(comp: int, tot: int, fname: str) -> None:
-                bar.progress(comp / tot)
-                txt_progreso.caption(f"⏳ {comp}/{tot} completados — `{fname}`")
-
-            resultados = leer_y_procesar_lote(
-                nombres_y_bytes_validos,
-                fn_extraer,
-                progreso_cb=_progreso_ventas,
-            )
+            resultados = resultados_json + resultados_pdf
 
             # ── Clasificación secuencial en hilo principal ──────────────────────
             for fname, file_bytes, res in resultados:
@@ -1792,6 +1800,7 @@ if not st.session_state.db_ventas.empty:
         st.markdown("#### 🧾 Detalle de Ventas a Contribuyentes (CCF / NC / ND)")
         if not df_fil_contrib.empty:
             df_f07_c = construir_df_f07_contribuyentes(df_fil_contrib)
+            df_f07_c.insert(0, "Estatus", df_fil_contrib.apply(calcular_estatus_venta, axis=1).values)
             COLS_NUM_C = [c for c in df_f07_c.columns if df_f07_c[c].dtype == float]
             st.dataframe(
                 df_f07_c.style.format({c: "{:.2f}" for c in COLS_NUM_C}),
@@ -1862,6 +1871,7 @@ if not st.session_state.db_ventas.empty:
     with tab3:
         st.write(f"📊 Registros: **{len(df_filtrado)}** de **{len(df)}**")
         df_auditoria = construir_df_f07_ventas_combinado(df_filtrado)
+        df_auditoria.insert(0, "Estatus", df_filtrado.apply(calcular_estatus_venta, axis=1).values)
         COLS_NUM_AUD_V = ["Exentas", "No Sujetas", "Gravadas", "Débito", "Total"]
         cols_fmt_aud   = {c: "{:,.2f}" for c in COLS_NUM_AUD_V if c in df_auditoria.columns}
         st.dataframe(
