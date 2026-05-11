@@ -72,7 +72,7 @@ cliente = st.session_state.cliente_activo
 # ─────────────────────────────────────────────
 MAX_VALORES_LOOP = 40
 
-TIPOS_VALIDOS_COMPRAS = {"03", "05", "06", "11", "14", "01"}
+TIPOS_VALIDOS_COMPRAS = {"03", "05", "06", "11", "14"}
 
 SKIP_LINEAS = re.compile(
     r'^(?:DOCUMENTO|TRIBUTARIO|ELECTR[OÓ]NICO|ELECTRONICO|COMPROBANTE|'
@@ -1173,6 +1173,7 @@ with st.sidebar:
             resultados = resultados_json + resultados_pdf
 
             # ── Clasificación secuencial en hilo principal ──────────────────────
+            _TIPOS_ACEPTADOS_COMPRAS = {"03", "05", "06", "11", "14"}
             for fname, file_bytes, res in resultados:
                 cod_gen  = safe_str(res.get('gen', ''))
                 num_ctrl = safe_str(res.get('num_control', ''))
@@ -1195,7 +1196,11 @@ with st.sidebar:
                     for d in extracted
                 )
 
-                if "error_tipo" in res:
+                # Regla contable: DTE-01 (Factura consumidor) no es válido en Compras
+                _tipo_res = safe_str(res.get("tipo", ""))
+                if _tipo_res and _tipo_res not in _TIPOS_ACEPTADOS_COMPRAS and "error_tipo" not in res and "error_fatal" not in res:
+                    invalidos.append(fname)
+                elif "error_tipo" in res:
                     invalidos.append(fname)
                 elif dup_memoria or dup_lote:
                     duplicados.append(fname)
