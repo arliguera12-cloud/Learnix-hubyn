@@ -37,8 +37,6 @@ from utils.qa_utils import (
     mostrar_indicador_vision,
     requiere_revision_manual,
     validar_montos_ventas,
-    clasificar_alerta_venta,
-    estilar_alertas,
 )
 
 # ─────────────────────────────────────────────
@@ -1794,17 +1792,9 @@ if not st.session_state.db_ventas.empty:
         st.markdown("#### 🧾 Detalle de Ventas a Contribuyentes (CCF / NC / ND)")
         if not df_fil_contrib.empty:
             df_f07_c = construir_df_f07_contribuyentes(df_fil_contrib)
-            df_f07_c.insert(0, "_alerta", df_fil_contrib.apply(clasificar_alerta_venta, axis=1).values)
             COLS_NUM_C = [c for c in df_f07_c.columns if df_f07_c[c].dtype == float]
-            n_alertas_c = (df_f07_c["_alerta"].str.startswith("⚠️")).sum()
-            if n_alertas_c:
-                st.warning(
-                    f"⚠️ **{n_alertas_c} fila(s) con Error de Cuadre Legal** — "
-                    "IVA ≠ 13% o Sello vacío. Ver columna `_alerta`.",
-                    icon=None,
-                )
             st.dataframe(
-                estilar_alertas(df_f07_c, "_alerta").format({c: "{:.2f}" for c in COLS_NUM_C}),
+                df_f07_c.style.format({c: "{:.2f}" for c in COLS_NUM_C}),
                 hide_index=True, use_container_width=True
             )
             # Resumen
@@ -1876,18 +1866,6 @@ if not st.session_state.db_ventas.empty:
         cols_fmt_aud   = {c: "{:,.2f}" for c in COLS_NUM_AUD_V if c in df_auditoria.columns}
         st.dataframe(
             df_auditoria.style.format(cols_fmt_aud),
-        df_auditoria.insert(0, "_alerta", df_filtrado.apply(clasificar_alerta_venta, axis=1).values)
-        n_alertas_aud = (df_auditoria["_alerta"].str.startswith("⚠️")).sum()
-        if n_alertas_aud:
-            st.warning(
-                f"⚠️ **{n_alertas_aud} fila(s) con Error de Cuadre Legal** — "
-                "IVA ≠ 13% o Sello vacío. Ver columna `_alerta`.",
-                icon=None,
-            )
-        COLS_NUM_AUD_V = ["Exentas", "No Sujetas", "Gravadas", "Débito", "Total"]
-        cols_fmt_aud   = {c: "{:,.2f}" for c in COLS_NUM_AUD_V if c in df_auditoria.columns}
-        st.dataframe(
-            estilar_alertas(df_auditoria, "_alerta").format(cols_fmt_aud),
             use_container_width=True,
             hide_index=True,
         )
