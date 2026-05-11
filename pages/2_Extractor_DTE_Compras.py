@@ -39,6 +39,7 @@ from utils.qa_utils import (
     validar_montos_ventas,
     calcular_estatus_compra,
     razones_revisar_compra,
+    validar_periodo_compras,
 )
 # Alias para compatibilidad con código existente
 limpiar_monto             = _limpiar_monto
@@ -2011,20 +2012,10 @@ if not st.session_state.db_compras.empty:
         st.markdown("#### ⚠️ Detalle de Alertas por Documento")
 
         if not df_filtrado.empty:
-            # Validación de período: detectar si hay docs de más de un mes
-            if "fecha" in df_filtrado.columns:
-                def _mes_anio(f):
-                    try:
-                        p = str(f).strip().split("/")
-                        return f"{p[1]}/{p[2]}" if len(p) == 3 else None
-                    except Exception:
-                        return None
-                periodos = df_filtrado["fecha"].apply(_mes_anio).dropna().unique()
-                if len(periodos) > 1:
-                    st.warning(
-                        f"⚠️ **Alerta de período**: Los documentos abarcan {len(periodos)} meses "
-                        f"({', '.join(sorted(periodos))}). El F-07 debe presentarse por mes."
-                    )
+            # Validación de período — ventana legal de 4 meses Art. 65 Ley IVA
+            alerta_per = validar_periodo_compras(df_filtrado)
+            if alerta_per:
+                st.warning(f"⚠️ **Alerta de período**: {alerta_per}")
 
             # Nota informativa sobre NC
             n_nc = (df_filtrado["tipo"] == "05").sum() if "tipo" in df_filtrado.columns else 0

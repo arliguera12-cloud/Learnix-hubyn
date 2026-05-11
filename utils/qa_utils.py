@@ -417,6 +417,100 @@ def calcular_estatus_compra(row) -> str:
     return "🟢 OK"
 
 
+def _parse_fecha_dmy(fecha_str: str):
+    """Parsea DD/MM/YYYY → datetime.date. Retorna None en cualquier fallo."""
+    import datetime
+    try:
+        p = str(fecha_str or "").strip().split("/")
+        if len(p) == 3:
+            d, m, y = int(p[0]), int(p[1]), int(p[2])
+            if 1 <= d <= 31 and 1 <= m <= 12 and 2000 <= y <= 2100:
+                return datetime.date(y, m, 1)
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def validar_periodo_ventas(df) -> str:
+    """
+    VENTAS — Regla estricta: todos los documentos deben pertenecer al mismo mes/año.
+    El F-07 Ventas es mensual; mezclar períodos genera inconsistencias con la declaración.
+
+    Returns: string de alerta si hay más de un mes; '' si todo OK.
+    """
+    if df is None or (hasattr(df, "empty") and df.empty) or "fecha" not in df.columns:
+        return ""
+    meses: set = set()
+    for f in df["fecha"]:
+        parsed = _parse_fecha_dmy(str(f))
+        if parsed:
+            meses.add(f"{parsed.month:02d}/{parsed.year}")
+    if len(meses) > 1:
+        meses_s = sorted(meses, key=lambda x: (x.split("/")[1], x.split("/")[0]))
+        return (
+            f"Los documentos abarcan {len(meses)} meses distintos "
+            f"({', '.join(meses_s)}). El F-07 Ventas se presenta por período mensual."
+        )
+    return ""
+
+
+def validar_periodo_compras(df) -> str:
+    """
+    COMPRAS — Art. 65 Ley IVA El Salvador: el crédito fiscal puede reclamarse
+    hasta en los 3 meses calendario siguientes al período en que se originó.
+    → Ventana permitida: mes de declaración + 3 meses anteriores (4 meses en total).
+
+    Mes de declaración = mes más reciente encontrado en el lote.
+    Lanza alerta solo si hay documentos más antiguos a esa ventana o fechas futuras.
+
+    Returns: string de alerta si hay problema; '' si todo está dentro del rango legal.
+    """
+    import datetime
+    if df is None or (hasattr(df, "empty") and df.empty) or "fecha" not in df.columns:
+        return ""
+
+    hoy    = datetime.date.today()
+    fechas = [_parse_fecha_dmy(str(f)) for f in df["fecha"]]
+    fechas = [f for f in fechas if f is not None]
+    if not fechas:
+        return ""
+
+    max_fecha = max(fechas)
+
+    # Límite inferior: 3 meses antes del mes de declaración
+    mes_min   = max_fecha.month - 3
+    anio_min  = max_fecha.year
+    if mes_min <= 0:
+        mes_min  += 12
+        anio_min -= 1
+    min_permitido = datetime.date(anio_min, mes_min, 1)
+
+    fuera: list[str] = []
+    futuras: list[str] = []
+    for f in fechas:
+        etiqueta = f"{f.month:02d}/{f.year}"
+        hoy_mes  = datetime.date(hoy.year, hoy.month, 1)
+        if f > hoy_mes:
+            futuras.append(etiqueta)
+        elif f < min_permitido:
+            fuera.append(etiqueta)
+
+    fuera   = sorted(set(fuera),   key=lambda x: (x.split("/")[1], x.split("/")[0]))
+    futuras = sorted(set(futuras), key=lambda x: (x.split("/")[1], x.split("/")[0]))
+
+    partes: list[str] = []
+    if fuera:
+        mes_min_s = f"{min_permitido.month:02d}/{min_permitido.year}"
+        mes_max_s = f"{max_fecha.month:02d}/{max_fecha.year}"
+        partes.append(
+            f"Documentos de {', '.join(fuera)} exceden la ventana legal de 4 meses "
+            f"(Art. 65 Ley IVA: se permiten {mes_min_s}–{mes_max_s})."
+        )
+    if futuras:
+        partes.append(f"Fechas futuras inválidas detectadas: {', '.join(futuras)}.")
+    return " | ".join(partes)
+
+
 def razones_revisar_venta(row) -> str:
     """Devuelve string con el/los motivos de 🔴 Revisar, o '' si todo OK."""
     d      = row.to_dict() if hasattr(row, "to_dict") else dict(row)
