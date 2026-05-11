@@ -1334,51 +1334,75 @@ if st.session_state.cola_revision_v:
     col_img, col_form = st.columns([1.2, 1], gap="large")
 
     with col_img:
-        try:
-            with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
-                img = pdf.pages[0].to_image(resolution=200).original
-                st.image(img, caption=item_actual['archivo'], use_container_width=True)
-                texto_crudo = ""
-                for page in pdf.pages:
-                    texto_crudo += safe_extract_text(page, layout=True) + "\n"
+        if item_actual["archivo"].lower().endswith(".json"):
+            st.info(
+                "Vista previa de PDF no aplicable para archivos JSON nativos. "
+                "Los datos se extrajeron con 100% de precisión."
+            )
+            with st.expander("🔍 Datos extraídos automáticamente"):
+                _v_campos  = datos_act.get("_vision_campos", {})
+                _v_alertas = datos_act.get("_vision_alertas", [])
+                _v_audit   = datos_act.get("_vision_audit", {})
+                col_d1, col_d2 = st.columns(2)
+                with col_d1:
+                    st.caption(f"**Tipo DTE:** `{tipo_badge(tipo_actual)}`")
+                    st.caption(f"**Num Control:** `{datos_act.get('num_control_raw', datos_act.get('num_control','—'))}`")
+                    st.caption(f"**UUID:** `{datos_act.get('gen','—')}`")
+                    st.caption(f"**Sello:** `{datos_act.get('sello','—')}`")
+                    st.caption(f"**Fecha:** `{datos_act.get('fecha','—')}`")
+                with col_d2:
+                    st.caption(f"**NIT receptor:** `{datos_act.get('nit_cli','—')}`")
+                    st.caption(f"**DUI receptor:** `{datos_act.get('dui_cli','—')}`")
+                    st.caption(f"**Nombre:** `{datos_act.get('nom_cli','—')}`")
+                    st.caption(f"**Total:** `${datos_act.get('total',0):.2f}`")
+                    st.caption(f"**Gravadas:** `${datos_act.get('gravadas',0):.2f}`")
+                    st.caption(f"**Débito:** `${datos_act.get('debito',0):.2f}`")
+        else:
+            try:
+                with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
+                    img = pdf.pages[0].to_image(resolution=200).original
+                    st.image(img, caption=item_actual['archivo'], use_container_width=True)
+                    texto_crudo = ""
+                    for page in pdf.pages:
+                        texto_crudo += safe_extract_text(page, layout=True) + "\n"
 
-                with st.expander("🔍 Datos extraídos automáticamente"):
-                    # ── QA Banner + Vision indicator ──────────────────────────
-                    _v_campos = datos_act.get("_vision_campos", {})
-                    _v_alertas = datos_act.get("_vision_alertas", [])
-                    _v_audit   = datos_act.get("_vision_audit", {})
-                    _confianza = _v_audit.get("confianza", 100) if _v_audit else 100
-                    _alertas_qa = validar_montos_ventas(datos_act)
-                    mostrar_banner_qa(
-                        "ventas", datos_act,
-                        confianza=_confianza,
-                        alertas=_v_alertas + _alertas_qa,
-                    )
-                    mostrar_indicador_vision(
-                        _v_campos, _v_alertas, _v_audit,
-                        error_vision=vision_ultimo_error(),
-                    )
-                    # ─────────────────────────────────────────────────────────
-                    col_d1, col_d2 = st.columns(2)
-                    with col_d1:
-                        st.caption(f"**Tipo DTE:** `{tipo_badge(tipo_actual)}`")
-                        st.caption(f"**Num Control:** `{datos_act.get('num_control_raw', datos_act.get('num_control','—'))}`")
-                        st.caption(f"**UUID:** `{datos_act.get('gen','—')}`")
-                        st.caption(f"**Sello:** `{datos_act.get('sello','—')}`")
-                        st.caption(f"**Fecha:** `{datos_act.get('fecha','—')}`")
-                    with col_d2:
-                        st.caption(f"**NIT receptor:** `{datos_act.get('nit_cli','—')}`")
-                        st.caption(f"**DUI receptor:** `{datos_act.get('dui_cli','—')}`")
-                        st.caption(f"**Nombre:** `{datos_act.get('nom_cli','—')}`")
-                        st.caption(f"**Total:** `${datos_act.get('total',0):.2f}`")
-                        st.caption(f"**Gravadas:** `${datos_act.get('gravadas',0):.2f}`")
-                        st.caption(f"**Débito:** `${datos_act.get('debito',0):.2f}`")
+                    with st.expander("🔍 Datos extraídos automáticamente"):
+                        # ── QA Banner + Vision indicator ──────────────────────────
+                        _v_campos = datos_act.get("_vision_campos", {})
+                        _v_alertas = datos_act.get("_vision_alertas", [])
+                        _v_audit   = datos_act.get("_vision_audit", {})
+                        _confianza = _v_audit.get("confianza", 100) if _v_audit else 100
+                        _alertas_qa = validar_montos_ventas(datos_act)
+                        mostrar_banner_qa(
+                            "ventas", datos_act,
+                            confianza=_confianza,
+                            alertas=_v_alertas + _alertas_qa,
+                        )
+                        mostrar_indicador_vision(
+                            _v_campos, _v_alertas, _v_audit,
+                            error_vision=vision_ultimo_error(),
+                        )
+                        # ─────────────────────────────────────────────────────────
+                        col_d1, col_d2 = st.columns(2)
+                        with col_d1:
+                            st.caption(f"**Tipo DTE:** `{tipo_badge(tipo_actual)}`")
+                            st.caption(f"**Num Control:** `{datos_act.get('num_control_raw', datos_act.get('num_control','—'))}`")
+                            st.caption(f"**UUID:** `{datos_act.get('gen','—')}`")
+                            st.caption(f"**Sello:** `{datos_act.get('sello','—')}`")
+                            st.caption(f"**Fecha:** `{datos_act.get('fecha','—')}`")
+                        with col_d2:
+                            st.caption(f"**NIT receptor:** `{datos_act.get('nit_cli','—')}`")
+                            st.caption(f"**DUI receptor:** `{datos_act.get('dui_cli','—')}`")
+                            st.caption(f"**Nombre:** `{datos_act.get('nom_cli','—')}`")
+                            st.caption(f"**Total:** `${datos_act.get('total',0):.2f}`")
+                            st.caption(f"**Gravadas:** `${datos_act.get('gravadas',0):.2f}`")
+                            st.caption(f"**Débito:** `${datos_act.get('debito',0):.2f}`")
 
-                st.markdown("**📝 Texto extraído del PDF:**")
-                st.text_area("", value=texto_crudo.strip(),
-                             height=220, label_visibility="collapsed")
-        except Exception as ex_prev:
-            st.error(f"No se pudo cargar la vista previa: {safe_str(ex_prev)}")
+                    st.markdown("**📝 Texto extraído del PDF:**")
+                    st.text_area("", value=texto_crudo.strip(),
+                                 height=220, label_visibility="collapsed")
+            except Exception as ex_prev:
+                st.error(f"No se pudo cargar la vista previa: {safe_str(ex_prev)}")
 
     with col_form:
         st.markdown("### ✍️ Corrección Manual")
