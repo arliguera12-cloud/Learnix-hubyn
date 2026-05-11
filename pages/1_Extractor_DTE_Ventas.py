@@ -39,6 +39,7 @@ from utils.qa_utils import (
     validar_montos_ventas,
     calcular_estatus_venta,
     razones_revisar_venta,
+    validar_periodo_ventas,
 )
 
 # ─────────────────────────────────────────────
@@ -2012,20 +2013,10 @@ if not st.session_state.db_ventas.empty:
         st.markdown("#### ⚠️ Detalle de Alertas por Documento")
 
         if not df_filtrado.empty:
-            # Validación de período: detectar si hay docs de más de un mes
-            if "fecha" in df_filtrado.columns:
-                def _mes_anio_v(f):
-                    try:
-                        p = str(f).strip().split("/")
-                        return f"{p[1]}/{p[2]}" if len(p) == 3 else None
-                    except Exception:
-                        return None
-                periodos_v = df_filtrado["fecha"].apply(_mes_anio_v).dropna().unique()
-                if len(periodos_v) > 1:
-                    st.warning(
-                        f"⚠️ **Alerta de período**: Los documentos abarcan {len(periodos_v)} meses "
-                        f"({', '.join(sorted(periodos_v))}). El F-07 debe presentarse por mes."
-                    )
+            # Validación de período — regla estricta para Ventas
+            alerta_per = validar_periodo_ventas(df_filtrado)
+            if alerta_per:
+                st.warning(f"⚠️ **Alerta de período**: {alerta_per}")
 
             # Nota informativa sobre NC (DTE-05) en Ventas
             n_nc_v = (df_filtrado["tipo"] == "05").sum() if "tipo" in df_filtrado.columns else 0

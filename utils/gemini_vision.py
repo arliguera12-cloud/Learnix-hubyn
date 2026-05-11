@@ -280,6 +280,26 @@ PASO 3 — EXTRAER VALORES (NUNCA ETIQUETAS)
   Para IVA: Si no existe un campo "Total IVA" explícito, búscalo en la sección
     Tributos bajo el código "20" o la descripción "Impuesto al Valor Agregado".
   Para UUID (codigo_generacion): XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (36 chars).
+
+  CÓDIGO DE GENERACIÓN PARTIDO (farmacias como San Nicolás y similares):
+    Algunos emisores imprimen el UUID de 36 chars dividido en DOS líneas consecutivas.
+    Si ves fragmentos que parecen partes de un UUID (ej: "XXXXXXXX-XXXX" en una línea y
+    "XXXX-XXXX-XXXXXXXXXXXX" en la siguiente), concaténalos ELIMINANDO el salto de línea
+    para reconstruir el UUID completo de 36 chars.
+    Devuelve siempre el UUID en formato XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX.
+    NUNCA devuelvas un UUID truncado o partido.
+
+  FOVIAL Y COTRANS ESCONDIDOS (gasolineras con formato especial):
+    En algunos DTEs de gasolinera, FOVIAL y COTRANS NO aparecen en el detalle de ítems
+    sino en el cuadro de 'Suma Total de Operaciones', 'Sub-total' o cuadro de tributos,
+    etiquetados con los códigos:
+      • D1 → FOVIAL  ($0.20 por galón)
+      • C8 → COTRANS ($0.10 por galón)
+    Si el emisor menciona palabras como "COMBUSTIBLE", "GALÓN", "LITRO", "GASOLINERA"
+    o "SHELL", "TEXACO", "PUMA", "UNO", "PRIMAX", busca OBLIGATORIAMENTE los códigos
+    D1 y C8 en el cuadro de totales o tributos y extrae sus montos en los campos
+    fovial y cotrans respectivamente. No dejes estos campos en cero si los ves.
+
   Para num_control: formato DTE-XX-XXXX-XXXXXXXXX (con guiones).
   Para NIT/DUI del Emisor en compras:
     • Busca primero NIT de 14 dígitos. Si no encuentras NIT, busca DUI de 9 dígitos.
