@@ -82,32 +82,84 @@ def cargar_proveedores_json() -> dict:
 
 
 def extraer_sello(texto_original: str) -> str:
+    """Extrae el Sello de Recepción MH: alfanumérico ~40 chars sin guiones."""
+
+    def _valido(v: str) -> bool:
+        v = v.strip().upper()
+        return (
+            25 <= len(v) <= 60
+            and "-" not in v
+            and re.search(r"[A-Z]", v)
+            and re.search(r"[0-9]", v)
+            and not v.startswith("DTE")
+        )
+
+    t_ns = re.sub(r"\s+", "", texto_original).upper()
+
+    # 1. Etiqueta en la misma línea (valor inmediato)
     m = re.search(
-        r"[Ss]ello\s+de\s+[Rr]ecepci[oó]n\s*[:\-]?\s*([A-Z0-9]{20,})",
-        texto_original, re.I
+        r"(?:Sello\s+de\s+Recepci[oó]n|SelloRecibido|Sello\s+Recibido)"
+        r"[\s:=\-]*([A-Z0-9]{25,60})",
+        texto_original, re.I,
     )
-    if m:
-        return m.group(1).strip()
+    if m and _valido(m.group(1)):
+        return m.group(1).strip().upper()
 
-    t_ns = re.sub(r'\s+', '', texto_original).upper()
-    m2 = re.search(r"SELLODERECE[PC]CI[O0]N[:\-]?([A-Z0-9]{20,})", t_ns)
-    if m2:
-        return m2.group(1).strip()
+    # 2. Sin espacios (PDF que colapsa whitespace entre etiqueta y valor)
+    for pat_ns in (
+        r"SELLODERECEPCI[O0]N[:\-=]?([A-Z0-9]{25,60})",
+        r"SELLORECIBIDO[:\-=]?([A-Z0-9]{25,60})",
+        r"SELLORECEIBIDO[:\-=]?([A-Z0-9]{25,60})",
+        r"SELLORECE[PC]CION[:\-=]?([A-Z0-9]{25,60})",
+    ):
+        m = re.search(pat_ns, t_ns)
+        if m and _valido(m.group(1)):
+            return m.group(1).upper()
 
-    m3 = re.search(
-        r"[Tt]ransmisi[oó]n\s+normal\s+([A-Z0-9]{20,})",
-        texto_original, re.I
-    )
-    if m3:
-        return m3.group(1).strip()
+    # 3. JSON-like embebido en el texto del PDF
+    for pat_json in (
+        r'"[Ss]ello[Rr]ecibido"\s*:\s*"([A-Z0-9]{25,60})"',
+        r"'[Ss]ello[Rr]ecibido'\s*:\s*'([A-Z0-9]{25,60})'",
+        r"[Ss]ello[Rr]ecibido\s*[=:]\s*\"?([A-Z0-9]{25,60})\"?",
+        r"respuesta[Hh]acienda[^\"']{0,120}[Ss]ello[Rr]ecibido[\"'\s:=]+([A-Z0-9]{25,60})",
+        r"response[Mm][Hh][^\"']{0,120}[Ss]ello[Rr]ecibido[\"'\s:=]+([A-Z0-9]{25,60})",
+    ):
+        m = re.search(pat_json, texto_original)
+        if m and _valido(m.group(1)):
+            return m.group(1).upper()
 
-    for linea in texto_original.splitlines():
-        linea_s = linea.strip()
-        mc = re.match(r'^(20[2-3]\d[A-Z0-9]{26,})$', linea_s, re.I)
-        if mc:
-            candidato = mc.group(1).upper()
-            if '-' not in candidato:
-                return candidato
+    # 4. Etiqueta en una línea, sello en la siguiente (layout vertical)
+    lineas = texto_original.splitlines()
+    for i, linea in enumerate(lineas):
+        if re.search(
+            r"[Ss]ello\s+(?:de\s+)?[Rr]ecepci[oó]n|[Ss]ello\s*[Rr]ecibido",
+            linea,
+        ):
+            for sig in lineas[i + 1 : i + 5]:
+                cand = re.sub(r"[^A-Z0-9]", "", sig.strip().upper())
+                if _valido(cand):
+                    return cand
+
+    # 5. Cerca de "Fecha Procesado", "Fecha y Hora de Generación" (zona del sello MH)
+    for pat_ctx in (
+        r"(?:Fecha\s+[Yy]\s+Hora\s+de\s+Generaci[oó]n|Fecha\s+Procesad[oa]|"
+        r"Procesado\s+(?:por\s+)?MH|FechaHora\s*Recepci[oó]n)"
+        r"[^\n]{0,200}?([A-Z0-9]{30,50})",
+    ):
+        m = re.search(pat_ctx, texto_original, re.I | re.S)
+        if m and _valido(m.group(1)):
+            return m.group(1).upper()
+
+    # 6. Standalone 36-44 chars alfanumérico (no es UUID puro de 32 hex)
+    for cand in re.findall(r"(?<![A-Z0-9])([A-Z0-9]{36,44})(?![A-Z0-9])", t_ns):
+        if _valido(cand) and len(cand) != 32:   # 32 = UUID sin guiones (solo hex)
+            return cand
+
+    # 7. Heurística de inicio por año (sello suele comenzar con el año de emisión)
+    for linea in lineas:
+        mc = re.match(r"^\s*(20[2-9]\d[A-Z0-9]{28,38})\s*$", linea, re.I)
+        if mc and _valido(mc.group(1)):
+            return mc.group(1).upper()
 
     return ""
 
@@ -245,6 +297,11 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             base = float(_vision_campos["base"])
         if _vision_campos.get("ret") and ret == 0.0:
             ret = float(_vision_campos["ret"])
+
+        # Sello: aplicar Vision si regex no lo encontró o encontró uno corto
+        v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
+        if len(v_sello) >= 25 and "-" not in v_sello and len(sello) < 25:
+            sello = v_sello
 
         if not _vision_campos and gemini_disponible():
             # Fallback textual solo cuando Vision no está disponible

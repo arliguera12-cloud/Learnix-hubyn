@@ -647,6 +647,19 @@ def _limpio_str(raw) -> str | None:
     return str(raw).strip() or None
 
 
+def _limpio_sello(raw) -> str:
+    """Validates a sello_recepcion: strips dashes/spaces, requires 25-60 chars, mixed alphanum."""
+    if not raw:
+        return ""
+    v = re.sub(r'[\s\-]', '', str(raw).strip()).upper()
+    if (25 <= len(v) <= 60
+            and re.search(r'[A-Z]', v)
+            and re.search(r'[0-9]', v)
+            and not v.startswith('DTE')):
+        return v
+    return ""
+
+
 def _limpio_nit(raw) -> str:
     return re.sub(r'[^0-9]', '', str(raw or ""))
 
@@ -698,15 +711,99 @@ def _limpiar_monto_vision(raw) -> float:
         return 0.0
 
 
+def _buscar_sello_forzado(pdf_bytes: bytes) -> str:
+    """
+    Segunda llamada a Gemini Vision dedicada SOLO al Sello de Recepción.
+    Usa respuesta texto plano (no JSON schema) y un prompt ultrafocalizado.
+    Se invoca cuando la llamada principal no extrajo el sello.
+    """
+    api_key = _get_api_key()
+    if not api_key or not pdf_bytes:
+        return ""
+
+    prompt = (
+        "Eres un extractor especializado. Tu ÚNICA tarea es encontrar el Sello de Recepción "
+        "en este documento DTE de El Salvador.\n\n"
+        "El Sello de Recepción es:\n"
+        "• Una cadena alfanumérica de EXACTAMENTE ~40 caracteres SIN guiones ni espacios\n"
+        "• Contiene letras (A-Z) Y dígitos (0-9) mezclados\n"
+        "• Ejemplos reales: 20255C20E45745184C2B954A6A3635B24471EKLT\n"
+        "                   20258A7BB96EF5724E438F17E95D508EB6ECFKLC\n\n"
+        "Búscalo en TODO el documento:\n"
+        "• Junto a la etiqueta 'Sello de Recepción:' o 'SelloRecibido:'\n"
+        "• En la parte SUPERIOR o INFERIOR del documento (sello/stamp del MH)\n"
+        "• Cerca de 'Fecha y Hora de Generación', 'Procesado por MH', 'Fecha Procesado'\n"
+        "• En cualquier recuadro o sello visual impreso\n"
+        "• Como campo JSON: selloRecibido, respuestaHacienda.selloRecibido\n\n"
+        "NUNCA confundas con:\n"
+        "• UUID/Código de Generación: tiene GUIONES (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)\n"
+        "• Número de Control: empieza con 'DTE-'\n"
+        "• NIT: exactamente 14 dígitos (solo números)\n\n"
+        "Revisa la primera Y la última página exhaustivamente.\n\n"
+        "Responde ÚNICAMENTE con el sello encontrado (la cadena alfanumérica).\n"
+        "Si definitivamente no lo encuentras, responde exactamente: NOTFOUND"
+    )
+
+    pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    payload  = {
+        "contents": [{
+            "parts": [
+                {"inlineData": {"mimeType": "application/pdf", "data": pdf_b64}},
+                {"text": prompt},
+            ]
+        }],
+        "generationConfig": {
+            "temperature"     : 0.0,
+            "maxOutputTokens" : 128,
+            "thinkingConfig"  : {"thinkingBudget": 0},
+        },
+    }
+
+    try:
+        resp = requests.post(
+            _GEMINI_URL,
+            params  = {"key": api_key},
+            json    = payload,
+            timeout = _TIMEOUT,
+        )
+        if resp.status_code != 200:
+            log.warning("_buscar_sello_forzado HTTP %d", resp.status_code)
+            return ""
+
+        candidates = resp.json().get("candidates", [])
+        if not candidates:
+            return ""
+
+        raw = ""
+        for part in candidates[0].get("content", {}).get("parts", []):
+            txt = part.get("text", "").strip()
+            if txt:
+                raw = txt
+                break
+
+        if not raw or "NOTFOUND" in raw.upper():
+            return ""
+
+        return _limpio_sello(raw)
+
+    except Exception as exc:
+        log.warning("_buscar_sello_forzado error: %s", exc)
+        return ""
+
+
 def _mapear_campos(resultado: dict, tipo_dte: str, nit_ctx: str) -> dict:
     """Maps vision field names to page-expected field names and filters invalid values."""
     out: dict = {}
 
     # Campos comunes
-    for campo in ("tipo_documento", "fecha", "num_control", "codigo_generacion", "sello_recepcion"):
+    for campo in ("tipo_documento", "fecha", "num_control", "codigo_generacion"):
         v = _limpio_str(resultado.get(campo))
         if v:
             out[campo] = v
+
+    sello_v = _limpio_sello(resultado.get("sello_recepcion"))
+    if sello_v:
+        out["sello_recepcion"] = sello_v
 
     if tipo_dte == "ventas":
         nom = _limpio_str(resultado.get("nom_receptor"))
@@ -849,4 +946,12 @@ def extraer_dte_con_vision(
     }
 
     campos = _mapear_campos(resultado, tipo_dte, nit_ctx)
+
+    # Segunda llamada focalizada si el sello no fue extraído en el primer pase
+    if not campos.get("sello_recepcion"):
+        sello_extra = _buscar_sello_forzado(pdf_bytes)
+        if sello_extra:
+            campos["sello_recepcion"] = sello_extra
+            log.info("Sello encontrado en segunda llamada focalizada: %s…", sello_extra[:12])
+
     return campos, alertas, audit
