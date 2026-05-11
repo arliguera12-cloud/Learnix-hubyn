@@ -12,7 +12,7 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
-from utils.concurrent_processor import leer_y_procesar_lote
+from utils.concurrent_processor import leer_y_procesar_lote, procesar_json_nativo_compras
 from utils.pdf_utils import (
     safe_str as _safe_str,
     safe_extract_text as _safe_extract_text,
@@ -37,6 +37,7 @@ from utils.qa_utils import (
     mostrar_banner_qa,
     mostrar_indicador_vision,
     validar_montos_ventas,
+    calcular_estatus_compra,
 )
 # Alias para compatibilidad con código existente
 limpiar_monto             = _limpiar_monto
@@ -1089,8 +1090,8 @@ with st.sidebar:
     st.divider()
 
     archivos = st.file_uploader(
-        "Arrastra facturas de proveedores (PDF)",
-        type="pdf",
+        "Arrastra facturas de proveedores (PDF o JSON)",
+        type=["pdf", "json"],
         accept_multiple_files=True,
         key=str(st.session_state.comp_uploader_key),
     )
@@ -1119,20 +1120,35 @@ with st.sidebar:
 
             # ── Pre-lectura en hilo principal (UploadedFile no es thread-safe) ──
             nombres_y_bytes_validos : list[tuple[str, bytes]] = []
+            nombres_y_bytes_json    : list[tuple[str, bytes]] = []
             for f in nuevos:
                 fb = f.read()
-                if len(fb) < 512:
-                    corruptos.append(f.name)
-                    st.session_state.archivos_comp.append(f.name)
+                if f.name.lower().endswith(".json"):
+                    if len(fb) < 10:
+                        corruptos.append(f.name)
+                        st.session_state.archivos_comp.append(f.name)
+                    else:
+                        nombres_y_bytes_json.append((f.name, fb))
                 else:
-                    nombres_y_bytes_validos.append((f.name, fb))
+                    if len(fb) < 512:
+                        corruptos.append(f.name)
+                        st.session_state.archivos_comp.append(f.name)
+                    else:
+                        nombres_y_bytes_validos.append((f.name, fb))
 
             bar.progress(0)
             txt_progreso.caption(
-                f"⏳ Enviando {len(nombres_y_bytes_validos)} archivos en paralelo a Gemini..."
+                f"⏳ Enviando {len(nombres_y_bytes_validos)} PDF(s) y "
+                f"{len(nombres_y_bytes_json)} JSON(s) a procesar..."
             )
 
-            # ── Extracción paralela ─────────────────────────────────────────────
+            # ── JSON nativo: procesar sin Gemini ────────────────────────────────
+            resultados_json: list[tuple[str, bytes, dict]] = [
+                (fname, fb, procesar_json_nativo_compras(fb))
+                for fname, fb in nombres_y_bytes_json
+            ]
+
+            # ── PDFs: extracción paralela con Gemini Vision ──────────────────────
             fn_extraer = functools.partial(
                 extraer_compra_nativo_pro,
                 cliente_activo=cliente,
@@ -1143,11 +1159,13 @@ with st.sidebar:
                 bar.progress(comp / tot)
                 txt_progreso.caption(f"⏳ {comp}/{tot} completados — `{fname}`")
 
-            resultados = leer_y_procesar_lote(
+            resultados_pdf = leer_y_procesar_lote(
                 nombres_y_bytes_validos,
                 fn_extraer,
                 progreso_cb=_progreso_compras,
             )
+
+            resultados = resultados_json + resultados_pdf
 
             # ── Clasificación secuencial en hilo principal ──────────────────────
             for fname, file_bytes, res in resultados:
@@ -1745,6 +1763,7 @@ if not st.session_state.db_compras.empty:
     with tab1:
         if not df_filtrado.empty:
             df_f07 = construir_df_f07_compras(df_filtrado)
+            df_f07.insert(0, "Estatus", df_filtrado.apply(calcular_estatus_compra, axis=1).values)
             COLS_NUM  = [c for c in df_f07.columns if df_f07[c].dtype == float]
             st.dataframe(
                 df_f07.style.format({c: "{:,.2f}" for c in COLS_NUM}),
@@ -1797,8 +1816,10 @@ if not st.session_state.db_compras.empty:
         COLS_NUM_AUD = ['exe','gra','iva','ret','perc','tot','fovial','cotrans']
         cols_fmt     = {c: "{:,.2f}" for c in COLS_NUM_AUD if c in df_filtrado.columns}
 
+        df_aud = df_filtrado[cols_disp].copy()
+        df_aud.insert(0, "Estatus", df_filtrado.apply(calcular_estatus_compra, axis=1).values)
         st.dataframe(
-            df_filtrado[cols_disp].style.format(cols_fmt),
+            df_aud.style.format(cols_fmt),
             use_container_width=True,
             hide_index=True,
         )
