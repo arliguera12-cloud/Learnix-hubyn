@@ -33,6 +33,7 @@ from utils.qa_utils import (
     mostrar_indicador_vision,
     validar_montos_retenciones,
 )
+from utils.qr_reader import extraer_datos_qr as _extraer_qr
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -316,6 +317,14 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 fecha    = _corr_dict["fecha"]
             if _corr_dict.get("nit_prov"):
                 nit_prov = _corr_dict["nit_prov"]
+
+        # ── QR ES EL REY: sobreescribe gen si el QR encontró datos ─────────────
+        try:
+            _qr = _extraer_qr(file_bytes)
+            if _qr.get("codigo_generacion"):
+                gen = _qr["codigo_generacion"].upper()
+        except Exception:
+            pass
 
         return {
             "nit_prov"            : nit_prov,
