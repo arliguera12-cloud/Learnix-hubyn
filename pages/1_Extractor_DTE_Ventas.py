@@ -1129,7 +1129,8 @@ with st.sidebar:
             st.info("ℹ️ Todos los archivos ya fueron procesados.")
         else:
             extracted, duplicados, iva_calc_files   = [], [], []
-            invalidos, corruptos, nuevos_clientes_d = [], [], {}
+            invalidos, corruptos, ignorados_nit     = [], [], []
+            nuevos_clientes_d = {}
 
             # Carga única de BD (evita leer el JSON en disco por cada PDF)
             _clientes_db_cache = cargar_clientes_json()
@@ -1225,6 +1226,24 @@ with st.sidebar:
                     })
 
                 else:
+                    # ── Filtro de Pertenencia ────────────────────────────────────
+                    _nit_activo = re.sub(r"[^0-9]", "", safe_str(cliente.get("nit", "")))
+                    _nom_activo = safe_str(cliente.get("nombre", "")).upper()
+                    _sandbox = (
+                        _nit_activo == "00000000000000"
+                        or "PRUEBA" in _nom_activo
+                    )
+                    if not _sandbox:
+                        # En ventas el emisor del DTE = empresa activa
+                        _nit_emisor_dte = re.sub(
+                            r"[^0-9]", "",
+                            safe_str(res.get("_nit_emisor", ""))
+                        )
+                        if _nit_emisor_dte and _nit_emisor_dte != _nit_activo:
+                            ignorados_nit.append(fname)
+                            st.session_state.archivos_ventas.append(fname)
+                            continue
+                    # ─────────────────────────────────────────────────────────────
                     nom_res  = safe_str(res.get('nom_cli', '')).strip()
                     tipo_res = safe_str(res.get('tipo', ''))
                     requiere_nombre = tipo_res in TIPOS_CONTRIBUYENTES
@@ -1263,6 +1282,7 @@ with st.sidebar:
                 "iva_calc"        : iva_calc_files,
                 "nuevos_clientes" : nuevos_clientes_d,
                 "corruptos"       : corruptos,
+                "ignorados_nit"   : ignorados_nit,
             }
 
             if extracted:
@@ -1677,7 +1697,7 @@ if st.session_state.reporte_ventas:
     rep = st.session_state.reporte_ventas
     st.markdown("### 📋 Alertas de Procesamiento")
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
         alerta_con_lista("error" if rep.get("corruptos") else "success",
                          "💀", "Dañados", rep.get("corruptos", []))
@@ -1690,6 +1710,9 @@ if st.session_state.reporte_ventas:
     with c4:
         alerta_con_lista("info" if rep.get("iva_calc") else "success",
                          "🧮", "IVA Calculado", rep.get("iva_calc", []))
+    with c5:
+        alerta_con_lista("warning" if rep.get("ignorados_nit") else "success",
+                         "🚫", "Ignorados (NIT no coincide)", rep.get("ignorados_nit", []))
 
     nc_dict = rep.get("nuevos_clientes", {})
     if nc_dict:
