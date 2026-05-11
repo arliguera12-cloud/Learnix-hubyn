@@ -764,7 +764,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
         iva = max(iva, 0.0)
         tot = max(tot, 0.0)
 
-        # ── Completar montos desde Vision cuando regex obtuvo 0 ──────────────
+        # ── Completar campos desde Vision cuando regex obtuvo vacío/0 ─────────
         if _vision_campos:
             if _vision_campos.get("gravadas") and gra == 0.0:
                 gra = round(float(_vision_campos["gravadas"]), 2)
@@ -774,6 +774,10 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 tot = round(float(_vision_campos["total"]), 2)
             if _vision_campos.get("exentas") and exe == 0.0:
                 exe = round(float(_vision_campos["exentas"]), 2)
+            # Sello: Vision es la fuente primaria (~40 chars); regex como respaldo
+            v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
+            if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
+                sello = v_sello
 
         return {
             "fecha"          : fecha,
@@ -1752,11 +1756,12 @@ if not st.session_state.db_compras.empty:
     )
     st.markdown("")
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Libro F-07 Compras (Anexo 3)",
         "🔍 Auditoría Completa",
         "📈 Resumen por Proveedor",
         "📋 Anexo 8 — Percepciones",
+        "⚠️ Alertas",
     ])
 
     # ── Tab 1: F-07 ───────────────────────────────────────────────────────────
@@ -1931,6 +1936,49 @@ if not st.session_state.db_compras.empty:
                     "**Columna D**: Sello de Recepción. **Columna E**: UUID sin guiones. "
                     "**Columna I**: '8' (número de anexo)."
                 )
+
+    # ── Tab 5: Alertas ────────────────────────────────────────────────────────
+    with tab5:
+        st.markdown("#### ⚠️ Detalle de Alertas por Documento")
+        if not df_filtrado.empty:
+            filas_alerta = []
+            for _, row in df_filtrado.iterrows():
+                razones = []
+                tipo   = str(row.get("tipo", ""))
+                gra    = float(row.get("gra", 0) or 0)
+                iva    = float(row.get("iva", 0) or 0)
+                sello  = str(row.get("sello", "") or "").strip()
+                if tipo in ("03", "05", "06") and gra > 0 and iva > 0:
+                    iva_calc = round(gra * 0.13, 2)
+                    if abs(iva - iva_calc) > 0.01:
+                        razones.append(f"IVA ${iva:.2f} ≠ {gra:.2f}×13%=${iva_calc:.2f}")
+                if len(sello) < 30:
+                    razones.append(f"Sello vacío o corto ({len(sello)} chars)")
+                if razones:
+                    filas_alerta.append({
+                        "Archivo"    : str(row.get("archivo", "")),
+                        "Fecha"      : str(row.get("fecha", "")),
+                        "Tipo"       : tipo,
+                        "Num Control": str(row.get("num_control_raw", row.get("num_control", ""))),
+                        "Proveedor"  : str(row.get("nom_prov", "")),
+                        "Sello"      : sello or "(vacío)",
+                        "Alertas"    : " | ".join(razones),
+                    })
+            if filas_alerta:
+                df_alertas = pd.DataFrame(filas_alerta)
+                st.warning(f"⚠️ **{len(df_alertas)} documento(s) requieren revisión**")
+                st.dataframe(df_alertas, hide_index=True, use_container_width=True)
+                csv_al = df_alertas.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "📄 Exportar Alertas CSV",
+                    data=csv_al,
+                    file_name="alertas_compras.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.success("✅ Todos los documentos pasaron la validación.")
+        else:
+            st.info("Sin datos para analizar con el filtro actual.")
 
 else:
     # ── Estado vacío ──────────────────────────────────────────────────────────
