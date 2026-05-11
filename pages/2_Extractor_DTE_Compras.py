@@ -1116,7 +1116,8 @@ with st.sidebar:
         else:
             _proveedores_db_cache = cargar_proveedores_json()  # carga única
             extracted, duplicados, iva_calc_files    = [], [], []
-            invalidos, corruptos, nuevos_proveedores = [], [], {}
+            invalidos, corruptos, ignorados_nit = [], [], []
+            nuevos_proveedores = {}
 
             bar          = st.progress(0)
             txt_progreso = st.empty()
@@ -1207,6 +1208,24 @@ with st.sidebar:
                         "datos"  : datos_revision_vacio(res["error_extraccion"]),
                     })
                 else:
+                    # ── Filtro de Pertenencia ────────────────────────────────────
+                    _nit_activo = re.sub(r"[^0-9]", "", safe_str(cliente.get("nit", "")))
+                    _nom_activo = safe_str(cliente.get("nombre", "")).upper()
+                    _sandbox = (
+                        _nit_activo == "00000000000000"
+                        or "PRUEBA" in _nom_activo
+                    )
+                    if not _sandbox:
+                        # En compras el receptor del DTE = empresa activa
+                        _nit_receptor_dte = re.sub(
+                            r"[^0-9]", "",
+                            safe_str(res.get("_nit_receptor", ""))
+                        )
+                        if _nit_receptor_dte and _nit_receptor_dte != _nit_activo:
+                            ignorados_nit.append(fname)
+                            st.session_state.archivos_comp.append(fname)
+                            continue
+                    # ─────────────────────────────────────────────────────────────
                     nom_res     = safe_str(res.get('nom_prov', '')).strip()
                     va_revision = (
                         res.get('tot', 0.0) == 0.0
@@ -1246,6 +1265,7 @@ with st.sidebar:
                 "iva_calc"          : iva_calc_files,
                 "nuevos_proveedores": nuevos_proveedores,
                 "corruptos"         : corruptos,
+                "ignorados_nit"     : ignorados_nit,
             }
 
             if extracted:
@@ -1640,7 +1660,7 @@ if st.session_state.reporte_compras:
     rep = st.session_state.reporte_compras
     st.markdown("### 📋 Alertas de Procesamiento")
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
         alerta_con_lista(
             "error" if rep.get("corruptos") else "success",
@@ -1660,6 +1680,11 @@ if st.session_state.reporte_compras:
         alerta_con_lista(
             "info" if rep.get("iva_calc") else "success",
             "🧮", "IVA Calculado (estimado)", rep.get("iva_calc", [])
+        )
+    with c5:
+        alerta_con_lista(
+            "warning" if rep.get("ignorados_nit") else "success",
+            "🚫", "Ignorados (NIT no coincide)", rep.get("ignorados_nit", [])
         )
 
     np_dict = rep.get("nuevos_proveedores", {})

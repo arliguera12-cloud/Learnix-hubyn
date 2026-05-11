@@ -109,197 +109,206 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
     Parses a native Hacienda DTE JSON (ventas side).
     Returns the same field schema as extraer_venta_nativo_pro so the
     Streamlit page can handle it without special-casing.
-
-    Key mappings from DTE JSON → internal schema:
-      identificacion.tipoDte         → tipo
-      identificacion.fecEmi          → fecha (DD/MM/YYYY)
-      identificacion.numeroControl   → num_control / num_control_raw
-      identificacion.codigoGeneracion→ gen / gen_sin_guiones
-      identificacion.selloRecibido   → sello
-      receptor.nombre                → nom_cli
-      receptor.nit / numDocumento    → nit_cli / dui_cli
-      resumen.totalGravada           → gravadas
-      resumen.totalExenta            → exentas
-      resumen.totalNoSuj             → no_sujetas
-      resumen.totalIva / tributos IVA→ debito
-      resumen.totalPagar             → total
-      tributos FOVIAL (C3)           → fovial
-      tributos COTRANS (59)          → cotrans
+    Any unexpected parsing error returns blank/zero fields instead of crashing.
     """
+    _BLANK = {
+        "tipo": "", "fecha": "", "num_control": "", "num_control_raw": "",
+        "gen": "", "gen_sin_guiones": "", "sello": "",
+        "nom_cli": "CONSUMIDOR FINAL", "nit_cli": "", "dui_cli": "",
+        "gravadas": 0.0, "exentas": 0.0, "no_sujetas": 0.0,
+        "debito": 0.0, "terceros": 0.0, "deb_terc": 0.0,
+        "total": 0.0, "fovial": 0.0, "cotrans": 0.0, "_origen": "json_nativo",
+    }
     try:
         data = json.loads(file_bytes.decode("utf-8-sig"))
     except Exception as exc:
         return {"error_fatal": f"JSON inválido: {exc}"}
 
-    # Los datos del DTE vienen dentro de dteJson; fallback a la raíz por compatibilidad
-    dte = data.get("dteJson") or data
+    try:
+        # Los datos del DTE vienen dentro de dteJson; fallback a la raíz por compatibilidad
+        dte = data.get("dteJson") or data
 
-    ident    = dte.get("identificacion") or {}
-    receptor = dte.get("receptor") or {}
-    resumen  = dte.get("resumen") or {}
+        ident    = dte.get("identificacion") or {}
+        receptor = dte.get("receptor") or {}
+        resumen  = dte.get("resumen") or {}
 
-    # Sello nómada: puede estar en varios niveles del envoltorio o del DTE
-    def _ss(v): return re.sub(r"\s+", "", str(v or "")).strip()
-    sello = (
-        _ss(data.get("selloRecibido"))
-        or _ss(dte.get("selloRecibido"))
-        or _ss((dte.get("respuestaHacienda") or {}).get("selloRecibido"))
-        or _ss((dte.get("responseMH") or {}).get("selloRecibido"))
-        or _ss(ident.get("SelloRecibido"))
-        or _ss(ident.get("selloRecibido"))
-    )
+        # Sello nómada: puede estar en varios niveles del envoltorio o del DTE
+        def _ss(v): return re.sub(r"\s+", "", str(v or "")).strip()
+        sello = (
+            _ss(data.get("selloRecibido"))
+            or _ss(dte.get("selloRecibido"))
+            or _ss((dte.get("respuestaHacienda") or {}).get("selloRecibido"))
+            or _ss((dte.get("responseMH") or {}).get("selloRecibido"))
+            or _ss(ident.get("SelloRecibido"))
+            or _ss(ident.get("selloRecibido"))
+        )
 
-    # Fecha: YYYY-MM-DD → DD/MM/YYYY
-    fecha_raw = str(ident.get("fecEmi") or "")
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_raw):
-        y, m, d = fecha_raw.split("-")
-        fecha = f"{d}/{m}/{y}"
-    else:
-        fecha = fecha_raw
+        # Fecha: YYYY-MM-DD → DD/MM/YYYY
+        fecha_raw = str(ident.get("fecEmi") or "")
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_raw):
+            y, m, d = fecha_raw.split("-")
+            fecha = f"{d}/{m}/{y}"
+        else:
+            fecha = fecha_raw
 
-    # Identificación del receptor
-    nit_r = re.sub(r"[^0-9]", "", str(receptor.get("nit") or receptor.get("numDocumento") or ""))
-    dui_r = re.sub(r"[^0-9]", "", str(receptor.get("numDocumento") or ""))
+        # Identificación del receptor
+        nit_r = re.sub(r"[^0-9]", "", str(receptor.get("nit") or receptor.get("numDocumento") or ""))
+        dui_r = re.sub(r"[^0-9]", "", str(receptor.get("numDocumento") or ""))
 
-    # Tributos: IVA, FOVIAL, COTRANS
-    iva_val = fovial = cotrans = 0.0
-    for t in (resumen.get("tributos") or []):
-        cod  = str(t.get("codigo") or "")
-        desc = str(t.get("descripcion") or "").upper()
-        val  = float(t.get("valor") or 0)
-        if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
-            iva_val = val
-        elif cod == "C3" or "FOVIAL" in desc:
-            fovial = val
-        elif cod == "59" or "COTRANS" in desc:
-            cotrans = val
-    if not iva_val:
-        iva_val = float(resumen.get("totalIva") or 0)
+        # Identificación del emisor (para validación de pertenencia en ventas)
+        emisor_v = dte.get("emisor") or {}
+        nit_emisor_v = re.sub(r"[^0-9]", "", str(emisor_v.get("nit") or ""))
 
-    gen_uuid = str(ident.get("codigoGeneracion") or "")
-    num_ctrl = str(ident.get("numeroControl") or "")
+        # Tributos: IVA, FOVIAL, COTRANS
+        iva_val = fovial = cotrans = 0.0
+        for t in (resumen.get("tributos") or []):
+            cod  = str(t.get("codigo") or "")
+            desc = str(t.get("descripcion") or "").upper()
+            val  = float(t.get("valor") or 0)
+            if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
+                iva_val = val
+            elif cod == "C3" or "FOVIAL" in desc:
+                fovial = val
+            elif cod == "59" or "COTRANS" in desc:
+                cotrans = val
+        if not iva_val:
+            iva_val = float(resumen.get("totalIva") or 0)
 
-    return {
-        "tipo"           : str(ident.get("tipoDte") or ""),
-        "fecha"          : fecha,
-        "num_control"    : num_ctrl,
-        "num_control_raw": num_ctrl,
-        "gen"            : gen_uuid,
-        "gen_sin_guiones": gen_uuid.replace("-", ""),
-        "sello"          : sello,
-        "nom_cli"        : str(receptor.get("nombre") or "CONSUMIDOR FINAL").upper().strip(),
-        "nit_cli"        : nit_r if len(nit_r) == 14 else "",
-        "dui_cli"        : dui_r if len(dui_r) == 9 else "",
-        "gravadas"       : float(resumen.get("totalGravada") or 0),
-        "exentas"        : float(resumen.get("totalExenta") or 0),
-        "no_sujetas"     : float(resumen.get("totalNoSuj") or 0),
-        "debito"         : iva_val,
-        "terceros"       : 0.0,
-        "deb_terc"       : 0.0,
-        "total"          : float(resumen.get("totalPagar") or 0),
-        "fovial"         : fovial,
-        "cotrans"        : cotrans,
-        "_origen"        : "json_nativo",
-    }
+        gen_uuid = str(ident.get("codigoGeneracion") or "")
+        num_ctrl = str(ident.get("numeroControl") or "")
+
+        return {
+            "tipo"           : str(ident.get("tipoDte") or ""),
+            "fecha"          : fecha,
+            "num_control"    : num_ctrl,
+            "num_control_raw": num_ctrl,
+            "gen"            : gen_uuid,
+            "gen_sin_guiones": gen_uuid.replace("-", ""),
+            "sello"          : sello,
+            "_nit_emisor"    : nit_emisor_v,
+            "nom_cli"        : str(receptor.get("nombre") or "CONSUMIDOR FINAL").upper().strip(),
+            "nit_cli"        : nit_r if len(nit_r) == 14 else "",
+            "dui_cli"        : dui_r if len(dui_r) == 9 else "",
+            "gravadas"       : float(resumen.get("totalGravada") or 0),
+            "exentas"        : float(resumen.get("totalExenta") or 0),
+            "no_sujetas"     : float(resumen.get("totalNoSuj") or 0),
+            "debito"         : iva_val,
+            "terceros"       : 0.0,
+            "deb_terc"       : 0.0,
+            "total"          : float(resumen.get("totalPagar") or 0),
+            "fovial"         : fovial,
+            "cotrans"        : cotrans,
+            "_origen"        : "json_nativo",
+        }
+    except Exception as exc:
+        log.error("Error inesperado parseando JSON ventas: %s", exc, exc_info=True)
+        return _BLANK
 
 
 def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
     """
     Parses a native Hacienda DTE JSON (compras side).
     Returns the same field schema as extraer_compra_nativo_pro.
-
-    Key mappings:
-      identificacion.*               → same as ventas
-      emisor.nit                     → nit_prov
-      emisor.nombre                  → nom_prov
-      resumen.totalGravada           → gra
-      resumen.totalExenta            → exe
-      resumen.totalNoSuj             → no_sujetas (stored as no_sujetas)
-      resumen.totalIva / tributos IVA→ iva
-      resumen.totalPagar             → tot
-      tributos FOVIAL / COTRANS      → fovial / cotrans
+    Any unexpected parsing error returns blank/zero fields instead of crashing.
     """
+    _BLANK = {
+        "tipo": "", "fecha": "", "num_control": "", "num_control_raw": "",
+        "gen": "", "gen_sin_guiones": "", "sello": "",
+        "nom_prov": "", "nit_prov": "", "dui_prov": "",
+        "gra": 0.0, "exe": 0.0, "no_sujetas": 0.0,
+        "iva": 0.0, "ret": 0.0, "perc": 0.0,
+        "tot": 0.0, "fovial": 0.0, "cotrans": 0.0, "_origen": "json_nativo",
+    }
     try:
         data = json.loads(file_bytes.decode("utf-8-sig"))
     except Exception as exc:
         return {"error_fatal": f"JSON inválido: {exc}"}
 
-    # Los datos del DTE vienen dentro de dteJson; fallback a la raíz por compatibilidad
-    dte = data.get("dteJson") or data
+    try:
+        # Los datos del DTE vienen dentro de dteJson; fallback a la raíz por compatibilidad
+        dte = data.get("dteJson") or data
 
-    ident   = dte.get("identificacion") or {}
-    resumen = dte.get("resumen") or {}
+        ident   = dte.get("identificacion") or {}
+        resumen = dte.get("resumen") or {}
 
-    # Sello nómada: puede estar en varios niveles del envoltorio o del DTE
-    def _ss(v): return re.sub(r"\s+", "", str(v or "")).strip()
-    sello = (
-        _ss(data.get("selloRecibido"))
-        or _ss(dte.get("selloRecibido"))
-        or _ss((dte.get("respuestaHacienda") or {}).get("selloRecibido"))
-        or _ss((dte.get("responseMH") or {}).get("selloRecibido"))
-        or _ss(ident.get("SelloRecibido"))
-        or _ss(ident.get("selloRecibido"))
-    )
+        # Sello nómada: puede estar en varios niveles del envoltorio o del DTE
+        def _ss(v): return re.sub(r"\s+", "", str(v or "")).strip()
+        sello = (
+            _ss(data.get("selloRecibido"))
+            or _ss(dte.get("selloRecibido"))
+            or _ss((dte.get("respuestaHacienda") or {}).get("selloRecibido"))
+            or _ss((dte.get("responseMH") or {}).get("selloRecibido"))
+            or _ss(ident.get("SelloRecibido"))
+            or _ss(ident.get("selloRecibido"))
+        )
 
-    # Proveedor: emisor por defecto; para DTE-14, usar sujetoExcluido
-    tipo_dte = str(ident.get("tipoDte") or "")
-    if tipo_dte == "14":
-        sujeto   = dte.get("sujetoExcluido") or {}
-        nom_prov = str(sujeto.get("nombre") or "").upper().strip()
-        id_prov  = re.sub(r"[^0-9]", "", str(sujeto.get("documento") or sujeto.get("nit") or ""))
-    else:
-        emisor   = dte.get("emisor") or {}
-        nom_prov = str(emisor.get("nombre") or "").upper().strip()
-        id_prov  = re.sub(r"[^0-9]", "", str(
-            emisor.get("nit") or emisor.get("dui") or emisor.get("nrc") or ""
-        ))
+        # Proveedor: emisor por defecto; para DTE-14, usar sujetoExcluido
+        tipo_dte = str(ident.get("tipoDte") or "")
+        if tipo_dte == "14":
+            sujeto   = dte.get("sujetoExcluido") or {}
+            nom_prov = str(sujeto.get("nombre") or "").upper().strip()
+            id_prov  = re.sub(r"[^0-9]", "", str(sujeto.get("documento") or sujeto.get("nit") or ""))
+        else:
+            emisor   = dte.get("emisor") or {}
+            nom_prov = str(emisor.get("nombre") or "").upper().strip()
+            id_prov  = re.sub(r"[^0-9]", "", str(
+                emisor.get("nit") or emisor.get("dui") or emisor.get("nrc") or ""
+            ))
 
-    nit_prov = id_prov if len(id_prov) == 14 else ""
-    dui_prov = id_prov if len(id_prov) == 9  else ""
+        nit_prov = id_prov if len(id_prov) == 14 else ""
+        dui_prov = id_prov if len(id_prov) == 9  else ""
 
-    fecha_raw = str(ident.get("fecEmi") or "")
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_raw):
-        y, m, d = fecha_raw.split("-")
-        fecha = f"{d}/{m}/{y}"
-    else:
-        fecha = fecha_raw
+        # Identificación del receptor (para validación de pertenencia en compras)
+        receptor_c = dte.get("receptor") or {}
+        nit_receptor_c = re.sub(r"[^0-9]", "", str(receptor_c.get("nit") or ""))
 
-    iva_val = fovial = cotrans = 0.0
-    for t in (resumen.get("tributos") or []):
-        cod  = str(t.get("codigo") or "")
-        desc = str(t.get("descripcion") or "").upper()
-        val  = float(t.get("valor") or 0)
-        if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
-            iva_val = val
-        elif cod == "C3" or "FOVIAL" in desc:
-            fovial = val
-        elif cod == "59" or "COTRANS" in desc:
-            cotrans = val
-    if not iva_val:
-        iva_val = float(resumen.get("totalIva") or 0)
+        fecha_raw = str(ident.get("fecEmi") or "")
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_raw):
+            y, m, d = fecha_raw.split("-")
+            fecha = f"{d}/{m}/{y}"
+        else:
+            fecha = fecha_raw
 
-    gen_uuid = str(ident.get("codigoGeneracion") or "")
-    num_ctrl = str(ident.get("numeroControl") or "")
+        iva_val = fovial = cotrans = 0.0
+        for t in (resumen.get("tributos") or []):
+            cod  = str(t.get("codigo") or "")
+            desc = str(t.get("descripcion") or "").upper()
+            val  = float(t.get("valor") or 0)
+            if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
+                iva_val = val
+            elif cod == "C3" or "FOVIAL" in desc:
+                fovial = val
+            elif cod == "59" or "COTRANS" in desc:
+                cotrans = val
+        if not iva_val:
+            iva_val = float(resumen.get("totalIva") or 0)
 
-    return {
-        "tipo"           : tipo_dte,
-        "fecha"          : fecha,
-        "num_control"    : num_ctrl,
-        "num_control_raw": num_ctrl,
-        "gen"            : gen_uuid,
-        "gen_sin_guiones": gen_uuid.replace("-", ""),
-        "sello"          : sello,
-        "nom_prov"       : nom_prov,
-        "nit_prov"       : nit_prov,
-        "dui_prov"       : dui_prov,
-        "gra"            : float(resumen.get("totalGravada") or 0),
-        "exe"            : float(resumen.get("totalExenta") or 0),
-        "no_sujetas"     : float(resumen.get("totalNoSuj") or 0),
-        "iva"            : iva_val,
-        "ret"            : 0.0,
-        "perc"           : 0.0,
-        "tot"            : float(resumen.get("totalPagar") or 0),
-        "fovial"         : fovial,
-        "cotrans"        : cotrans,
-        "_origen"        : "json_nativo",
-    }
+        gen_uuid = str(ident.get("codigoGeneracion") or "")
+        num_ctrl = str(ident.get("numeroControl") or "")
+
+        return {
+            "tipo"           : tipo_dte,
+            "fecha"          : fecha,
+            "num_control"    : num_ctrl,
+            "num_control_raw": num_ctrl,
+            "gen"            : gen_uuid,
+            "gen_sin_guiones": gen_uuid.replace("-", ""),
+            "sello"          : sello,
+            "_nit_receptor"  : nit_receptor_c,
+            "nom_prov"       : nom_prov,
+            "nit_prov"       : nit_prov,
+            "dui_prov"       : dui_prov,
+            "gra"            : float(resumen.get("totalGravada") or 0),
+            "exe"            : float(resumen.get("totalExenta") or 0),
+            "no_sujetas"     : float(resumen.get("totalNoSuj") or 0),
+            "iva"            : iva_val,
+            "ret"            : 0.0,
+            "perc"           : 0.0,
+            "tot"            : float(resumen.get("totalPagar") or 0),
+            "fovial"         : fovial,
+            "cotrans"        : cotrans,
+            "_origen"        : "json_nativo",
+        }
+    except Exception as exc:
+        log.error("Error inesperado parseando JSON compras: %s", exc, exc_info=True)
+        return _BLANK
