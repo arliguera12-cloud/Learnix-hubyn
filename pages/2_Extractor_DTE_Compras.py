@@ -32,6 +32,7 @@ from utils.gemini_vision import (
     vision_disponible,
     vision_ultimo_error,
 )
+from utils.manual_loader import obtener_file_parts_compras
 from utils.qa_utils import (
     campos_invalidos_dte,
     mostrar_banner_qa,
@@ -369,6 +370,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             file_bytes,
             "compras",
             {"nit": _nit_rec_ctx, "nombre": _nom_rec_ctx},
+            manual_parts=obtener_file_parts_compras("03"),
         )
         gemini_correcciones = [
             f"Vision: {a}" for a in _vision_alertas

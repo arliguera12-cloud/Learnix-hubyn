@@ -28,6 +28,7 @@ from utils.gemini_vision import (
     vision_disponible,
     vision_ultimo_error,
 )
+from utils.manual_loader import obtener_file_parts_retenciones
 from utils.qa_utils import (
     mostrar_banner_qa,
     mostrar_indicador_vision,
@@ -184,6 +185,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             file_bytes,
             "retenciones",
             {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
+            manual_parts=obtener_file_parts_retenciones(),
         )
         gemini_correcciones = [
             f"Vision: {a}" for a in _vision_alertas

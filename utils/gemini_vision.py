@@ -1091,14 +1091,20 @@ def extraer_dte_con_vision(
     pdf_bytes: bytes,
     tipo_dte: str,
     contexto: dict,
+    manual_parts: "list[dict] | None" = None,
 ) -> tuple[dict, list[str], dict]:
     """
     Extrae todos los campos de un DTE enviando el PDF directamente a Gemini Vision.
 
     Args:
-        pdf_bytes: bytes crudos del PDF.
-        tipo_dte : "ventas" | "compras" | "retenciones" | "sujetos_excluidos"
-        contexto : {"nit": "...", "nombre": "..."} — cliente activo del sistema.
+        pdf_bytes    : bytes crudos del PDF.
+        tipo_dte     : "ventas" | "compras" | "retenciones" | "sujetos_excluidos"
+        contexto     : {"nit": "...", "nombre": "..."} — cliente activo del sistema.
+        manual_parts : lista opcional de dicts fileData (Gemini Files API) con los
+                       manuales de Hacienda relevantes.  Se preprenden al payload
+                       antes del PDF inline para que Gemini los use como contexto.
+                       Si es None o lista vacía, el comportamiento es idéntico al
+                       original (degradación elegante).
 
     Returns:
         (campos, alertas, audit)
@@ -1119,6 +1125,8 @@ def extraer_dte_con_vision(
         return {}, [], {}
 
     # ── Caché SHA256: evita re-llamar a la API para el mismo PDF ─────────────
+    # manual_parts son contexto estático (mismas URIs por sesión) → no afectan
+    # la clave de caché.
     cached = cache_get(pdf_bytes, tipo_dte)
     if cached is not None:
         log.debug("Vision cache HIT (%s)", tipo_dte)
@@ -1128,7 +1136,7 @@ def extraer_dte_con_vision(
     nom_ctx = str(contexto.get("nombre", "")).strip().upper()
 
     prompt    = _build_prompt(tipo_dte, nit_ctx, nom_ctx)
-    resultado = _llamar_vision(pdf_bytes, prompt, schema)
+    resultado = _llamar_vision(pdf_bytes, prompt, schema, manual_parts=manual_parts or None)
 
     if resultado is None:
         return {}, [], {}

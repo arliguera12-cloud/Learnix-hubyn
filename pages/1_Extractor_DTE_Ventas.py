@@ -31,6 +31,7 @@ from utils.gemini_vision import (
     vision_disponible,
     vision_ultimo_error,   # surfaces the actual API error for debugging
 )
+from utils.manual_loader import obtener_file_parts_ventas
 from utils.qa_utils import (
     campos_invalidos_dte,
     mostrar_banner_qa,
@@ -318,6 +319,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             file_bytes,
             "ventas",
             {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
+            manual_parts=obtener_file_parts_ventas("03"),
         )
         gemini_correcciones = [
             f"Vision: {a}" for a in _vision_alertas
