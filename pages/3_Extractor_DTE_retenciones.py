@@ -28,12 +28,14 @@ from utils.gemini_vision import (
     vision_disponible,
     vision_ultimo_error,
 )
+from utils.manual_loader import obtener_file_parts_retenciones
 from utils.qa_utils import (
     mostrar_banner_qa,
     mostrar_indicador_vision,
     validar_montos_retenciones,
 )
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
+from utils.revision_queue import cola_cargar, cola_guardar, cola_agregar, cola_limpiar
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -183,6 +185,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             file_bytes,
             "retenciones",
             {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
+            manual_parts=obtener_file_parts_retenciones(),
         )
         gemini_correcciones = [
             f"Vision: {a}" for a in _vision_alertas
@@ -449,8 +452,10 @@ st.markdown(f"""
 # ─────────────────────────────────────────────
 # 6. SESSION STATE
 # ─────────────────────────────────────────────
-if 'db_ret'       not in st.session_state: st.session_state.db_ret       = pd.DataFrame()
-if 'archivos_ret' not in st.session_state: st.session_state.archivos_ret = []
+_nit_key_r = re.sub(r"[^0-9]", "", str(cliente.get("nit", "") or "")) or "sandbox"
+if 'db_ret'           not in st.session_state: st.session_state.db_ret           = pd.DataFrame()
+if 'archivos_ret'     not in st.session_state: st.session_state.archivos_ret     = []
+if '_uuids_vistos_r'  not in st.session_state: st.session_state._uuids_vistos_r  = set()
 
 # ─────────────────────────────────────────────
 # 7. SIDEBAR — CARGA Y PROCESAMIENTO
@@ -479,8 +484,9 @@ with st.sidebar:
     )
 
     if limpiar:
-        st.session_state.db_ret       = pd.DataFrame()
-        st.session_state.archivos_ret = []
+        st.session_state.db_ret          = pd.DataFrame()
+        st.session_state.archivos_ret    = []
+        st.session_state._uuids_vistos_r = set()
         st.success("Memoria limpiada.")
         st.rerun()
 
@@ -521,12 +527,25 @@ with st.sidebar:
                 elif "error_tipo" in res:
                     errores.append(f"⚠️ `{fname}` — {res['error_tipo']}")
                 else:
-                    res["archivo"] = fname
-                    _qa_alertas = validar_montos_retenciones(res)
-                    _v_audit    = res.get("_vision_audit", {})
-                    _confianza  = _v_audit.get("confianza", 100) if _v_audit else 100
-                    res["_revision"] = "⚠️" if (_qa_alertas or _confianza < 65) else "✅"
-                    extracted.append(res)
+                    _r_cod_gen  = re.sub(r"[^0-9A-Za-z-]", "", str(res.get("codigo_generacion", "") or ""))
+                    _r_num_ctrl = str(res.get("num_control", "") or "")
+                    _r_dup = (
+                        (_r_cod_gen  and _r_cod_gen  in st.session_state._uuids_vistos_r)
+                        or (_r_num_ctrl and _r_num_ctrl in st.session_state._uuids_vistos_r)
+                        or (not st.session_state.db_ret.empty and 'codigo_generacion' in st.session_state.db_ret.columns
+                            and _r_cod_gen and (st.session_state.db_ret['codigo_generacion'] == _r_cod_gen).any())
+                    )
+                    if _r_dup:
+                        errores.append(f"🔁 `{fname}` — Duplicado (UUID ya registrado)")
+                    else:
+                        res["archivo"] = fname
+                        _qa_alertas = validar_montos_retenciones(res)
+                        _v_audit    = res.get("_vision_audit", {})
+                        _confianza  = _v_audit.get("confianza", 100) if _v_audit else 100
+                        res["_revision"] = "⚠️" if (_qa_alertas or _confianza < 65) else "✅"
+                        extracted.append(res)
+                        if _r_cod_gen:  st.session_state._uuids_vistos_r.add(_r_cod_gen)
+                        if _r_num_ctrl: st.session_state._uuids_vistos_r.add(_r_num_ctrl)
 
                 st.session_state.archivos_ret.append(fname)
 

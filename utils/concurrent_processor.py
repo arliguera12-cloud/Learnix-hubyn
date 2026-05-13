@@ -25,6 +25,11 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
+from utils.fiscal_rules import (
+    normalizar_tipo_dte,
+    parse_tributos,
+)
+
 log = logging.getLogger(__name__)
 
 MAX_WORKERS: int = 10   # hilos simultáneos — seguro bajo 1,000 RPM
@@ -176,27 +181,17 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
         ).replace("-", "").strip()
         nit_emisor_v = re.sub(r"[^0-9]", "", _raw_emit_v)
 
-        # Tributos: IVA, FOVIAL, COTRANS — proteger contra None
-        tributos_v = resumen.get("tributos") or []
-        iva_val = fovial = cotrans = 0.0
-        for t in tributos_v:
-            cod  = str(t.get("codigo") or "")
-            desc = str(t.get("descripcion") or "").upper()
-            val  = _safe_float(t.get("valor"))
-            if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
-                iva_val = val
-            elif cod == "C3" or "FOVIAL" in desc:
-                fovial = val
-            elif cod == "59" or "COTRANS" in desc:
-                cotrans = val
-        if not iva_val:
-            iva_val = _safe_float(resumen.get("totalIva"))
+        # Tributos: IVA, FOVIAL, COTRANS (D1/C3), COTRANS (C8/59) via fiscal_rules
+        trb_v   = parse_tributos(resumen.get("tributos") or [])
+        iva_val = trb_v["iva"] or _safe_float(resumen.get("totalIva"))
+        fovial  = trb_v["fovial"]
+        cotrans = trb_v["cotrans"]
 
         gen_uuid = str(ident.get("codigoGeneracion") or "")
         num_ctrl = str(ident.get("numeroControl") or "")
 
         return {
-            "tipo"           : str(ident.get("tipoDte") or ""),
+            "tipo"           : normalizar_tipo_dte(ident.get("tipoDte")),
             "fecha"          : fecha,
             "num_control"    : num_ctrl,
             "num_control_raw": num_ctrl,
@@ -294,26 +289,19 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
         else:
             fecha = fecha_raw
 
-        tributos_c = resumen.get("tributos") or []
-        iva_val = fovial = cotrans = 0.0
-        for t in tributos_c:
-            cod  = str(t.get("codigo") or "")
-            desc = str(t.get("descripcion") or "").upper()
-            val  = _safe_float(t.get("valor"))
-            if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
-                iva_val = val
-            elif cod == "C3" or "FOVIAL" in desc:
-                fovial = val
-            elif cod == "59" or "COTRANS" in desc:
-                cotrans = val
-        if not iva_val:
-            iva_val = _safe_float(resumen.get("totalIva"))
+        # Tributos: IVA, FOVIAL (C3/D1), COTRANS (59/C8), Ret IVA (22), Perc IVA (23)
+        trb_c   = parse_tributos(resumen.get("tributos") or [])
+        iva_val = trb_c["iva"] or _safe_float(resumen.get("totalIva"))
+        fovial  = trb_c["fovial"]
+        cotrans = trb_c["cotrans"]
+        ret_iva = trb_c["ret_iva"] or _safe_float(resumen.get("reteRenta"))
+        perc_iva = trb_c["perc_iva"]
 
         gen_uuid = str(ident.get("codigoGeneracion") or "")
         num_ctrl = str(ident.get("numeroControl") or "")
 
         return {
-            "tipo"           : tipo_dte,
+            "tipo"           : normalizar_tipo_dte(ident.get("tipoDte")),
             "fecha"          : fecha,
             "num_control"    : num_ctrl,
             "num_control_raw": num_ctrl,
@@ -328,8 +316,8 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
             "exe"            : _safe_float(resumen.get("totalExenta")),
             "no_sujetas"     : _safe_float(resumen.get("totalNoSuj")),
             "iva"            : iva_val,
-            "ret"            : 0.0,
-            "perc"           : 0.0,
+            "ret"            : ret_iva,
+            "perc"           : perc_iva,
             "tot"            : _safe_float(resumen.get("totalPagar")),
             "fovial"         : fovial,
             "cotrans"        : cotrans,
