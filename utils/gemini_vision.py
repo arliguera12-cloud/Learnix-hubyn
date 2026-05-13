@@ -20,6 +20,8 @@ import time
 import requests
 import streamlit as st
 
+from utils.pdf_cache import cache_get, cache_set
+
 log = logging.getLogger(__name__)
 
 _GEMINI_MODEL = "gemini-2.5-flash"
@@ -489,23 +491,60 @@ _CAMPOS: dict[str, str] = {
 }
 
 
+_FEW_SHOT: dict[str, str] = {
+    "ventas": (
+        "\nEJEMPLO CORRECTO (DTE-03 CCF ventas):\n"
+        "  tipo_documento='03'  <- nunca 'CCF' ni texto, solo 2 digitos\n"
+        "  fecha='15/03/2025'   <- DD/MM/YYYY\n"
+        "  codigo_generacion='0F3F7B2A-1A2B-4C5D-8E9F-52A3B4C5D6E7'  <- 36 chars con guiones\n"
+        "  nom_receptor='EMPRESA COMPRADORA S.A.'  <- del bloque RECEPTOR\n"
+        "  nit_receptor='06149004711051'  <- 14 digitos sin guiones\n"
+        "  gravadas=1000.00, iva=130.00 (=13%), total=1130.00\n"
+    ),
+    "compras": (
+        "\nEJEMPLO CORRECTO (DTE-03 CCF compras):\n"
+        "  tipo_documento='03'\n"
+        "  nom_emisor='GRANJA SAN DIEGO S.A.'  <- SOLO del bloque EMISOR/PROVEEDOR\n"
+        "  nit_emisor='06142708151077'  <- NUNCA del bloque Firmas o Responsable\n"
+        "  gravadas=500.00, iva=65.00 (=13%), total=565.00\n"
+        "  sello_recepcion='20264BDE9F3A0C1D...'  <- ~40 chars alfanumericos SIN guiones\n"
+    ),
+    "retenciones": (
+        "\nEJEMPLO CORRECTO (DTE-07 Retencion):\n"
+        "  tipo_documento='07'\n"
+        "  nom_retenido='PROVEEDOR S.A.', nit_retenido='06149004711051'\n"
+        "  monto_sujeto=1000.00, iva_retenido=10.00  <- exactamente 1% de monto_sujeto\n"
+        "  sello_recepcion='20264BDE9F3A0C1D...'  <- 40 chars, OBLIGATORIO\n"
+    ),
+    "sujetos_excluidos": (
+        "\nEJEMPLO CORRECTO (DTE-14 Sujeto Excluido):\n"
+        "  tipo_documento='14'\n"
+        "  nom_sujeto='JUAN PEREZ'  <- del bloque Sujeto Excluido, NO del Emisor\n"
+        "  dui_sujeto='045812347'   <- 9 digitos (persona natural)\n"
+        "  base_compras=500.00, retencion_renta=50.00  <- 10% de base\n"
+    ),
+}
+
+
 def _build_prompt(tipo_dte: str, nit_ctx: str, nom_ctx: str) -> str:
+    few_shot = _FEW_SHOT.get(tipo_dte, "")
     return (
         f"Eres un AUDITOR FISCAL SENIOR especializado en DTEs de El Salvador.\n"
-        f"Analiza el documento PDF adjunto usando tus CAPACIDADES DE VISIÓN.\n\n"
+        f"Analiza el documento PDF adjunto usando tus CAPACIDADES DE VISION.\n\n"
         f"{_CONTEXTO_FISCAL}\n"
         f"CLIENTE ACTIVO DEL SISTEMA:\n"
         f"  NIT   : {nit_ctx}\n"
         f"  Nombre: {nom_ctx}\n\n"
         f"ROL EN ESTE DOCUMENTO:\n{_ROLES.get(tipo_dte, '')}\n\n"
         f"{_INSTRUCCIONES_ESPACIALES}\n"
-        f"CAMPOS A EXTRAER:\n{_CAMPOS.get(tipo_dte, '')}\n\n"
+        f"CAMPOS A EXTRAER:\n{_CAMPOS.get(tipo_dte, '')}\n"
+        f"{few_shot}\n"
         f"INSTRUCCIONES DE SALIDA:\n"
-        f"  • Devuelve JSON válido según el schema. Omite o deja null campos no encontrados.\n"
-        f"  • alertas_fiscales: lista todos los problemas; [] si no hay ninguno.\n"
-        f"  • auditoria_ia.modelo_utilizado = 'gemini-2.5-flash-vision'\n"
-        f"  • auditoria_ia.confianza_extraccion: entero 0-100.\n"
-        f"  • auditoria_ia.notas: 1-2 oraciones sobre cómo resolviste ambigüedades."
+        f"  * Devuelve JSON valido segun el schema. Omite o deja null campos no encontrados.\n"
+        f"  * alertas_fiscales: lista todos los problemas; [] si no hay ninguno.\n"
+        f"  * auditoria_ia.modelo_utilizado = 'gemini-2.5-flash-vision'\n"
+        f"  * auditoria_ia.confianza_extraccion: entero 0-100.\n"
+        f"  * auditoria_ia.notas: 1-2 oraciones sobre como resolviste ambiguedades."
     )
 
 
@@ -1063,6 +1102,12 @@ def extraer_dte_con_vision(
         log.warning("extraer_dte_con_vision: tipo_dte desconocido '%s'", tipo_dte)
         return {}, [], {}
 
+    # ── Caché SHA256: evita re-llamar a la API para el mismo PDF ─────────────
+    cached = cache_get(pdf_bytes, tipo_dte)
+    if cached is not None:
+        log.debug("Vision cache HIT (%s)", tipo_dte)
+        return cached
+
     nit_ctx = _limpio_nit(contexto.get("nit", ""))
     nom_ctx = str(contexto.get("nombre", "")).strip().upper()
 
@@ -1100,4 +1145,5 @@ def extraer_dte_con_vision(
             campos["sello_recepcion"] = sello_extra
             log.info("Sello encontrado en segunda llamada focalizada: %s…", sello_extra[:12])
 
+    cache_set(pdf_bytes, tipo_dte, (campos, alertas, audit))
     return campos, alertas, audit

@@ -42,6 +42,7 @@ from utils.qa_utils import (
     validar_periodo_compras,
 )
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
+from utils.revision_queue import cola_cargar, cola_guardar, cola_agregar, cola_limpiar
 # Alias para compatibilidad con código existente
 limpiar_monto             = _limpiar_monto
 extraer_y_formatear_fecha = _extraer_fecha
@@ -868,6 +869,8 @@ def construir_df_f07_compras(df_in: pd.DataFrame) -> pd.DataFrame:
     df_out["S. Sector"]                  = "4"
     df_out["T. Tipo Costo/Gasto"]        = "2"
     df_out["U. Num Anexo"]               = "3"
+    df_out["V. FOVIAL"]                  = df_in.get("fovial", pd.Series([0.0] * len(df_in))).fillna(0.0)
+    df_out["W. COTRANS"]                 = df_in.get("cotrans", pd.Series([0.0] * len(df_in))).fillna(0.0)
     return df_out
 
 
@@ -1104,11 +1107,14 @@ st.markdown(f"""
 # ─────────────────────────────────────────────
 # 13. SESSION STATE
 # ─────────────────────────────────────────────
-if 'cola_revision'     not in st.session_state: st.session_state.cola_revision     = []
-if 'comp_uploader_key' not in st.session_state: st.session_state.comp_uploader_key = 0
-if 'db_compras'        not in st.session_state: st.session_state.db_compras        = pd.DataFrame()
-if 'archivos_comp'     not in st.session_state: st.session_state.archivos_comp     = []
-if 'reporte_compras'   not in st.session_state: st.session_state.reporte_compras   = None
+_nit_key_c = re.sub(r"[^0-9]", "", str(cliente.get("nit", "") or "")) or "sandbox"
+if 'comp_uploader_key'  not in st.session_state: st.session_state.comp_uploader_key  = 0
+if 'db_compras'         not in st.session_state: st.session_state.db_compras         = pd.DataFrame()
+if 'archivos_comp'      not in st.session_state: st.session_state.archivos_comp      = []
+if 'reporte_compras'    not in st.session_state: st.session_state.reporte_compras    = None
+if '_uuids_vistos_c'    not in st.session_state: st.session_state._uuids_vistos_c    = set()
+if 'cola_revision'      not in st.session_state:
+    st.session_state.cola_revision = cola_cargar(_nit_key_c)
 
 # ─────────────────────────────────────────────
 # 14. SIDEBAR
@@ -1208,8 +1214,13 @@ with st.sidebar:
                 num_ctrl = safe_str(res.get('num_control', ''))
                 dup_id   = cod_gen or num_ctrl
 
+                dup_global = dup_id and (
+                    (cod_gen and cod_gen in st.session_state._uuids_vistos_c)
+                    or (num_ctrl and num_ctrl in st.session_state._uuids_vistos_c)
+                )
                 dup_memoria = (
-                    not st.session_state.db_compras.empty
+                    not dup_global
+                    and not st.session_state.db_compras.empty
                     and dup_id
                     and 'gen' in st.session_state.db_compras.columns
                     and (
@@ -1219,7 +1230,7 @@ with st.sidebar:
                         if num_ctrl else False
                     )
                 )
-                dup_lote = dup_id and any(
+                dup_lote = not dup_global and dup_id and any(
                     (d.get('gen') == cod_gen and cod_gen)
                     or (d.get('num_control') == num_ctrl and num_ctrl)
                     for d in extracted
@@ -1235,7 +1246,7 @@ with st.sidebar:
                     invalidos.append(fname)
                 elif "error_tipo" in res:
                     invalidos.append(fname)
-                elif dup_memoria or dup_lote:
+                elif dup_global or dup_memoria or dup_lote:
                     duplicados.append(fname)
                 elif "error_fatal" in res:
                     corruptos.append(fname)
@@ -1245,6 +1256,7 @@ with st.sidebar:
                         "bytes"  : file_bytes,
                         "datos"  : datos_revision_vacio(res["error_extraccion"]),
                     })
+                    cola_guardar(_nit_key_c, st.session_state.cola_revision)
                 else:
                     # ── Filtro de Pertenencia ────────────────────────────────────
                     _nit_activo = re.sub(r"[^0-9]", "", safe_str(cliente.get("nit", "")))
@@ -1277,6 +1289,7 @@ with st.sidebar:
                             "bytes"  : file_bytes,
                             "datos"  : res,
                         })
+                        cola_guardar(_nit_key_c, st.session_state.cola_revision)
                     else:
                         if res.get('iva_calc'):
                             iva_calc_files.append(fname)
@@ -1290,6 +1303,8 @@ with st.sidebar:
                             if col not in res:
                                 res[col] = ""
                         extracted.append(res)
+                        if cod_gen: st.session_state._uuids_vistos_c.add(cod_gen)
+                        if num_ctrl: st.session_state._uuids_vistos_c.add(num_ctrl)
 
                 st.session_state.archivos_comp.append(fname)
 
@@ -1322,7 +1337,8 @@ with st.sidebar:
 
     st.divider()
     if st.button("🧹 Limpiar Memoria Compras", type="secondary", use_container_width=True):
-        for key in ('db_compras','archivos_comp','reporte_compras','cola_revision'):
+        cola_limpiar(_nit_key_c)
+        for key in ('db_compras','archivos_comp','reporte_compras','cola_revision','_uuids_vistos_c'):
             if key in st.session_state:
                 del st.session_state[key]
         st.session_state.comp_uploader_key = st.session_state.get('comp_uploader_key', 0) + 1
@@ -1366,6 +1382,7 @@ if st.session_state.cola_revision:
         with col_m1:
             if st.button("🗑️ Descartar TODOS los pendientes", type="secondary", use_container_width=True):
                 st.session_state.cola_revision = []
+                cola_limpiar(_nit_key_c)
                 st.rerun()
         with col_m2:
             st.caption(f"Total en cola: {total_cola} documentos")
@@ -1675,6 +1692,7 @@ if st.session_state.cola_revision:
                             }
 
                     st.session_state.cola_revision.pop(0)
+                    cola_guardar(_nit_key_c, st.session_state.cola_revision)
                     st.success("✅ Documento aprobado y agregado al libro.")
                     time.sleep(0.5)
                     st.rerun()
@@ -1682,10 +1700,12 @@ if st.session_state.cola_revision:
             if submit_skip:
                 item = st.session_state.cola_revision.pop(0)
                 st.session_state.cola_revision.append(item)
+                cola_guardar(_nit_key_c, st.session_state.cola_revision)
                 st.rerun()
 
             if submit_del:
                 st.session_state.cola_revision.pop(0)
+                cola_guardar(_nit_key_c, st.session_state.cola_revision)
                 st.rerun()
 
     st.stop()

@@ -42,6 +42,7 @@ from utils.qa_utils import (
     validar_periodo_ventas,
 )
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
+from utils.revision_queue import cola_cargar, cola_guardar, cola_agregar, cola_limpiar
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -1108,11 +1109,14 @@ st.markdown(f"""
 # ─────────────────────────────────────────────
 # 8. SESSION STATE
 # ─────────────────────────────────────────────
-if 'cola_revision_v'  not in st.session_state: st.session_state.cola_revision_v  = []
-if 'ventas_uploader'  not in st.session_state: st.session_state.ventas_uploader  = 0
-if 'db_ventas'        not in st.session_state: st.session_state.db_ventas        = pd.DataFrame()
-if 'archivos_ventas'  not in st.session_state: st.session_state.archivos_ventas  = []
-if 'reporte_ventas'   not in st.session_state: st.session_state.reporte_ventas   = None
+_nit_key_v = re.sub(r"[^0-9]", "", str(cliente.get("nit", "") or "")) or "sandbox"
+if 'ventas_uploader'   not in st.session_state: st.session_state.ventas_uploader   = 0
+if 'db_ventas'         not in st.session_state: st.session_state.db_ventas         = pd.DataFrame()
+if 'archivos_ventas'   not in st.session_state: st.session_state.archivos_ventas   = []
+if 'reporte_ventas'    not in st.session_state: st.session_state.reporte_ventas    = None
+if '_uuids_vistos_v'   not in st.session_state: st.session_state._uuids_vistos_v   = set()
+if 'cola_revision_v'   not in st.session_state:
+    st.session_state.cola_revision_v = cola_cargar(_nit_key_v)
 
 # ─────────────────────────────────────────────
 # 9. SIDEBAR
@@ -1211,8 +1215,13 @@ with st.sidebar:
                 num_ctrl = safe_str(res.get('num_control', ''))
                 dup_id   = cod_gen or num_ctrl
 
+                dup_global = dup_id and (
+                    (cod_gen and cod_gen in st.session_state._uuids_vistos_v)
+                    or (num_ctrl and num_ctrl in st.session_state._uuids_vistos_v)
+                )
                 dup_memoria = (
-                    not st.session_state.db_ventas.empty
+                    not dup_global
+                    and not st.session_state.db_ventas.empty
                     and dup_id
                     and 'gen' in st.session_state.db_ventas.columns
                     and (
@@ -1222,7 +1231,7 @@ with st.sidebar:
                         if num_ctrl else False
                     )
                 )
-                dup_lote = dup_id and any(
+                dup_lote = not dup_global and dup_id and any(
                     (d.get('gen') == cod_gen and cod_gen)
                     or (d.get('num_control') == num_ctrl and num_ctrl)
                     for d in extracted
@@ -1231,7 +1240,7 @@ with st.sidebar:
                 if "error_tipo" in res:
                     invalidos.append(fname)
 
-                elif dup_memoria or dup_lote:
+                elif dup_global or dup_memoria or dup_lote:
                     duplicados.append(fname)
 
                 elif "error_fatal" in res:
@@ -1243,6 +1252,7 @@ with st.sidebar:
                         "bytes"  : file_bytes,
                         "datos"  : datos_revision_vacio_ventas(res["error_extraccion"]),
                     })
+                    cola_guardar(_nit_key_v, st.session_state.cola_revision_v)
 
                 else:
                     # ── Filtro de Pertenencia ────────────────────────────────────
@@ -1278,6 +1288,7 @@ with st.sidebar:
                             "bytes"  : file_bytes,
                             "datos"  : res,
                         })
+                        cola_guardar(_nit_key_v, st.session_state.cola_revision_v)
                     else:
                         if res.get('iva_calc'):
                             iva_calc_files.append(fname)
@@ -1288,6 +1299,8 @@ with st.sidebar:
                             guardar_cliente_rapido(id_clave, nom_n)
                         res["archivo"] = fname
                         extracted.append(res)
+                        if cod_gen: st.session_state._uuids_vistos_v.add(cod_gen)
+                        if num_ctrl: st.session_state._uuids_vistos_v.add(num_ctrl)
 
                 st.session_state.archivos_ventas.append(fname)
 
@@ -1320,7 +1333,8 @@ with st.sidebar:
 
     st.divider()
     if st.button("🧹 Limpiar Memoria Ventas", type="secondary", use_container_width=True):
-        for key in ('db_ventas', 'archivos_ventas', 'reporte_ventas', 'cola_revision_v'):
+        cola_limpiar(_nit_key_v)
+        for key in ('db_ventas', 'archivos_ventas', 'reporte_ventas', 'cola_revision_v', '_uuids_vistos_v'):
             if key in st.session_state:
                 del st.session_state[key]
         st.session_state.ventas_uploader = st.session_state.get('ventas_uploader', 0) + 1
@@ -1360,6 +1374,7 @@ if st.session_state.cola_revision_v:
         with col_m1:
             if st.button("🗑️ Descartar TODOS los pendientes", type="secondary", use_container_width=True):
                 st.session_state.cola_revision_v = []
+                cola_limpiar(_nit_key_v)
                 st.rerun()
         with col_m2:
             st.caption(f"Total en cola: {total_cola} documentos")
@@ -1695,16 +1710,19 @@ if st.session_state.cola_revision_v:
                             st.session_state.reporte_ventas["nuevos_clientes"] = nc_dict
 
                     st.session_state.cola_revision_v.pop(0)
+                    cola_guardar(_nit_key_v, st.session_state.cola_revision_v)
                     st.success("✅ Documento aprobado y agregado al libro.")
                     st.rerun()
 
             if submit_skip:
                 item = st.session_state.cola_revision_v.pop(0)
                 st.session_state.cola_revision_v.append(item)
+                cola_guardar(_nit_key_v, st.session_state.cola_revision_v)
                 st.rerun()
 
             if submit_del:
                 st.session_state.cola_revision_v.pop(0)
+                cola_guardar(_nit_key_v, st.session_state.cola_revision_v)
                 st.rerun()
 
     st.stop()
