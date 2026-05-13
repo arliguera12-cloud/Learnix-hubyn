@@ -162,3 +162,72 @@ def parse_tributos(tributos_list: list) -> dict:
             perc_iva = val
     return {"iva": iva, "fovial": fovial, "cotrans": cotrans,
             "ret_iva": ret_iva, "perc_iva": perc_iva}
+
+
+# ── Detección rápida de tipo DTE desde bytes de PDF ───────────────────────────
+
+# Palabras clave en el texto del PDF → código DTE
+_KEYWORDS_TIPO: list[tuple[str, str]] = [
+    # Orden importa: más específico primero
+    ("SUJETO EXCLUIDO",                 "14"),
+    ("COMPROBANTE DE RETENCIÓN",        "07"),
+    ("COMPROBANTE DE RETENCION",        "07"),
+    ("NOTA DE CRÉDITO",                 "05"),
+    ("NOTA DE CREDITO",                 "05"),
+    ("NOTA DE DÉBITO",                  "06"),
+    ("NOTA DE DEBITO",                  "06"),
+    ("COMPROBANTE DE CRÉDITO FISCAL",   "03"),
+    ("COMPROBANTE DE CREDITO FISCAL",   "03"),
+    ("FACTURA DE EXPORTACIÓN",          "11"),
+    ("FACTURA DE EXPORTACION",          "11"),
+    ("FACTURA EXENTA",                  "11"),
+    ("FACTURA DE CONSUMIDOR FINAL",     "01"),
+    ("FACTURA CONSUMIDOR",              "01"),
+]
+
+
+def detectar_tipo_dte_rapido(pdf_bytes: bytes) -> str:
+    """
+    Detección rápida del tipoDte a partir de los bytes del PDF, SIN llamada a API.
+
+    Estrategia en 3 capas:
+      1. Busca campo JSON `"tipoDte":"XX"` en texto extraído (JSONs embebidos o texto digital).
+      2. Busca palabras clave del encabezado del DTE.
+      3. Devuelve "" si no puede determinar el tipo (el llamador usará su default).
+
+    Usa solo la primera página para rapidez (~5-20 ms).
+    """
+    try:
+        import pdfplumber
+        from io import BytesIO
+
+        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+            if not pdf.pages:
+                return ""
+            texto = (pdf.pages[0].extract_text() or "").upper()
+    except Exception:
+        return ""
+
+    if not texto:
+        return ""
+
+    # Capa 1: campo JSON tipoDte (PDFs con JSON embebido o texto digital)
+    m = re.search(r'"tipoDte"\s*:\s*"(\d{1,2})"', texto, re.IGNORECASE)
+    if m:
+        return m.group(1).zfill(2)
+
+    # También puede aparecer como número solo: tipoDte: 3
+    m2 = re.search(r'TIPOPDTE["\s:]+(\d{1,2})', texto, re.IGNORECASE)
+    if m2:
+        return m2.group(1).zfill(2)
+
+    # Capa 2: palabras clave del encabezado
+    for keyword, codigo in _KEYWORDS_TIPO:
+        if keyword in texto:
+            return codigo
+
+    # Capa 3: buscar "CCF" como abreviatura
+    if re.search(r'\bCCF\b', texto):
+        return "03"
+
+    return ""

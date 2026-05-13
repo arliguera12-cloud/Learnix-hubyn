@@ -32,6 +32,7 @@ from utils.gemini_vision import (
     vision_ultimo_error,   # surfaces the actual API error for debugging
 )
 from utils.manual_loader import obtener_file_parts_ventas
+from utils.fiscal_rules import detectar_tipo_dte_rapido
 from utils.qa_utils import (
     campos_invalidos_dte,
     mostrar_banner_qa,
@@ -315,11 +316,12 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
     _vision_audit: dict   = {}
 
     if vision_disponible():
+        _tipo_rapido_v = detectar_tipo_dte_rapido(file_bytes) or "03"
         _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
             file_bytes,
             "ventas",
             {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
-            manual_parts=obtener_file_parts_ventas("03"),
+            manual_parts=obtener_file_parts_ventas(_tipo_rapido_v),
         )
         gemini_correcciones = [
             f"Vision: {a}" for a in _vision_alertas
