@@ -1,175 +1,182 @@
 """
-utils/manual_loader.py — Carga URIs de manuales Hacienda desde st.secrets.
+utils/manual_loader.py — Carga manuales Hacienda como contexto para Gemini.
 
-Cada URI apunta a un archivo subido a Gemini Files API (válido 48h).
-El mapeo tipo_dte → [uri, ...] se usa en gemini_vision.py para incluir
-el manual como contexto en cada llamada de extracción.
+Soporta dos modos automáticos (prioridad en orden):
+  1. Files API  — URIs en st.secrets["manuales"] (se necesita re-subir cada 48h)
+  2. Disco      — PDFs en data/manuales/<key>.pdf commiteados al repo (sin expiración)
+
+Si ninguno está disponible, las funciones devuelven [] y la extracción funciona
+exactamente como antes (degradación elegante).
 """
+from __future__ import annotations
+
+import base64
 import logging
+import os
 
 import streamlit as st
 
 log = logging.getLogger(__name__)
 
+_DIR_MANUALES = os.path.join("data", "manuales")
+
 # ─── Claves de los 7 manuales ─────────────────────────────────────────────────
 
 MANUAL_KEYS: list[str] = [
-    "ventas_contribuyentes",     # DTE 03, 05, 06 — ventas a contribuyentes
-    "ventas_consumidor",         # DTE 01 — ventas a consumidor final
-    "compras_contribuyentes",    # DTE 03, 05, 06 — módulo compras
-    "retencion_1pct",            # DTE 07 — comprobante de retención 1%
-    "percepcion_1pct",           # Anexo 8 — percepciones
-    "compras_sujetos_excluidos", # DTE 14 — sujetos excluidos (casilla 66)
-    "f14_retenciones",           # F-14 retenciones
+    "ventas_contribuyentes",      # DTE 03, 05, 06 — ventas a contribuyentes
+    "ventas_consumidor",          # DTE 01 — ventas a consumidor final
+    "compras_contribuyentes",     # DTE 03, 05, 06 — módulo compras
+    "retencion_1pct",             # DTE 07 — comprobante de retención 1%
+    "percepcion_1pct",            # Anexo 8 — percepciones
+    "compras_sujetos_excluidos",  # DTE 14 — sujetos excluidos (casilla 66)
+    "f14_retenciones",            # F-14 retenciones
 ]
 
-# ─── Mapeo tipo_dte (string de 2 dígitos) → lista de claves de manual ─────────
-#
-# Tipos 03/05/06 aparecen tanto en ventas como en compras;
-# las funciones obtener_file_parts_ventas / obtener_file_parts_compras
-# usan subconjuntos distintos de este mapeo según el contexto.
+# ─── Mapeos tipo_dte → keys de manual por contexto ───────────────────────────
 
-_TIPO_A_MANUALES: dict[str, list[str]] = {
+_VENTAS_MAP: dict[str, list[str]] = {
     "01": ["ventas_consumidor"],
-    "03": ["ventas_contribuyentes", "compras_contribuyentes"],
-    "05": ["ventas_contribuyentes", "compras_contribuyentes"],
-    "06": ["ventas_contribuyentes", "compras_contribuyentes"],
-    "07": ["retencion_1pct"],
+    "03": ["ventas_contribuyentes"],
+    "05": ["ventas_contribuyentes"],
+    "06": ["ventas_contribuyentes"],
     "11": ["ventas_contribuyentes"],
+}
+
+_COMPRAS_MAP: dict[str, list[str]] = {
+    "03": ["compras_contribuyentes"],
+    "05": ["compras_contribuyentes"],
+    "06": ["compras_contribuyentes"],
+    "11": ["compras_contribuyentes"],
     "14": ["compras_sujetos_excluidos"],
 }
 
+_RETENCIONES_KEYS: list[str] = ["retencion_1pct", "f14_retenciones"]
 
-# ─── Carga y caché de URIs ────────────────────────────────────────────────────
 
-def cargar_uris_manuales() -> dict[str, str]:
-    """
-    Lee las URIs de manuales desde st.secrets["manuales"].
+# ─── Modo 1: Files API (URIs desde secrets) ───────────────────────────────────
 
-    Cachea el resultado en st.session_state._manuales_uris para evitar
-    lecturas repetidas de secrets en cada llamada.
-
-    Returns:
-        {key: uri_string} — dict vacío si no hay sección [manuales] en secrets.
-    """
-    _CACHE_KEY = "_manuales_uris"
-
-    # Devolver caché si ya fue cargado en esta sesión
-    cached = st.session_state.get(_CACHE_KEY)
+def _cargar_uris() -> dict[str, str]:
+    """Lee URIs desde st.secrets["manuales"], cacheado en session_state."""
+    cache_key = "_manuales_uris"
+    cached = st.session_state.get(cache_key)
     if cached is not None:
-        return cached  # type: ignore[return-value]
-
+        return cached
     try:
         seccion = st.secrets.get("manuales", {})
-        uris: dict[str, str] = {
-            k: str(v)
-            for k, v in seccion.items()
-            if k in MANUAL_KEYS and v
-        }
-        st.session_state[_CACHE_KEY] = uris
+        uris = {k: str(v) for k, v in seccion.items() if k in MANUAL_KEYS and v}
+        st.session_state[cache_key] = uris
         if uris:
-            log.debug("manual_loader: %d URIs cargadas: %s", len(uris), list(uris.keys()))
+            log.debug("manual_loader (Files API): %d URIs cargadas", len(uris))
         return uris
     except Exception as exc:
-        # Degradación elegante: si secrets no está disponible (tests, scripts), devuelve {}
-        log.debug("manual_loader: no se pudieron cargar manuales (%s)", exc)
-        st.session_state[_CACHE_KEY] = {}
+        log.debug("manual_loader: sin secrets (%s)", exc)
+        st.session_state[cache_key] = {}
         return {}
 
 
-# ─── Construcción de parts fileData ──────────────────────────────────────────
-
 def _uris_a_parts(uris: dict[str, str], keys: list[str]) -> list[dict]:
+    return [
+        {"fileData": {"mimeType": "application/pdf", "fileUri": uris[k]}}
+        for k in keys
+        if k in uris
+    ]
+
+
+# ─── Modo 2: Inline desde disco ──────────────────────────────────────────────
+
+def _cargar_bytes_disco() -> dict[str, bytes]:
     """
-    Convierte una lista de claves de manual en parts fileData de Gemini.
-
-    Solo incluye las claves que tengan URI configurada.
+    Lee los PDFs de data/manuales/ y los cachea en session_state.
+    Solo carga los archivos que existan — los faltantes se ignoran.
     """
-    parts = []
-    for key in keys:
-        uri = uris.get(key)
-        if uri:
-            parts.append({
-                "fileData": {
-                    "mimeType": "application/pdf",
-                    "fileUri" : uri,
-                }
-            })
-    return parts
+    cache_key = "_manuales_bytes"
+    cached = st.session_state.get(cache_key)
+    if cached is not None:
+        return cached
+
+    result: dict[str, bytes] = {}
+    for key in MANUAL_KEYS:
+        path = os.path.join(_DIR_MANUALES, f"{key}.pdf")
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as f:
+                    result[key] = f.read()
+                log.debug("manual_loader (disco): %s cargado (%d KB)", key, len(result[key]) // 1024)
+            except Exception as exc:
+                log.warning("manual_loader: no se pudo leer %s: %s", path, exc)
+
+    st.session_state[cache_key] = result
+    if result:
+        log.info("manual_loader (disco): %d manuales en memoria", len(result))
+    return result
 
 
-def obtener_file_parts_ventas(tipo_dte: str) -> list[dict]:
+def _bytes_a_parts(manuales_bytes: dict[str, bytes], keys: list[str]) -> list[dict]:
+    return [
+        {
+            "inlineData": {
+                "mimeType": "application/pdf",
+                "data"    : base64.b64encode(manuales_bytes[k]).decode(),
+            }
+        }
+        for k in keys
+        if k in manuales_bytes
+    ]
+
+
+# ─── Función unificada: elige modo automáticamente ───────────────────────────
+
+def _obtener_parts(keys: list[str]) -> list[dict]:
     """
-    Devuelve los fileData parts del manual relevante para extracción en VENTAS.
-
-    Para tipos 03/05/06 usa ventas_contribuyentes.
-    Para tipo 01 usa ventas_consumidor.
-    Para tipo 11 usa ventas_contribuyentes.
-
-    Args:
-        tipo_dte: código de 2 dígitos, ej. "03", "01".
-
-    Returns:
-        Lista de dicts con formato {"fileData": {"mimeType": ..., "fileUri": ...}}.
-        Lista vacía si no hay URIs configuradas o el tipo no está mapeado.
+    Devuelve los parts de Gemini para las claves dadas.
+    Intenta Files API primero; cae a disco si no hay URIs; devuelve [] si nada.
     """
-    uris = cargar_uris_manuales()
-    if not uris:
+    if not keys:
         return []
 
-    ventas_keys_map: dict[str, list[str]] = {
-        "01": ["ventas_consumidor"],
-        "03": ["ventas_contribuyentes"],
-        "05": ["ventas_contribuyentes"],
-        "06": ["ventas_contribuyentes"],
-        "11": ["ventas_contribuyentes"],
-    }
-    keys = ventas_keys_map.get(tipo_dte, [])
-    return _uris_a_parts(uris, keys)
+    # Modo 1 — Files API
+    uris = _cargar_uris()
+    parts_uri = _uris_a_parts(uris, keys)
+    if parts_uri:
+        return parts_uri
+
+    # Modo 2 — Inline desde disco
+    manuales_bytes = _cargar_bytes_disco()
+    parts_inline = _bytes_a_parts(manuales_bytes, keys)
+    if parts_inline:
+        return parts_inline
+
+    return []
+
+
+# ─── API pública ──────────────────────────────────────────────────────────────
+
+def obtener_file_parts_ventas(tipo_dte: str) -> list[dict]:
+    """Parts del manual para extracción en módulo VENTAS."""
+    return _obtener_parts(_VENTAS_MAP.get(tipo_dte, []))
 
 
 def obtener_file_parts_compras(tipo_dte: str) -> list[dict]:
-    """
-    Devuelve los fileData parts del manual relevante para extracción en COMPRAS.
-
-    Para tipos 03/05/06 usa compras_contribuyentes.
-    Para tipo 14 usa compras_sujetos_excluidos.
-
-    Args:
-        tipo_dte: código de 2 dígitos, ej. "03", "14".
-
-    Returns:
-        Lista de dicts con formato {"fileData": {"mimeType": ..., "fileUri": ...}}.
-        Lista vacía si no hay URIs configuradas o el tipo no está mapeado.
-    """
-    uris = cargar_uris_manuales()
-    if not uris:
-        return []
-
-    compras_keys_map: dict[str, list[str]] = {
-        "03": ["compras_contribuyentes"],
-        "05": ["compras_contribuyentes"],
-        "06": ["compras_contribuyentes"],
-        "11": ["compras_contribuyentes"],
-        "14": ["compras_sujetos_excluidos"],
-    }
-    keys = compras_keys_map.get(tipo_dte, [])
-    return _uris_a_parts(uris, keys)
+    """Parts del manual para extracción en módulo COMPRAS."""
+    return _obtener_parts(_COMPRAS_MAP.get(tipo_dte, []))
 
 
 def obtener_file_parts_retenciones() -> list[dict]:
+    """Parts de manuales para módulo RETENCIONES (retencion_1pct + f14)."""
+    return _obtener_parts(_RETENCIONES_KEYS)
+
+
+def manuales_disponibles() -> dict[str, str]:
     """
-    Devuelve los fileData parts para el módulo de retenciones.
-
-    Incluye retencion_1pct y f14_retenciones cuando estén disponibles.
-
-    Returns:
-        Lista de dicts con formato {"fileData": {"mimeType": ..., "fileUri": ...}}.
-        Lista vacía si no hay URIs configuradas.
+    Retorna un dict con los manuales disponibles y su fuente.
+    Útil para mostrar estado en la UI: {"ventas_contribuyentes": "disco", ...}
     """
-    uris = cargar_uris_manuales()
-    if not uris:
-        return []
-
-    keys = ["retencion_1pct", "f14_retenciones"]
-    return _uris_a_parts(uris, keys)
+    estado: dict[str, str] = {}
+    uris = _cargar_uris()
+    bytes_disco = _cargar_bytes_disco()
+    for key in MANUAL_KEYS:
+        if key in uris:
+            estado[key] = "files_api"
+        elif key in bytes_disco:
+            estado[key] = "disco"
+    return estado
