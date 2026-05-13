@@ -555,10 +555,14 @@ def _http_post(
     prompt: str,
     api_key: str,
     schema: dict | None,
+    manual_parts: list[dict] | None = None,
 ) -> dict | None:
     """
     Sends the PDF as base64 inlineData to Gemini Vision.
     Returns parsed JSON dict or None on any error (sets _ultimo_error).
+
+    If manual_parts is provided, the manual fileData parts are prepended
+    before the inline PDF data so Gemini sees the manual first.
     """
     global _ultimo_error
 
@@ -573,17 +577,21 @@ def _http_post(
     if schema:
         gen_cfg["responseSchema"] = schema
 
+    # Build parts list: optional manual context first, then inline PDF, then prompt
+    parts: list[dict] = []
+    if manual_parts:
+        parts.extend(manual_parts)
+    parts.append({
+        "inlineData": {
+            "mimeType": "application/pdf",
+            "data"    : pdf_b64,
+        }
+    })
+    parts.append({"text": prompt})
+
     payload = {
         "contents": [{
-            "parts": [
-                {
-                    "inlineData": {
-                        "mimeType": "application/pdf",
-                        "data"    : pdf_b64,
-                    }
-                },
-                {"text": prompt},
-            ]
+            "parts": parts,
         }],
         "generationConfig": gen_cfg,
     }
@@ -657,7 +665,12 @@ def _http_post(
 
 # ─── Llamada con reintentos automáticos ──────────────────────────────────────
 
-def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict | None) -> dict | None:
+def _llamar_vision(
+    pdf_bytes: bytes,
+    prompt: str,
+    schema: dict | None,
+    manual_parts: list[dict] | None = None,
+) -> dict | None:
     """
     Calls Gemini Vision with automatic retry for transient errors:
       • 429 / 5xx  → exponential backoff (2 s, 4 s, 8 s), up to 3 attempts.
@@ -667,6 +680,9 @@ def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict | None) -> dict |
       Phase 1 — with responseSchema (structured output).
       Phase 2 — without responseSchema if Phase 1 returns HTTP 400
                  (responseSchema + inlineData can conflict in some API versions).
+
+    If manual_parts is provided, the manual fileData parts are forwarded to
+    _http_post so they are prepended before the inline PDF.
     """
     global _ultimo_error
 
@@ -681,7 +697,7 @@ def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict | None) -> dict |
     api_key = _get_api_key()
 
     for attempt in range(_MAX_RETRIES):
-        result = _http_post(pdf_bytes, prompt, api_key, schema)
+        result = _http_post(pdf_bytes, prompt, api_key, schema, manual_parts)
         if result is not None:
             return result
 
@@ -714,7 +730,7 @@ def _llamar_vision(pdf_bytes: bytes, prompt: str, schema: dict | None) -> dict |
         )
         if schema and is_schema_error:
             log.warning("Vision Phase 2 (no schema) due to: %s", err[:80])
-            result = _http_post(pdf_bytes, prompt, api_key, schema=None)
+            result = _http_post(pdf_bytes, prompt, api_key, schema=None, manual_parts=manual_parts)
             if result is not None:
                 if isinstance(result, dict) and "auditoria_ia" not in result:
                     result["auditoria_ia"] = {}
