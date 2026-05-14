@@ -199,7 +199,7 @@ with st.sidebar:
     if not _gemini_secret:
         with st.expander("⚡ IA · Gemini", expanded=False):
             gemini_key = st.text_input(
-                "API Key Gemini 1.5 Flash",
+                "API Key Gemini 2.5 Flash",
                 type="password",
                 value=st.session_state.get("gemini_api_key", ""),
                 placeholder="AIza...",
