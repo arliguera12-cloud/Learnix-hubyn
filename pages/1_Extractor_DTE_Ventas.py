@@ -767,34 +767,34 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
 # CONSTRUCCIÓN DE DATAFRAMES F-07 SEGÚN MANUAL DGII
 # ══════════════════════════════════════════════════════════════
 
-def construir_df_f07_contribuyentes(df_in: pd.DataFrame) -> pd.DataFrame:
+def construir_df_f07_contribuyentes(
+    df_in: pd.DataFrame,
+    tipo_op_renta: str = "1",
+    tipo_ingreso_renta: str = "3",
+    periodo_ene2025: bool = True,
+) -> pd.DataFrame:
     """
     Anexo 1: Detalle de Ventas a Contribuyentes (DTE-03, 05, 06)
     Columnas: A-T (20 columnas según manual F-07 V14 enero 2025)
-    
+
     D. Número de Resolución = num_control SIN guiones
     E. Número de Serie      = sello de recepción
     F. Número de Documento  = código de generación SIN guiones
     G. Control Interno      = en blanco (DTE)
-    H. NIT o NRC            = nit_cli
-    Q. DUI                  = dui_cli (si persona natural)
-    R. Tipo Operación       = 1 (Gravada) por defecto
-    S. Tipo Ingreso         = 1 (Profesiones/Servicios) por defecto — usuario ajusta
+    H. NIT o NRC            = nit_cli (vacío si persona natural con DUI)
+    Q. DUI                  = dui_cli (solo persona natural desde ene 2022)
+    R. Tipo Operación Renta = usuario selecciona (0 si periodo < ene 2025)
+    S. Tipo Ingreso Renta   = usuario selecciona (0 si periodo < ene 2025)
     T. Número Anexo         = 1
     """
     df_out = pd.DataFrame()
     df_out["A. Fecha Emisión"]            = df_in["fecha"]
-    df_out["B. Clase Documento"]          = "4"          # DTE
+    df_out["B. Clase Documento"]          = "4"
     df_out["C. Tipo Documento"]           = df_in["tipo"]
-    # D: Num Control SIN guiones (col D = resolución para DTE)
     df_out["D. Num Resolución"]           = df_in["num_control"].astype(str)
-    # E: Sello de recepción
     df_out["E. Serie (Sello)"]            = df_in.get("sello", pd.Series([""] * len(df_in), index=df_in.index))
-    # F: Código generación SIN guiones
     df_out["F. Num Documento (UUID)"]     = df_in["gen_sin_guiones"].astype(str)
-    # G: Control interno en blanco para DTE
     df_out["G. Control Interno"]          = ""
-    # H: NIT o NRC (vacío si solo hay DUI)
     df_out["H. NIT/NRC Cliente"]          = df_in["nit_cli"].astype(str)
     df_out["I. Nombre Cliente"]           = df_in["nom_cli"].astype(str)
     df_out["J. Ventas Exentas"]           = df_in["exentas"]
@@ -804,62 +804,45 @@ def construir_df_f07_contribuyentes(df_in: pd.DataFrame) -> pd.DataFrame:
     df_out["N. Vtas Cuenta Terceros"]     = df_in["terceros"]
     df_out["O. Déb. Fiscal Terceros"]     = df_in["deb_terc"]
     df_out["P. Total Ventas"]             = df_in["total"]
-    # Q: DUI (solo persona natural; si hay NIT este va vacío)
     df_out["Q. DUI Cliente"]              = df_in["dui_cli"].astype(str)
-    df_out["R. Tipo Operación (Renta)"]   = "1"  # 1=Gravada (ajustar según caso)
-    df_out["S. Tipo Ingreso (Renta)"]     = "1"  # 1=Profesiones (ajustar)
+    df_out["R. Tipo Operación (Renta)"]   = tipo_op_renta   if periodo_ene2025 else "0"
+    df_out["S. Tipo Ingreso (Renta)"]     = tipo_ingreso_renta if periodo_ene2025 else "0"
     df_out["T. Num Anexo"]                = "1"
     return df_out
 
 
-def construir_df_f07_consumidor(df_in: pd.DataFrame) -> pd.DataFrame:
+def construir_df_f07_consumidor(
+    df_in: pd.DataFrame,
+    tipo_op_renta: str = "1",
+    tipo_ingreso_renta: str = "3",
+    periodo_ene2025: bool = True,
+) -> pd.DataFrame:
     """
     Anexo 2: Detalle de Ventas a Consumidor Final (DTE-01, 02, 10, 11)
     Columnas: A-W (23 columnas según manual F-07 V14 enero 2025)
-    
-    NOTA MANUAL: Los DTE se agrupan por DÍA.
-    D. Número de Resolución = N/A
-    E. Serie                = N/A
-    F. N° Control Interno DEL = N/A
-    G. N° Control Interno AL  = N/A
-    H. N° Documento DEL = UUID del PRIMER DTE del día
-    I. N° Documento AL  = UUID del ÚLTIMO DTE del día
-    J. N° Máquina Registradora = en blanco
-    N. Ventas Gravadas = CON IVA incluido
-    W. Número Anexo = 2
-    
-    IMPLEMENTACIÓN: agrupamos por fecha. Si ya vienen individuales,
-    cada fila es su propio grupo de un documento.
-    """
-    # Para el agrupado por día: agrupamos por fecha
-    df_in = df_in.copy()
-    
-    # Si el df tiene una sola fila por documento (no agrupado), crear vista individual
-    # El manual dice agrupar por día, pero para auditoría interna es mejor individual
-    # Exportamos individual (cada DTE) y el usuario puede agrupar manualmente si Hacienda lo pide
 
+    Los DTE se exportan individuales; el usuario puede agrupar por día
+    manualmente si el portal lo exige (factura.gob.sv lo acepta individual).
+    D/E/F/G = N/A para DTE · H/I = UUID DTE (sin guiones) · J = vacío
+    N = Ventas Gravadas CON IVA incluido · U/V = 0 si periodo < ene 2025
+    W = 2
+    """
+    df_in = df_in.copy()
     df_out = pd.DataFrame()
     df_out["A. Fecha Emisión"]                  = df_in["fecha"]
-    df_out["B. Clase Documento"]                = "4"          # DTE
+    df_out["B. Clase Documento"]                = "4"
     df_out["C. Tipo Documento"]                 = df_in["tipo"]
-    # D: N/A para DTE (se agrupa por día)
     df_out["D. Num Resolución"]                 = "N/A"
-    # E: N/A para DTE agrupado por día
     df_out["E. Serie Documento"]                = "N/A"
-    # F y G: N/A para DTE
     df_out["F. N° Control Interno DEL"]         = "N/A"
     df_out["G. N° Control Interno AL"]          = "N/A"
-    # H: Código generación SIN guiones del DTE (primer DTE del día)
     df_out["H. N° Documento DEL (UUID)"]        = df_in["gen_sin_guiones"].astype(str)
-    # I: Mismo (documento individual)
     df_out["I. N° Documento AL (UUID)"]         = df_in["gen_sin_guiones"].astype(str)
-    # J: Vacío para DTE
     df_out["J. N° Máquina Registradora"]        = ""
     df_out["K. Ventas Exentas"]                 = df_in["exentas"]
-    # L: Exentas no sujetas a proporcionalidad (normalmente 0)
     df_out["L. Exentas No Prop."]               = 0.0
     df_out["M. Ventas No Sujetas"]              = df_in["no_sujetas"]
-    # N: Ventas Gravadas CON IVA incluido (total para facturas consumidor)
+    # N: Ventas Gravadas CON IVA incluido (campo 'gravadas' ya lo trae así para consumidor)
     df_out["N. Ventas Gravadas (c/IVA)"]        = df_in["gravadas"]
     df_out["O. Export. dentro CA"]              = 0.0
     df_out["P. Export. fuera CA"]               = 0.0
@@ -867,8 +850,8 @@ def construir_df_f07_consumidor(df_in: pd.DataFrame) -> pd.DataFrame:
     df_out["R. Vtas Zonas Francas DPA"]         = 0.0
     df_out["S. Vtas Cuenta Terceros"]           = df_in["terceros"]
     df_out["T. Total Ventas"]                   = df_in["total"]
-    df_out["U. Tipo Operación (Renta)"]         = "1"
-    df_out["V. Tipo Ingreso (Renta)"]           = "1"
+    df_out["U. Tipo Operación (Renta)"]         = tipo_op_renta    if periodo_ene2025 else "0"
+    df_out["V. Tipo Ingreso (Renta)"]           = tipo_ingreso_renta if periodo_ene2025 else "0"
     df_out["W. Num Anexo"]                      = "2"
     return df_out
 
@@ -975,13 +958,13 @@ def _validar_matematica_ventas(df: pd.DataFrame) -> list:
     return alertas
 
 
-@st.dialog("Confirmar Descarga de Anexos")
+@st.dialog("Confirmar Descarga de Anexos F-07")
 def ventana_descarga_ventas(df_contribuyentes: pd.DataFrame,
                              df_consumidor: pd.DataFrame,
                              nombre_base: str) -> None:
     st.write("Verifica los totales antes de descargar. Los archivos están listos para cargar en el portal de Hacienda.")
 
-    # Validación matemática Anexo 1
+    # ── Validación matemática Anexo 1 ────────────────────────────────────────
     if not df_contribuyentes.empty:
         alertas = _validar_matematica_ventas(df_contribuyentes)
         if alertas:
@@ -995,12 +978,51 @@ def ventana_descarga_ventas(df_contribuyentes: pd.DataFrame,
                         unsafe_allow_html=True
                     )
 
+    # ── Configuración columnas R/S (Renta — desde ene 2025) ──────────────────
+    st.markdown("##### Columnas Renta (R/S · U/V)")
+    st.caption("Aplica desde enero 2025. Para periodos anteriores selecciona 'Anterior a ene 2025'.")
+    rc1, rc2, rc3 = st.columns(3)
+    with rc1:
+        sel_periodo_r = st.selectbox(
+            "Periodo declaración",
+            ["Ene 2025 en adelante", "Anterior a ene 2025"],
+            key="vta_periodo_renta",
+        )
+    with rc2:
+        sel_tipo_op_r = st.selectbox(
+            "Tipo de Operación (R/U)",
+            ["1 — Gravada", "2 — No Gravada o Exento", "3 — Excluido/No Renta",
+             "4 — Mixta", "12 — Retención F14/F910", "13 — Sujeto excluido art.6 LISR"],
+            key="vta_tipo_op_renta",
+        )
+    with rc3:
+        sel_tipo_ing_r = st.selectbox(
+            "Tipo de Ingreso (S/V)",
+            ["1 — Prof./Artes/Oficios", "2 — Act. Servicios", "3 — Act. Comerciales",
+             "4 — Act. Industriales", "5 — Act. Agropecuarias", "6 — Utilidades/Dividendos",
+             "7 — Export. bienes", "8 — Serv. exterior/SV", "9 — Export. servicios",
+             "10 — Otras Rentas Grav.", "12 — Ret. F14/F910", "13 — Sujeto excluido art.6"],
+            index=2,
+            key="vta_tipo_ing_renta",
+        )
+
+    periodo_ene2025 = (sel_periodo_r == "Ene 2025 en adelante")
+    tipo_op_r  = sel_tipo_op_r.split(" — ")[0]
+    tipo_ing_r = sel_tipo_ing_r.split(" — ")[0]
+
+    st.divider()
+
     col1, col2 = st.columns(2)
 
     with col1:
         st.markdown("**Anexo 1 — Contribuyentes (CCF/NC/ND)**")
         if not df_contribuyentes.empty:
-            f07_contrib = construir_df_f07_contribuyentes(df_contribuyentes)
+            f07_contrib = construir_df_f07_contribuyentes(
+                df_contribuyentes,
+                tipo_op_renta=tipo_op_r,
+                tipo_ingreso_renta=tipo_ing_r,
+                periodo_ene2025=periodo_ene2025,
+            )
             st.caption(f"📄 {len(f07_contrib)} documentos")
             total_c = df_contribuyentes['total'].sum()
             st.caption(f"Total: ${total_c:,.2f}")
@@ -1017,7 +1039,12 @@ def ventana_descarga_ventas(df_contribuyentes: pd.DataFrame,
     with col2:
         st.markdown("**Anexo 2 — Consumidor Final (Facturas)**")
         if not df_consumidor.empty:
-            f07_cons = construir_df_f07_consumidor(df_consumidor)
+            f07_cons = construir_df_f07_consumidor(
+                df_consumidor,
+                tipo_op_renta=tipo_op_r,
+                tipo_ingreso_renta=tipo_ing_r,
+                periodo_ene2025=periodo_ene2025,
+            )
             st.caption(f"📄 {len(f07_cons)} documentos")
             total_cons = df_consumidor['total'].sum()
             st.caption(f"💰 Total: ${total_cons:,.2f}")

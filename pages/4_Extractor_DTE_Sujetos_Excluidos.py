@@ -536,6 +536,80 @@ def generar_excel_retencion(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     return buf.getvalue()
 
 
+# ══════════════════════════════════════════════════════════════
+# FORMATO HACIENDA — CASILLA 66 / ANEXO 5
+# Compras a Sujetos Excluidos (13 columnas A-M)
+# ══════════════════════════════════════════════════════════════
+
+def construir_df_hacienda_c66(
+    df: pd.DataFrame,
+    tipo_op: str = "1",
+    clasif: str  = "2",
+    sector: str  = "4",
+    tipo_cg: str = "1",
+    periodo_feb2024: bool = True,
+) -> pd.DataFrame:
+    """
+    Genera el DataFrame con la estructura exacta requerida por Hacienda
+    para la Casilla 66 — Compras a Sujetos Excluidos (Anexo 5).
+
+    Columnas A-M según Manual F-07:
+      A  Tipo de Documento (1=NIT, 2=DUI, 3=Otro)
+      B  Número NIT/DUI/Otro (sin guiones)
+      C  Nombre, Razón Social o Denominación
+      D  Fecha de Emisión DD/MM/AAAA
+      E  Número de Serie (Sello de Recepción del DTE)
+      F  Número de Documento (Código de Generación SIN guiones)
+      G  Monto de la Operación
+      H  Monto de la Retención IVA 13% (0.00 si no aplica)
+      I  Tipo de Operación (desde Feb 2024; "0" si anterior)
+      J  Clasificación (desde Feb 2024; "0" si anterior)
+      K  Sector (desde Feb 2024; "0" si anterior)
+      L  Tipo de Costo/Gasto (desde Feb 2024; "0" si anterior)
+      M  Número de Anexo = 5
+    """
+    def _tipo_doc(id_str: str) -> str:
+        clean = re.sub(r"[^0-9]", "", str(id_str))
+        if len(clean) == 14:
+            return "1"   # NIT
+        if len(clean) == 9:
+            return "2"   # DUI
+        return "3"       # Otro
+
+    def _iva13(base_val: float, t_op: str) -> str:
+        # Solo aplica si la operación es Gravada (tipo 1) o Mixta (tipo 4)
+        if t_op in ("1", "4"):
+            return f"{round(float(base_val) * 0.13, 2):.2f}"
+        return "0.00"
+
+    out = pd.DataFrame()
+    out["A"] = df["id_sujeto"].apply(_tipo_doc)
+    out["B"] = df["id_sujeto"].astype(str).str.replace(r"[^0-9]", "", regex=True)
+    out["C"] = df["nom_sujeto"].astype(str)
+    out["D"] = df["fecha"].astype(str)
+    out["E"] = df["sello"].astype(str)
+    out["F"] = df["gen"].astype(str).str.replace("-", "", regex=False).str.upper()
+    out["G"] = df["base"].map(lambda x: f"{float(x):.2f}")
+    out["H"] = df["base"].apply(lambda x: _iva13(x, tipo_op))
+    if periodo_feb2024:
+        out["I"] = tipo_op
+        out["J"] = clasif
+        out["K"] = sector
+        out["L"] = tipo_cg
+    else:
+        out["I"] = "0"
+        out["J"] = "0"
+        out["K"] = "0"
+        out["L"] = "0"
+    out["M"] = "5"
+    return out
+
+
+def to_csv_hacienda_c66(df_hacienda: pd.DataFrame) -> bytes:
+    """CSV sin encabezados, listo para Hacienda (Casilla 66)."""
+    return df_hacienda.to_csv(index=False, header=False).encode("utf-8")
+
+
 # ─────────────────────────────────────────────
 # 5. ENCABEZADO
 # ─────────────────────────────────────────────
@@ -704,27 +778,106 @@ if not st.session_state.db_sujetos.empty:
 
     st.markdown("---")
 
-    col1, col2 = st.columns(2)
+    # ── Configuración para Casilla 66 ────────────────────────────────────────
+    st.markdown(
+        "<span class='badge-sistema'>EXPORTAR — CASILLA 66</span>",
+        unsafe_allow_html=True
+    )
+    st.markdown("")
+    st.caption(
+        "Configura los campos de clasificación requeridos por Hacienda "
+        "(aplica desde Febrero 2024). El sistema los aplica igual a todos los registros. "
+        "Puedes editar el CSV luego si hay documentos con clasificación distinta."
+    )
+
+    cc1, cc2, cc3, cc4, cc5 = st.columns(5)
+    with cc1:
+        sel_periodo = st.selectbox(
+            "Periodo",
+            ["Feb 2024 en adelante", "Anterior a Feb 2024"],
+            key="c66_periodo",
+        )
+    with cc2:
+        sel_tipo_op = st.selectbox(
+            "Tipo de Operación (I)",
+            ["1 — Gravada", "2 — No Gravada", "3 — Excluido/No Renta", "4 — Mixta"],
+            key="c66_tipo_op",
+        )
+    with cc3:
+        sel_clasif = st.selectbox(
+            "Clasificación (J)",
+            ["1 — Costo", "2 — Gasto"],
+            key="c66_clasif",
+        )
+    with cc4:
+        sel_sector = st.selectbox(
+            "Sector (K)",
+            ["1 — Industria", "2 — Comercio", "3 — Agropecuaria", "4 — Servicios/Prof."],
+            key="c66_sector",
+            index=3,
+        )
+    with cc5:
+        sel_tipocg = st.selectbox(
+            "Tipo Costo/Gasto (L)",
+            [
+                "1 — Gastos de Venta",
+                "2 — Gastos de Admón.",
+                "3 — Gastos Financieros",
+                "4 — Costo Art. Import.",
+                "5 — Costo Art. Interno",
+                "6 — Costos Ind. Fab.",
+                "7 — Mano de obra",
+            ],
+            key="c66_tipocg",
+        )
+
+    st.markdown("")
+
+    col_h, col1, col2 = st.columns([2, 2, 2])
+
+    with col_h:
+        df_c66 = construir_df_hacienda_c66(
+            df,
+            tipo_op=sel_tipo_op[0],
+            clasif=sel_clasif[0],
+            sector=sel_sector[0],
+            tipo_cg=sel_tipocg[0],
+            periodo_feb2024=(sel_periodo == "Feb 2024 en adelante"),
+        )
+        st.markdown("**Formato Hacienda**")
+        st.caption("CSV listo para cargar · Casilla 66 · Anexo 5")
+        st.download_button(
+            "📤 CSV Hacienda — Casilla 66",
+            data=to_csv_hacienda_c66(df_c66),
+            file_name=f"C66_SujetosExcluidos_{cliente['nombre'].replace(' ','_')}.csv",
+            mime="text/csv",
+            type="primary",
+            use_container_width=True,
+        )
 
     with col1:
         excel_libro = generar_excel_libro(df, cliente['nombre'])
+        st.markdown("**Libro Sujeto Excluido**")
+        st.caption("Excel formato auditoría F-14")
         st.download_button(
-            "📥 Libro Sujeto Excluido (F-14)",
+            "📥 Excel Libro F-14",
             data=excel_libro,
             file_name=f"Libro_Sujeto_Excluido_{cliente['nombre'].replace(' ','_')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
+            type="secondary",
             use_container_width=True
         )
 
     with col2:
         excel_ret = generar_excel_retencion(df, cliente['nombre'])
+        st.markdown("**Retención Honorarios**")
+        st.caption("Excel retención 10% ISR · F-14")
         st.download_button(
-            "📥 Retención Honorarios (F-14)",
+            "📥 Excel Ret. Honorarios",
             data=excel_ret,
             file_name=f"Retencion_Honorarios_{cliente['nombre'].replace(' ','_')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
+            type="secondary",
             use_container_width=True
         )
 
