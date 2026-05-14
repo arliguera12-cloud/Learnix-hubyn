@@ -32,7 +32,7 @@ st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 # 4. CARGA DE CLIENTES
 # ─────────────────────────────────────────────
 def cargar_clientes() -> dict:
-    archivo = "data/clientes.json"
+    archivo = os.path.join(os.path.dirname(__file__), "..", "data", "clientes.json")
     if not os.path.exists(archivo):
         return {}
     try:
@@ -65,7 +65,7 @@ with col_badge:
     st.markdown(
         "<div style='text-align:right; margin-top:18px;'>"
         "<span style='background:#152015; border:1px solid #2E4828; border-radius:20px;"
-        " padding:4px 14px; font-size:0.7rem; color:#5EA830; letter-spacing:2px;'>v3.0 · PRODUCCIÓN</span>"
+        " padding:4px 14px; font-size:0.7rem; color:#5EA830; letter-spacing:2px;'>v3.1 · PRODUCCIÓN</span>"
         "</div>",
         unsafe_allow_html=True
     )
@@ -154,7 +154,7 @@ if cliente_activo:
     )
 
     st.markdown(
-        "<div style='font-size:0.72rem; color:#3A5830; letter-spacing:2px; text-transform:uppercase;"
+        "<div style='font-size:0.72rem; color:#5EA830; letter-spacing:2px; text-transform:uppercase;"
         " font-weight:600; margin-bottom:10px;'>📊 Resumen de Sesión Actual</div>",
         unsafe_allow_html=True
     )
@@ -183,7 +183,7 @@ if cliente_activo:
 # 8. TARJETAS DE MÓDULOS
 # ─────────────────────────────────────────────
 st.markdown(
-    "<div style='font-size:0.72rem; color:#3A5830; letter-spacing:2px; text-transform:uppercase;"
+    "<div style='font-size:0.72rem; color:#5EA830; letter-spacing:2px; text-transform:uppercase;"
     " font-weight:600; margin-bottom:12px;'>🗂️ Módulos Disponibles</div>",
     unsafe_allow_html=True
 )
@@ -269,8 +269,8 @@ if not cliente_activo and db_clientes:
 st.markdown("")
 st.divider()
 st.markdown(
-    "<p style='text-align:center; font-size:0.72rem; color:#1E3020;'>"
-    "Learnix DTE Hub &nbsp;·&nbsp; v3.0 &nbsp;·&nbsp; El Salvador &nbsp;·&nbsp; "
+    "<p style='text-align:center; font-size:0.72rem; color:#5EA830;'>"
+    "Learnix DTE Hub &nbsp;·&nbsp; v3.1 &nbsp;·&nbsp; El Salvador &nbsp;·&nbsp; "
     "Todos los datos se procesan localmente sin envío a terceros.</p>",
     unsafe_allow_html=True
 )

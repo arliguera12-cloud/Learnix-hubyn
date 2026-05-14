@@ -540,6 +540,12 @@ DARK_PRO_CSS = """
     border: 1px solid rgba(248,81,73,0.20);
     border-radius: var(--radius); padding: 20px;
   }
+  .zona-peligro-titulo {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent-danger) !important;
+    margin: 0 0 6px;
+  }
   .badge-sistema {
     display: inline-block;
     background: rgba(63,185,80,0.08);

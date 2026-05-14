@@ -14,25 +14,26 @@ from styles import DARK_PRO_CSS
 st.set_page_config(page_title="Directorio Proveedores", layout="wide", page_icon="🏢")
 
 # ─────────────────────────────────────────────
-# 2. ESTILOS
-# ─────────────────────────────────────────────
-st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
-
-# ─────────────────────────────────────────────
-# 3. VERIFICACIÓN DE SEGURIDAD
+# 2. VERIFICACIÓN DE SEGURIDAD
 # ─────────────────────────────────────────────
 if not st.session_state.get("autenticado"):
     st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
     st.stop()
 
 # ─────────────────────────────────────────────
+# 3. ESTILOS
+# ─────────────────────────────────────────────
+st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
 # 4. FUNCIONES
 # ─────────────────────────────────────────────
-ARCHIVO_PROVEEDORES = "data/proveedores.json"
+ARCHIVO_PROVEEDORES = os.path.join(os.path.dirname(__file__), "..", "data", "proveedores.json")
 
 def cargar_proveedores() -> dict:
-    if not os.path.exists("data"):
-        os.makedirs("data")
+    data_dir = os.path.dirname(ARCHIVO_PROVEEDORES)
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
     if not os.path.exists(ARCHIVO_PROVEEDORES):
         with open(ARCHIVO_PROVEEDORES, "w", encoding="utf-8") as f:
             json.dump({}, f, indent=4, ensure_ascii=False)
