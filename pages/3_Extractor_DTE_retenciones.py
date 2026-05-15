@@ -347,6 +347,46 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         return {"error": str(err)}
 
 
+# ══════════════════════════════════════════════════════════════
+# FORMATO HACIENDA — CASILLA 162 / ANEXO 7
+# Retención IVA 1% efectuada al declarante (9 columnas A-I)
+# ══════════════════════════════════════════════════════════════
+
+def construir_df_hacienda_c162(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Genera el DataFrame con la estructura exacta requerida por el portal
+    de Hacienda El Salvador para la Casilla 162 (Retención IVA 1%).
+
+    Columnas A-I según Manual F-07:
+      A  NIT del Agente (14 dig, sin guiones; vacío si se usa DUI en H)
+      B  Fecha de Emisión DD/MM/AAAA
+      C  Tipo de Documento (07 = Comprobante de Retención)
+      D  Serie (Sello de Recepción del DTE)
+      E  Número de Documento (Código de Generación SIN guiones)
+      F  Monto Sujeto
+      G  Monto Retención 1%
+      H  DUI del Agente (9 dig; vacío si se usa NIT en A)
+      I  Número de Anexo = 7
+    """
+    out = pd.DataFrame()
+    out["A"] = df["nit_prov"].astype(str).str.replace(r"[^0-9]", "", regex=True)
+    out["B"] = df["fecha"].astype(str)
+    out["C"] = df["tipo"].astype(str)
+    out["D"] = df["sello"].astype(str)
+    # E: UUID sin guiones
+    out["E"] = df["gen"].astype(str).str.replace("-", "", regex=False).str.upper()
+    out["F"] = df["base"].map(lambda x: f"{float(x):.2f}")
+    out["G"] = df["ret"].map(lambda x: f"{float(x):.2f}")
+    out["H"] = ""   # DUI del agente (persona natural); vacío cuando se usa NIT
+    out["I"] = "7"
+    return out
+
+
+def to_csv_hacienda(df_hacienda: pd.DataFrame) -> bytes:
+    """CSV sin encabezados, sin separador de miles, listo para Hacienda."""
+    return df_hacienda.to_csv(index=False, header=False).encode("utf-8")
+
+
 def generar_excel(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -668,22 +708,45 @@ if not st.session_state.db_ret.empty:
 
     st.markdown("---")
 
-    # ── Descarga Excel ───────────────────────────────────────────────────────
-    col_dl1, col_dl2, _ = st.columns([2, 2, 2])
+    # ── Descarga ─────────────────────────────────────────────────────────────
+    st.markdown(
+        "<span class='badge-sistema'>EXPORTAR</span>",
+        unsafe_allow_html=True
+    )
+    st.markdown("")
+
+    col_h, col_dl1, col_dl2 = st.columns([2, 2, 2])
+
+    with col_h:
+        # ── Formato Hacienda (Casilla 162 / Anexo 7) ─────────────────────────
+        df_c162 = construir_df_hacienda_c162(df_fil)
+        st.markdown("**Formato Hacienda**")
+        st.caption("CSV listo para cargar · Casilla 162 · Anexo 7")
+        st.download_button(
+            "📤 CSV Hacienda — Casilla 162",
+            data=to_csv_hacienda(df_c162),
+            file_name=f"C162_Ret1pct_{cliente['nombre'].replace(' ','_')}.csv",
+            mime="text/csv",
+            type="primary",
+            use_container_width=True,
+        )
+
     with col_dl1:
         excel_bytes = generar_excel(df_fil, cliente['nombre'])
+        st.markdown("**Base de Trabajo (F-14)**")
+        st.caption("Excel con formato de auditoría")
         st.download_button(
-            "📥 Descargar Base para F-14 (Excel)",
+            "📥 Excel Auditoría F-14",
             data=excel_bytes,
             file_name=f"Retenciones_F14_{cliente['nombre'].replace(' ','_')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
+            type="secondary",
             use_container_width=True,
         )
     with col_dl2:
         csv_bytes = df_fil[list(cols_existentes.keys())].to_csv(index=False).encode("utf-8")
         st.download_button(
-            "📄 Descargar CSV",
+            "📄 CSV Auditoría",
             data=csv_bytes,
             file_name=f"Retenciones_F14_{cliente['nombre'].replace(' ','_')}.csv",
             mime="text/csv",

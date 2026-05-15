@@ -845,7 +845,14 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
 # ─────────────────────────────────────────────
 _CLASE_MAP_COMPRAS = {"03": "1", "05": "4", "06": "3", "11": "2"}
 
-def construir_df_f07_compras(df_in: pd.DataFrame) -> pd.DataFrame:
+def construir_df_f07_compras(
+    df_in: pd.DataFrame,
+    tipo_op: str = "1",
+    clasif: str = "2",
+    sector: str = "4",
+    tipo_cg: str = "2",
+    periodo_feb2024: bool = True,
+) -> pd.DataFrame:
     df_out = pd.DataFrame()
     df_out["A. Fecha Emisión"]           = df_in["fecha"]
     df_out["B. Clase Documento"]         = df_in["tipo"].astype(str).map(_CLASE_MAP_COMPRAS).fillna("1")
@@ -863,11 +870,17 @@ def construir_df_f07_compras(df_in: pd.DataFrame) -> pd.DataFrame:
     df_out["N. Crédito Fiscal (IVA)"]    = df_in["iva"]
     df_out["O. Total Compras"]           = df_in["tot"]
     df_out["P. DUI Proveedor"]           = df_in["dui_prov"].astype(str)
-    df_out["Q. Tipo Operación"]          = "1"
-    df_out["R. Clasificación"]           = "2"
-    df_out["S. Sector"]                  = "4"
-    df_out["T. Tipo Costo/Gasto"]        = "2"
-    df_out["U. Num Anexo"]               = "3"
+    if periodo_feb2024:
+        df_out["Q. Tipo Operación"]   = tipo_op
+        df_out["R. Clasificación"]    = clasif
+        df_out["S. Sector"]           = sector
+        df_out["T. Tipo Costo/Gasto"] = tipo_cg
+    else:
+        df_out["Q. Tipo Operación"]   = "0"
+        df_out["R. Clasificación"]    = "0"
+        df_out["S. Sector"]           = "0"
+        df_out["T. Tipo Costo/Gasto"] = "0"
+    df_out["U. Num Anexo"] = "3"
     return df_out
 
 
@@ -989,55 +1002,122 @@ def to_excel_hacienda_compras(df: pd.DataFrame) -> bytes:
     return output.getvalue()
 
 
+def to_csv_hacienda_compras(df_f07: pd.DataFrame) -> bytes:
+    """Exports Anexo 3 (Compras) as Hacienda CSV — no headers, 2 decimal places."""
+    df_exp = df_f07.copy()
+    cols_num = [c for c in df_exp.columns if df_exp[c].dtype == float]
+    for col in cols_num:
+        df_exp[col] = df_exp[col].apply(lambda v: f"{float(v):.2f}")
+    return df_exp.to_csv(index=False, header=False).encode("utf-8")
+
+
+_TIPO_OP_OPTS_C = {
+    "1 — Gravada": "1",
+    "2 — No Gravada o Exenta": "2",
+    "3 — Excluido / No Renta": "3",
+    "4 — Mixta": "4",
+}
+_CLASIF_OPTS_C = {
+    "1 — Bienes": "1",
+    "2 — Servicios": "2",
+    "3 — Bienes y Servicios": "3",
+}
+_SECTOR_OPTS_C = {
+    "1 — Agropecuario": "1",
+    "2 — Industria": "2",
+    "3 — Comercio": "3",
+    "4 — Servicios": "4",
+    "5 — Otro": "5",
+}
+_TIPO_CG_OPTS_C = {
+    "1 — Costo": "1",
+    "2 — Gasto": "2",
+    "3 — Costo y Gasto": "3",
+}
+
+
 @st.dialog("Confirmar Descarga de Compras")
-def ventana_descarga_compras(df_f07: pd.DataFrame, nombre_archivo: str) -> None:
+def ventana_descarga_compras(df_filtrado: pd.DataFrame, nombre_base: str) -> None:
     st.write(
-        "Verifica los totales. El archivo está listo para cargar en el portal "
-        "de Hacienda como **Anexo 3**."
+        "Configura las columnas clasificatorias (Q-T) y descarga el archivo "
+        "para cargar en el portal de Hacienda como **Anexo 3**."
     )
 
-    # Validación matemática: Gravadas + IVA + Exentas ≠ Total
-    if "J. Compras Gravadas" in df_f07.columns and "O. Total Compras" in df_f07.columns:
-        alertas_c = []
-        for _, row in df_f07.iterrows():
-            esperado = round(
-                float(row.get("J. Compras Gravadas", 0))
-                + float(row.get("N. Crédito Fiscal (IVA)", 0))
-                + float(row.get("G. Compras Exentas/NS", 0)), 2
-            )
-            real = round(float(row.get("O. Total Compras", 0)), 2)
-            if real > 0 and abs(esperado - real) > 0.50:
-                alertas_c.append({"doc": row.get("D. Num Documento (UUID)", "—"), "diff": abs(esperado - real)})
-        if alertas_c:
-            with st.expander(f"⚠️ {len(alertas_c)} fila(s) con posible inconsistencia matemática"):
-                for a in alertas_c[:8]:
-                    st.markdown(
-                        f'<div class="math-warn">📄 <code>{safe_str(a["doc"])[:20]}…</code> '
-                        f'— diferencia: <strong>${a["diff"]:,.2f}</strong></div>',
-                        unsafe_allow_html=True
-                    )
+    col_p, col_q = st.columns(2)
+    with col_p:
+        periodo_lbl = st.selectbox(
+            "Período",
+            ["Feb 2024 en adelante", "Anterior a feb 2024"],
+            index=0,
+        )
+    periodo_feb2024 = periodo_lbl == "Feb 2024 en adelante"
 
-    resumen_cols = {
-        "G. Compras Exentas/NS"  : "Exentas/NS",
-        "J. Compras Gravadas"    : "Gravadas",
-        "N. Crédito Fiscal (IVA)": "IVA",
-        "O. Total Compras"       : "Total",
-    }
+    if periodo_feb2024:
+        col_r, col_s = st.columns(2)
+        col_t, _ = st.columns(2)
+        with col_q:
+            tipo_op_lbl = st.selectbox("Q — Tipo Operación", list(_TIPO_OP_OPTS_C.keys()), index=0)
+        with col_r:
+            clasif_lbl = st.selectbox("R — Clasificación", list(_CLASIF_OPTS_C.keys()), index=1)
+        with col_s:
+            sector_lbl = st.selectbox("S — Sector", list(_SECTOR_OPTS_C.keys()), index=3)
+        with col_t:
+            tipo_cg_lbl = st.selectbox("T — Tipo Costo/Gasto", list(_TIPO_CG_OPTS_C.keys()), index=1)
+        tipo_op = _TIPO_OP_OPTS_C[tipo_op_lbl]
+        clasif  = _CLASIF_OPTS_C[clasif_lbl]
+        sector  = _SECTOR_OPTS_C[sector_lbl]
+        tipo_cg = _TIPO_CG_OPTS_C[tipo_cg_lbl]
+    else:
+        tipo_op = clasif = sector = tipo_cg = "0"
+
+    df_f07 = construir_df_f07_compras(df_filtrado, tipo_op, clasif, sector, tipo_cg, periodo_feb2024)
+
+    # Validación matemática
+    alertas_c = []
+    for _, row in df_f07.iterrows():
+        esperado = round(
+            float(row.get("J. Compras Gravadas", 0))
+            + float(row.get("N. Crédito Fiscal (IVA)", 0))
+            + float(row.get("G. Compras Exentas/NS", 0)), 2
+        )
+        real = round(float(row.get("O. Total Compras", 0)), 2)
+        if real > 0 and abs(esperado - real) > 0.50:
+            alertas_c.append({"doc": row.get("D. Num Documento (UUID)", "—"), "diff": abs(esperado - real)})
+    if alertas_c:
+        with st.expander(f"⚠️ {len(alertas_c)} fila(s) con posible inconsistencia matemática"):
+            for a in alertas_c[:8]:
+                st.markdown(
+                    f'<div class="math-warn">📄 <code>{safe_str(a["doc"])[:20]}…</code> '
+                    f'— diferencia: <strong>${a["diff"]:,.2f}</strong></div>',
+                    unsafe_allow_html=True
+                )
+
     col1, col2, col3, col4 = st.columns(4)
-    for col_key, label, col_obj in zip(
-        resumen_cols.keys(), resumen_cols.values(), [col1, col2, col3, col4]
-    ):
-        if col_key in df_f07.columns:
-            col_obj.metric(label, f"${df_f07[col_key].sum():,.2f}")
+    col1.metric("Exentas/NS", f"${df_f07['G. Compras Exentas/NS'].sum():,.2f}")
+    col2.metric("Gravadas",   f"${df_f07['J. Compras Gravadas'].sum():,.2f}")
+    col3.metric("IVA",        f"${df_f07['N. Crédito Fiscal (IVA)'].sum():,.2f}")
+    col4.metric("Total",      f"${df_f07['O. Total Compras'].sum():,.2f}")
 
-    st.download_button(
-        "📥 Confirmar y Descargar Anexo 3",
-        data=to_excel_hacienda_compras(df_f07),
-        file_name=nombre_archivo,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary",
-        use_container_width=True,
-    )
+    st.markdown("---")
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        st.download_button(
+            "📤 CSV Hacienda — Detalle Compras (Anexo 3)",
+            data=to_csv_hacienda_compras(df_f07),
+            file_name=f"Anexo3_Compras_{nombre_base}.csv",
+            mime="text/csv",
+            type="primary",
+            use_container_width=True,
+        )
+    with col_dl2:
+        st.download_button(
+            "📊 Excel Auditoría",
+            data=to_excel_hacienda_compras(df_f07),
+            file_name=f"F07_Compras_{nombre_base}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="secondary",
+            use_container_width=True,
+        )
 
 
 # ─────────────────────────────────────────────
@@ -1898,10 +1978,10 @@ if not st.session_state.db_compras.empty:
                 "antes de subir a Hacienda."
             )
 
-            if st.button("📥 Generar Excel para Hacienda", type="primary"):
+            if st.button("📥 Generar / Descargar Compras", type="primary"):
                 ventana_descarga_compras(
-                    df_f07,
-                    f"F07_Compras_{safe_str(cliente.get('nombre','')).replace(' ','_')}.xlsx",
+                    df_filtrado,
+                    safe_str(cliente.get("nombre", "")).replace(" ", "_"),
                 )
         else:
             st.info("Sin compras que mostrar con el filtro actual.")

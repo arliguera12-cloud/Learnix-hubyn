@@ -536,6 +536,206 @@ def generar_excel_retencion(df: pd.DataFrame, nombre_cliente: str) -> bytes:
     return buf.getvalue()
 
 
+# ══════════════════════════════════════════════════════════════
+# FORMATO HACIENDA — CASILLA 66 / ANEXO 5
+# Compras a Sujetos Excluidos (13 columnas A-M)
+# ══════════════════════════════════════════════════════════════
+
+def construir_df_hacienda_c66(
+    df: pd.DataFrame,
+    tipo_op: str = "1",
+    clasif: str  = "2",
+    sector: str  = "4",
+    tipo_cg: str = "1",
+    periodo_feb2024: bool = True,
+) -> pd.DataFrame:
+    """
+    Genera el DataFrame con la estructura exacta requerida por Hacienda
+    para la Casilla 66 — Compras a Sujetos Excluidos (Anexo 5).
+
+    Columnas A-M según Manual F-07:
+      A  Tipo de Documento (1=NIT, 2=DUI, 3=Otro)
+      B  Número NIT/DUI/Otro (sin guiones)
+      C  Nombre, Razón Social o Denominación
+      D  Fecha de Emisión DD/MM/AAAA
+      E  Número de Serie (Sello de Recepción del DTE)
+      F  Número de Documento (Código de Generación SIN guiones)
+      G  Monto de la Operación
+      H  Monto de la Retención IVA 13% (0.00 si no aplica)
+      I  Tipo de Operación (desde Feb 2024; "0" si anterior)
+      J  Clasificación (desde Feb 2024; "0" si anterior)
+      K  Sector (desde Feb 2024; "0" si anterior)
+      L  Tipo de Costo/Gasto (desde Feb 2024; "0" si anterior)
+      M  Número de Anexo = 5
+    """
+    def _tipo_doc(id_str: str) -> str:
+        clean = re.sub(r"[^0-9]", "", str(id_str))
+        if len(clean) == 14:
+            return "1"   # NIT
+        if len(clean) == 9:
+            return "2"   # DUI
+        return "3"       # Otro
+
+    def _iva13(base_val: float, t_op: str) -> str:
+        # Solo aplica si la operación es Gravada (tipo 1) o Mixta (tipo 4)
+        if t_op in ("1", "4"):
+            return f"{round(float(base_val) * 0.13, 2):.2f}"
+        return "0.00"
+
+    out = pd.DataFrame()
+    out["A"] = df["id_sujeto"].apply(_tipo_doc)
+    out["B"] = df["id_sujeto"].astype(str).str.replace(r"[^0-9]", "", regex=True)
+    out["C"] = df["nom_sujeto"].astype(str)
+    out["D"] = df["fecha"].astype(str)
+    out["E"] = df["sello"].astype(str)
+    out["F"] = df["gen"].astype(str).str.replace("-", "", regex=False).str.upper()
+    out["G"] = df["base"].map(lambda x: f"{float(x):.2f}")
+    out["H"] = df["base"].apply(lambda x: _iva13(x, tipo_op))
+    if periodo_feb2024:
+        out["I"] = tipo_op
+        out["J"] = clasif
+        out["K"] = sector
+        out["L"] = tipo_cg
+    else:
+        out["I"] = "0"
+        out["J"] = "0"
+        out["K"] = "0"
+        out["L"] = "0"
+    out["M"] = "5"
+    return out
+
+
+def to_csv_hacienda_c66(df_hacienda: pd.DataFrame) -> bytes:
+    """CSV sin encabezados, listo para Hacienda (Casilla 66)."""
+    return df_hacienda.to_csv(index=False, header=False).encode("utf-8")
+
+
+_CODIGOS_INGRESO_F14 = {
+    "0601 — Honorarios / Servicios Profesionales": "0601",
+    "0701 — Agropecuario": "0701",
+    "0801 — Arrendamiento Bienes Muebles": "0801",
+    "0901 — Arrendamiento Bienes Inmuebles": "0901",
+    "1001 — Otros Ingresos": "1001",
+}
+
+_TIPO_OP_F14 = {
+    "1 — Gravada": "1",
+    "2 — No Gravada": "2",
+    "3 — Excluido / No Renta": "3",
+    "4 — Mixta": "4",
+}
+_CLASIF_F14 = {"1 — Costo": "1", "2 — Gasto": "2"}
+_SECTOR_F14 = {
+    "1 — Industria": "1",
+    "2 — Comercio": "2",
+    "3 — Agropecuaria": "3",
+    "4 — Servicios / Prof. / Artes y Oficios": "4",
+}
+_TIPO_CG_F14 = {
+    "1 — Gastos de Venta sin Donación": "1",
+    "2 — Gastos de Admón. sin Donación": "2",
+    "3 — Gastos Financieros sin Donación": "3",
+    "4 — Costo Art. Prod./Comprados Import./Internac.": "4",
+    "5 — Costo Art. Prod./Comprados Interno": "5",
+    "6 — Costos Indirectos de Fabricación": "6",
+    "7 — Mano de Obra": "7",
+}
+
+_CORTE_DUI_F14 = pd.Timestamp(2022, 1, 1)
+
+
+def construir_df_f14_isr(
+    df: pd.DataFrame,
+    codigo_ingreso: str = "0601",
+    periodo: str = "012024",
+    tipo_op: str = "3",
+    clasif: str = "2",
+    sector: str = "4",
+    tipo_cg: str = "2",
+    periodo_feb2024: bool = True,
+) -> pd.DataFrame:
+    """
+    Genera el CSV Anexo F-14 (ISR Retenciones) — 23 columnas A-W.
+
+    A  Domiciliado (1=Dom, 2=NoDom)
+    B  Código de País (SLV para domiciliados)
+    C  Apellidos, Nombres, Razón Social (max 100 chars)
+    D  NIT/NIF (vacío si natural con DUI desde ene 2022)
+    E  DUI (9 dígitos; vacío si jurídico o NIT sin DUI)
+    F  Código de Ingreso (5 chars)
+    G  Monto Devengado
+    H  Monto Devengado por Bonificaciones/Gratificaciones (0)
+    I  Impuesto Retenido
+    J  Aguinaldo Exento (0)
+    K  Aguinaldo Gravado (0)
+    L  AFP (0)
+    M  ISSS (0)
+    N  INPEP (0)
+    O  IPSFA (0)
+    P  CEFAFA (0)
+    Q  Bienestar Magisterial (0)
+    R  ISS-VM (0)
+    S  Tipo de Operación (desde Feb 2024; '0' si anterior)
+    T  Clasificación (desde Feb 2024; '0' si anterior)
+    U  Sector (desde Feb 2024; '0' si anterior)
+    V  Tipo de Costo/Gasto (desde Feb 2024; '0' si anterior)
+    W  Período MMYYYY
+    """
+    def _limpio(val: str) -> str:
+        return re.sub(r"[^0-9]", "", str(val or ""))
+
+    def _parse_fecha(fecha_str: str) -> pd.Timestamp:
+        try:
+            p = str(fecha_str).strip().split("/")
+            if len(p) == 3:
+                return pd.Timestamp(int(p[2]), int(p[1]), int(p[0]))
+        except Exception:
+            pass
+        return pd.NaT
+
+    col_d, col_e = [], []
+    for id_raw, fecha_str in zip(df["id_sujeto"].astype(str), df["fecha"].astype(str)):
+        limpio = _limpio(id_raw)
+        ts = _parse_fecha(fecha_str)
+        es_2022_plus = ts is not pd.NaT and ts >= _CORTE_DUI_F14
+        if len(limpio) == 9 and es_2022_plus:
+            col_d.append("")
+            col_e.append(limpio)
+        else:
+            col_d.append(limpio)
+            col_e.append("")
+
+    out = pd.DataFrame()
+    out["A"] = "1"
+    out["B"] = "SLV"
+    out["C"] = df["nom_sujeto"].astype(str).str[:100]
+    out["D"] = col_d
+    out["E"] = col_e
+    out["F"] = codigo_ingreso
+    out["G"] = df["base"].map(lambda x: f"{float(x):.2f}")
+    out["H"] = "0.00"
+    out["I"] = df["ret"].map(lambda x: f"{float(x):.2f}")
+    for col_lbl in ("J", "K", "L", "M", "N", "O", "P", "Q", "R"):
+        out[col_lbl] = "0.00"
+    if periodo_feb2024:
+        out["S"] = tipo_op
+        out["T"] = clasif
+        out["U"] = sector
+        out["V"] = tipo_cg
+    else:
+        out["S"] = "0"
+        out["T"] = "0"
+        out["U"] = "0"
+        out["V"] = "0"
+    out["W"] = periodo
+    return out
+
+
+def to_csv_f14_isr(df_f14: pd.DataFrame) -> bytes:
+    """CSV sin encabezados, listo para cargar en F-14 de Hacienda."""
+    return df_f14.to_csv(index=False, header=False).encode("utf-8")
+
+
 # ─────────────────────────────────────────────
 # 5. ENCABEZADO
 # ─────────────────────────────────────────────
@@ -704,29 +904,208 @@ if not st.session_state.db_sujetos.empty:
 
     st.markdown("---")
 
-    col1, col2 = st.columns(2)
+    # ── Configuración para Casilla 66 ────────────────────────────────────────
+    st.markdown(
+        "<span class='badge-sistema'>EXPORTAR — CASILLA 66</span>",
+        unsafe_allow_html=True
+    )
+    st.markdown("")
+    st.caption(
+        "Configura los campos de clasificación requeridos por Hacienda "
+        "(aplica desde Febrero 2024). El sistema los aplica igual a todos los registros. "
+        "Puedes editar el CSV luego si hay documentos con clasificación distinta."
+    )
+
+    cc1, cc2, cc3, cc4, cc5 = st.columns(5)
+    with cc1:
+        sel_periodo = st.selectbox(
+            "Periodo",
+            ["Feb 2024 en adelante", "Anterior a Feb 2024"],
+            key="c66_periodo",
+        )
+    with cc2:
+        sel_tipo_op = st.selectbox(
+            "Tipo de Operación (I)",
+            ["1 — Gravada", "2 — No Gravada", "3 — Excluido/No Renta", "4 — Mixta"],
+            key="c66_tipo_op",
+        )
+    with cc3:
+        sel_clasif = st.selectbox(
+            "Clasificación (J)",
+            ["1 — Costo", "2 — Gasto"],
+            key="c66_clasif",
+        )
+    with cc4:
+        sel_sector = st.selectbox(
+            "Sector (K)",
+            ["1 — Industria", "2 — Comercio", "3 — Agropecuaria", "4 — Servicios/Prof."],
+            key="c66_sector",
+            index=3,
+        )
+    with cc5:
+        sel_tipocg = st.selectbox(
+            "Tipo Costo/Gasto (L)",
+            [
+                "1 — Gastos de Venta",
+                "2 — Gastos de Admón.",
+                "3 — Gastos Financieros",
+                "4 — Costo Art. Import.",
+                "5 — Costo Art. Interno",
+                "6 — Costos Ind. Fab.",
+                "7 — Mano de obra",
+            ],
+            key="c66_tipocg",
+        )
+
+    st.markdown("")
+
+    col_h, col1, col2 = st.columns([2, 2, 2])
+
+    with col_h:
+        df_c66 = construir_df_hacienda_c66(
+            df,
+            tipo_op=sel_tipo_op[0],
+            clasif=sel_clasif[0],
+            sector=sel_sector[0],
+            tipo_cg=sel_tipocg[0],
+            periodo_feb2024=(sel_periodo == "Feb 2024 en adelante"),
+        )
+        st.markdown("**Formato Hacienda**")
+        st.caption("CSV listo para cargar · Casilla 66 · Anexo 5")
+        st.download_button(
+            "📤 CSV Hacienda — Casilla 66",
+            data=to_csv_hacienda_c66(df_c66),
+            file_name=f"C66_SujetosExcluidos_{cliente['nombre'].replace(' ','_')}.csv",
+            mime="text/csv",
+            type="primary",
+            use_container_width=True,
+        )
 
     with col1:
         excel_libro = generar_excel_libro(df, cliente['nombre'])
+        st.markdown("**Libro Sujeto Excluido**")
+        st.caption("Excel formato auditoría F-14")
         st.download_button(
-            "📥 Libro Sujeto Excluido (F-14)",
+            "📥 Excel Libro F-14",
             data=excel_libro,
             file_name=f"Libro_Sujeto_Excluido_{cliente['nombre'].replace(' ','_')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
+            type="secondary",
             use_container_width=True
         )
 
     with col2:
         excel_ret = generar_excel_retencion(df, cliente['nombre'])
+        st.markdown("**Retención Honorarios**")
+        st.caption("Excel retención 10% ISR · F-14")
         st.download_button(
-            "📥 Retención Honorarios (F-14)",
+            "📥 Excel Ret. Honorarios",
             data=excel_ret,
             file_name=f"Retencion_Honorarios_{cliente['nombre'].replace(' ','_')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
+            type="secondary",
             use_container_width=True
         )
+
+    # ── Exportar F-14 ISR (Hacienda CSV oficial) ─────────────────────────────
+    st.markdown("---")
+    st.markdown(
+        "<span class='badge-sistema'>EXPORTAR — F-14 ISR (RETENCIONES RENTA)</span>",
+        unsafe_allow_html=True
+    )
+    st.markdown("")
+    st.caption(
+        "Genera el archivo CSV en el formato exacto del Ministerio de Hacienda "
+        "para cargar en la declaración F-14 (Retenciones de Impuesto sobre la Renta · Sujetos Domiciliados). "
+        "23 columnas A-W. Columnas S-V aplican desde Febrero 2024."
+    )
+
+    f14_r1c1, f14_r1c2, f14_r1c3 = st.columns(3)
+    with f14_r1c1:
+        sel_cod_ingreso = st.selectbox(
+            "F — Código de Ingreso",
+            list(_CODIGOS_INGRESO_F14.keys()),
+            key="f14_cod_ingreso",
+        )
+    with f14_r1c2:
+        f14_mes = st.selectbox(
+            "Período — Mes",
+            ["01","02","03","04","05","06","07","08","09","10","11","12"],
+            key="f14_mes",
+        )
+    with f14_r1c3:
+        import datetime as _dt
+        anio_actual = _dt.date.today().year
+        f14_anio = st.selectbox(
+            "Período — Año",
+            [str(a) for a in range(anio_actual, 2020, -1)],
+            key="f14_anio",
+        )
+
+    f14_periodo_str = f14_mes + f14_anio
+
+    f14_c1, f14_c2, f14_c3, f14_c4, f14_c5 = st.columns(5)
+    with f14_c1:
+        f14_per_lbl = st.selectbox(
+            "Período S-V",
+            ["Feb 2024 en adelante", "Anterior a Feb 2024"],
+            key="f14_periodo",
+        )
+    with f14_c2:
+        f14_tipo_op_lbl = st.selectbox(
+            "S — Tipo Operación",
+            list(_TIPO_OP_F14.keys()),
+            index=2,
+            key="f14_tipo_op",
+        )
+    with f14_c3:
+        f14_clasif_lbl = st.selectbox(
+            "T — Clasificación",
+            list(_CLASIF_F14.keys()),
+            index=1,
+            key="f14_clasif",
+        )
+    with f14_c4:
+        f14_sector_lbl = st.selectbox(
+            "U — Sector",
+            list(_SECTOR_F14.keys()),
+            index=3,
+            key="f14_sector",
+        )
+    with f14_c5:
+        f14_tipocg_lbl = st.selectbox(
+            "V — Tipo Costo/Gasto",
+            list(_TIPO_CG_F14.keys()),
+            index=1,
+            key="f14_tipocg",
+        )
+
+    df_f14 = construir_df_f14_isr(
+        df,
+        codigo_ingreso=_CODIGOS_INGRESO_F14[sel_cod_ingreso],
+        periodo=f14_periodo_str,
+        tipo_op=_TIPO_OP_F14[f14_tipo_op_lbl],
+        clasif=_CLASIF_F14[f14_clasif_lbl],
+        sector=_SECTOR_F14[f14_sector_lbl],
+        tipo_cg=_TIPO_CG_F14[f14_tipocg_lbl],
+        periodo_feb2024=(f14_per_lbl == "Feb 2024 en adelante"),
+    )
+
+    col_f14_dl, _ = st.columns([2, 4])
+    with col_f14_dl:
+        st.download_button(
+            "📤 CSV Hacienda — F-14 ISR (Retenciones Renta)",
+            data=to_csv_f14_isr(df_f14),
+            file_name=f"F14_ISR_{cliente['nombre'].replace(' ','_')}_{f14_periodo_str}.csv",
+            mime="text/csv",
+            type="primary",
+            use_container_width=True,
+        )
+    st.caption(
+        f"Período: **{f14_mes}/{f14_anio}** · Registros: **{len(df_f14)}** · "
+        f"Total Devengado: **${df['base'].sum():,.2f}** · "
+        f"Total ISR Retenido: **${df['ret'].sum():,.2f}**"
+    )
 
 else:
     st.markdown("""
