@@ -1,29 +1,28 @@
 # ═══════════════════════════════════════════════════════════════
 #  .streamlit/config.toml
 #  Learnix DTE Hub — Configuración Global
-#  Tema: Midnight Forest Professional · Modo Oscuro
+#  Tema: Teal Navy Pro · Modo Oscuro Corporativo
 # ═══════════════════════════════════════════════════════════════
 
 [theme]
-base                   = "dark"
-primaryColor           = "#5EA830"
-backgroundColor        = "#080C09"
-secondaryBackgroundColor = "#0D1410"
-textColor              = "#E0EED8"
-font                   = "sans serif"
+base                     = "dark"
+primaryColor             = "#568F7C"
+backgroundColor          = "#000009"
+secondaryBackgroundColor = "#07142B"
+textColor                = "#BDD1BD"
+font                     = "sans serif"
 
 [server]
-maxUploadSize      = 500
+maxUploadSize        = 500
 enableXsrfProtection = true
-enableCORS         = false
-maxMessageSize     = 200
+enableCORS           = false
+maxMessageSize       = 200
 
 [runner]
 fastReruns = true
 
 [browser]
 gatherUsageStats = false
-serverAddress    = "localhost"
 
 [ui]
 hideTopBar = true
