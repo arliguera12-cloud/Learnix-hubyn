@@ -610,6 +610,132 @@ def to_csv_hacienda_c66(df_hacienda: pd.DataFrame) -> bytes:
     return df_hacienda.to_csv(index=False, header=False).encode("utf-8")
 
 
+_CODIGOS_INGRESO_F14 = {
+    "0601 — Honorarios / Servicios Profesionales": "0601",
+    "0701 — Agropecuario": "0701",
+    "0801 — Arrendamiento Bienes Muebles": "0801",
+    "0901 — Arrendamiento Bienes Inmuebles": "0901",
+    "1001 — Otros Ingresos": "1001",
+}
+
+_TIPO_OP_F14 = {
+    "1 — Gravada": "1",
+    "2 — No Gravada": "2",
+    "3 — Excluido / No Renta": "3",
+    "4 — Mixta": "4",
+}
+_CLASIF_F14 = {"1 — Costo": "1", "2 — Gasto": "2"}
+_SECTOR_F14 = {
+    "1 — Industria": "1",
+    "2 — Comercio": "2",
+    "3 — Agropecuaria": "3",
+    "4 — Servicios / Prof. / Artes y Oficios": "4",
+}
+_TIPO_CG_F14 = {
+    "1 — Gastos de Venta sin Donación": "1",
+    "2 — Gastos de Admón. sin Donación": "2",
+    "3 — Gastos Financieros sin Donación": "3",
+    "4 — Costo Art. Prod./Comprados Import./Internac.": "4",
+    "5 — Costo Art. Prod./Comprados Interno": "5",
+    "6 — Costos Indirectos de Fabricación": "6",
+    "7 — Mano de Obra": "7",
+}
+
+_CORTE_DUI_F14 = pd.Timestamp(2022, 1, 1)
+
+
+def construir_df_f14_isr(
+    df: pd.DataFrame,
+    codigo_ingreso: str = "0601",
+    periodo: str = "012024",
+    tipo_op: str = "3",
+    clasif: str = "2",
+    sector: str = "4",
+    tipo_cg: str = "2",
+    periodo_feb2024: bool = True,
+) -> pd.DataFrame:
+    """
+    Genera el CSV Anexo F-14 (ISR Retenciones) — 23 columnas A-W.
+
+    A  Domiciliado (1=Dom, 2=NoDom)
+    B  Código de País (SLV para domiciliados)
+    C  Apellidos, Nombres, Razón Social (max 100 chars)
+    D  NIT/NIF (vacío si natural con DUI desde ene 2022)
+    E  DUI (9 dígitos; vacío si jurídico o NIT sin DUI)
+    F  Código de Ingreso (5 chars)
+    G  Monto Devengado
+    H  Monto Devengado por Bonificaciones/Gratificaciones (0)
+    I  Impuesto Retenido
+    J  Aguinaldo Exento (0)
+    K  Aguinaldo Gravado (0)
+    L  AFP (0)
+    M  ISSS (0)
+    N  INPEP (0)
+    O  IPSFA (0)
+    P  CEFAFA (0)
+    Q  Bienestar Magisterial (0)
+    R  ISS-VM (0)
+    S  Tipo de Operación (desde Feb 2024; '0' si anterior)
+    T  Clasificación (desde Feb 2024; '0' si anterior)
+    U  Sector (desde Feb 2024; '0' si anterior)
+    V  Tipo de Costo/Gasto (desde Feb 2024; '0' si anterior)
+    W  Período MMYYYY
+    """
+    def _limpio(val: str) -> str:
+        return re.sub(r"[^0-9]", "", str(val or ""))
+
+    def _parse_fecha(fecha_str: str) -> pd.Timestamp:
+        try:
+            p = str(fecha_str).strip().split("/")
+            if len(p) == 3:
+                return pd.Timestamp(int(p[2]), int(p[1]), int(p[0]))
+        except Exception:
+            pass
+        return pd.NaT
+
+    col_d, col_e = [], []
+    for id_raw, fecha_str in zip(df["id_sujeto"].astype(str), df["fecha"].astype(str)):
+        limpio = _limpio(id_raw)
+        ts = _parse_fecha(fecha_str)
+        es_2022_plus = ts is not pd.NaT and ts >= _CORTE_DUI_F14
+        if len(limpio) == 9 and es_2022_plus:
+            col_d.append("")
+            col_e.append(limpio)
+        else:
+            col_d.append(limpio)
+            col_e.append("")
+
+    out = pd.DataFrame()
+    out["A"] = "1"
+    out["B"] = "SLV"
+    out["C"] = df["nom_sujeto"].astype(str).str[:100]
+    out["D"] = col_d
+    out["E"] = col_e
+    out["F"] = codigo_ingreso
+    out["G"] = df["base"].map(lambda x: f"{float(x):.2f}")
+    out["H"] = "0.00"
+    out["I"] = df["ret"].map(lambda x: f"{float(x):.2f}")
+    for col_lbl in ("J", "K", "L", "M", "N", "O", "P", "Q", "R"):
+        out[col_lbl] = "0.00"
+    if periodo_feb2024:
+        out["S"] = tipo_op
+        out["T"] = clasif
+        out["U"] = sector
+        out["V"] = tipo_cg
+    else:
+        out["S"] = "0"
+        out["T"] = "0"
+        out["U"] = "0"
+        out["V"] = "0"
+    out["W"] = periodo
+    return out
+
+
+def to_csv_f14_isr(df_f14: pd.DataFrame) -> bytes:
+    """CSV sin encabezados, listo para cargar en F-14 de Hacienda."""
+    return df_f14.to_csv(index=False, header=False).encode("utf-8")
+
+
 # ─────────────────────────────────────────────
 # 5. ENCABEZADO
 # ─────────────────────────────────────────────
@@ -880,6 +1006,106 @@ if not st.session_state.db_sujetos.empty:
             type="secondary",
             use_container_width=True
         )
+
+    # ── Exportar F-14 ISR (Hacienda CSV oficial) ─────────────────────────────
+    st.markdown("---")
+    st.markdown(
+        "<span class='badge-sistema'>EXPORTAR — F-14 ISR (RETENCIONES RENTA)</span>",
+        unsafe_allow_html=True
+    )
+    st.markdown("")
+    st.caption(
+        "Genera el archivo CSV en el formato exacto del Ministerio de Hacienda "
+        "para cargar en la declaración F-14 (Retenciones de Impuesto sobre la Renta · Sujetos Domiciliados). "
+        "23 columnas A-W. Columnas S-V aplican desde Febrero 2024."
+    )
+
+    f14_r1c1, f14_r1c2, f14_r1c3 = st.columns(3)
+    with f14_r1c1:
+        sel_cod_ingreso = st.selectbox(
+            "F — Código de Ingreso",
+            list(_CODIGOS_INGRESO_F14.keys()),
+            key="f14_cod_ingreso",
+        )
+    with f14_r1c2:
+        f14_mes = st.selectbox(
+            "Período — Mes",
+            ["01","02","03","04","05","06","07","08","09","10","11","12"],
+            key="f14_mes",
+        )
+    with f14_r1c3:
+        import datetime as _dt
+        anio_actual = _dt.date.today().year
+        f14_anio = st.selectbox(
+            "Período — Año",
+            [str(a) for a in range(anio_actual, 2020, -1)],
+            key="f14_anio",
+        )
+
+    f14_periodo_str = f14_mes + f14_anio
+
+    f14_c1, f14_c2, f14_c3, f14_c4, f14_c5 = st.columns(5)
+    with f14_c1:
+        f14_per_lbl = st.selectbox(
+            "Período S-V",
+            ["Feb 2024 en adelante", "Anterior a Feb 2024"],
+            key="f14_periodo",
+        )
+    with f14_c2:
+        f14_tipo_op_lbl = st.selectbox(
+            "S — Tipo Operación",
+            list(_TIPO_OP_F14.keys()),
+            index=2,
+            key="f14_tipo_op",
+        )
+    with f14_c3:
+        f14_clasif_lbl = st.selectbox(
+            "T — Clasificación",
+            list(_CLASIF_F14.keys()),
+            index=1,
+            key="f14_clasif",
+        )
+    with f14_c4:
+        f14_sector_lbl = st.selectbox(
+            "U — Sector",
+            list(_SECTOR_F14.keys()),
+            index=3,
+            key="f14_sector",
+        )
+    with f14_c5:
+        f14_tipocg_lbl = st.selectbox(
+            "V — Tipo Costo/Gasto",
+            list(_TIPO_CG_F14.keys()),
+            index=1,
+            key="f14_tipocg",
+        )
+
+    df_f14 = construir_df_f14_isr(
+        df,
+        codigo_ingreso=_CODIGOS_INGRESO_F14[sel_cod_ingreso],
+        periodo=f14_periodo_str,
+        tipo_op=_TIPO_OP_F14[f14_tipo_op_lbl],
+        clasif=_CLASIF_F14[f14_clasif_lbl],
+        sector=_SECTOR_F14[f14_sector_lbl],
+        tipo_cg=_TIPO_CG_F14[f14_tipocg_lbl],
+        periodo_feb2024=(f14_per_lbl == "Feb 2024 en adelante"),
+    )
+
+    col_f14_dl, _ = st.columns([2, 4])
+    with col_f14_dl:
+        st.download_button(
+            "📤 CSV Hacienda — F-14 ISR (Retenciones Renta)",
+            data=to_csv_f14_isr(df_f14),
+            file_name=f"F14_ISR_{cliente['nombre'].replace(' ','_')}_{f14_periodo_str}.csv",
+            mime="text/csv",
+            type="primary",
+            use_container_width=True,
+        )
+    st.caption(
+        f"Período: **{f14_mes}/{f14_anio}** · Registros: **{len(df_f14)}** · "
+        f"Total Devengado: **${df['base'].sum():,.2f}** · "
+        f"Total ISR Retenido: **${df['ret'].sum():,.2f}**"
+    )
 
 else:
     st.markdown("""
