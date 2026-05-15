@@ -9,3 +9,5 @@ PyMuPDF>=1.23.0
 # Plan C - OCR Tesseract para UUID en PDFs escaneados sin QR (packages.txt: tesseract-ocr)
 pytesseract>=0.3.1
 pyzbar
+# Supabase backend
+supabase>=2.4.0

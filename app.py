@@ -5,6 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from styles import DARK_PRO_CSS
+from utils.supabase_client import login, logout, session_activa
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG
@@ -15,21 +16,6 @@ st.set_page_config(
     page_icon="⚡",
     initial_sidebar_state="collapsed"
 )
-
-# ─────────────────────────────────────────────
-# CREDENCIALES
-# ─────────────────────────────────────────────
-def verificar_credenciales(usuario: str, clave: str) -> bool:
-    try:
-        usr_valido = st.secrets["auth"]["usuario"]
-        pwd_valido = st.secrets["auth"]["clave"]
-        return usuario.strip().lower() == usr_valido.lower() and clave == pwd_valido
-    except (KeyError, FileNotFoundError):
-        usr_env = os.environ.get("APP_USUARIO", "")
-        pwd_env = os.environ.get("APP_CLAVE",   "")
-        if not usr_env or not pwd_env:
-            return False
-        return usuario.strip().lower() == usr_env.lower() and clave == pwd_env
 
 # ─────────────────────────────────────────────
 # ESTILOS GLOBALES
@@ -64,7 +50,7 @@ if not st.session_state["autenticado"]:
         st.markdown('<div class="login-logo">YN</div>', unsafe_allow_html=True)
         st.markdown('<span class="login-badge">LEARNIX &nbsp;·&nbsp; DTE HUB</span>', unsafe_allow_html=True)
         st.markdown('<p class="login-title">Bienvenido de nuevo</p>', unsafe_allow_html=True)
-        st.markdown('<p class="login-sub">Ingresa tus credenciales para acceder al sistema.</p>', unsafe_allow_html=True)
+        st.markdown('<p class="login-sub">Ingresa tu correo y contraseña para acceder al sistema.</p>', unsafe_allow_html=True)
 
         # Estado de bloqueo / intentos
         ahora        = time.time()
@@ -92,9 +78,9 @@ if not st.session_state["autenticado"]:
                 )
 
             with st.form("login_form", clear_on_submit=False):
-                usuario = st.text_input(
-                    "Usuario",
-                    placeholder="tu.usuario",
+                email = st.text_input(
+                    "Correo electrónico",
+                    placeholder="contador@firma.com",
                     label_visibility="visible"
                 )
                 clave = st.text_input(
@@ -113,28 +99,27 @@ if not st.session_state["autenticado"]:
                 )
 
                 if submitted:
-                    if not usuario.strip():
-                        st.error("El campo usuario es obligatorio.")
+                    if not email.strip():
+                        st.error("El correo electrónico es obligatorio.")
                     elif not clave:
-                        st.error("El campo contraseña es obligatorio.")
-                    elif verificar_credenciales(usuario, clave):
-                        st.session_state["autenticado"]     = True
-                        st.session_state["intentos_login"]  = 0
-                        st.session_state["bloqueado_hasta"] = 0
-                        st.session_state["confirmar_logout"] = False
-                        st.rerun()
+                        st.error("La contraseña es obligatoria.")
                     else:
-                        st.session_state["intentos_login"] += 1
-                        n = st.session_state["intentos_login"]
-                        if n >= 5:
-                            st.session_state["bloqueado_hasta"] = time.time() + 60
-                            st.error("⛔ Demasiados intentos. Sistema bloqueado **60 segundos**.")
+                        exito, msg_error = login(email.strip(), clave)
+                        if exito:
+                            st.session_state["confirmar_logout"] = False
+                            st.rerun()
                         else:
-                            restantes = 5 - n
-                            st.error(
-                                f"Credenciales incorrectas. "
-                                f"{'Último intento disponible.' if restantes == 1 else f'{restantes} intentos restantes.'}"
-                            )
+                            st.session_state["intentos_login"] += 1
+                            n = st.session_state["intentos_login"]
+                            if n >= 5:
+                                st.session_state["bloqueado_hasta"] = time.time() + 60
+                                st.error("⛔ Demasiados intentos. Sistema bloqueado **60 segundos**.")
+                            else:
+                                restantes = 5 - n
+                                st.error(
+                                    f"{msg_error} "
+                                    f"{'Último intento disponible.' if restantes == 1 else f'({restantes} intentos restantes)'}"
+                                )
 
         st.markdown(
             '<p class="login-footer">'
@@ -234,9 +219,7 @@ with st.sidebar:
         c_si, c_no = st.columns(2)
         with c_si:
             if st.button("Sí, salir", type="primary", use_container_width=True):
-                conservar = {"intentos_login", "bloqueado_hasta"}
-                for k in [k for k in st.session_state if k not in conservar]:
-                    del st.session_state[k]
+                logout()
                 st.rerun()
         with c_no:
             if st.button("Cancelar", use_container_width=True):
