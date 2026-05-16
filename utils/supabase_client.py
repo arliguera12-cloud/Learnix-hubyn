@@ -14,15 +14,24 @@ from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
 
-# ── Singleton Supabase ─────────────────────────────────────────────────────────
-
-@st.cache_resource
+# ── Cliente Supabase por sesión de usuario ─────────────────────────────────────
+#
+# IMPORTANTE: NO usar @st.cache_resource aquí.
+# cache_resource crea UN SOLO objeto compartido entre todos los usuarios.
+# Eso significa que el token JWT de un usuario sobreescribe el del otro,
+# rompiendo el aislamiento multi-tenant.
+#
+# La solución es guardar el cliente en st.session_state, que es
+# independiente por cada conexión de navegador (por usuario).
+#
 def get_supabase() -> Client:
-    """Instancia única de Supabase por proceso."""
-    return create_client(
-        st.secrets["SUPABASE_URL"],
-        st.secrets["SUPABASE_KEY"],
-    )
+    """Retorna el cliente Supabase autenticado de la sesión actual."""
+    if "sb_client" not in st.session_state:
+        st.session_state["sb_client"] = create_client(
+            st.secrets["SUPABASE_URL"],
+            st.secrets["SUPABASE_KEY"],
+        )
+    return st.session_state["sb_client"]
 
 
 # ── Persistencia de sesión via cookies ────────────────────────────────────────
@@ -128,6 +137,8 @@ def _cargar_perfil_y_org(user_id: str) -> None:
         st.session_state["sb_organizacion"] = org
         st.session_state["sb_rol"]          = perfil.get("rol", "contador")
         st.session_state["sb_org_activa"]   = org.get("estado_activa", True)
+        # Acceso directo usado por las páginas para filtrar consultas
+        st.session_state["organizacion_id"] = org.get("id")
 
     except Exception as exc:
         logger.error("Error cargando perfil/org de user %s: %s", user_id, exc)

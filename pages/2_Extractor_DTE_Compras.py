@@ -144,31 +144,33 @@ def es_linea_direccion(texto: str) -> bool:
 # 6. DATA PERSISTENCE
 # ─────────────────────────────────────────────
 def cargar_proveedores_json() -> dict:
-    for ruta in ("data/proveedores.json", "data/clientes.json"):
-        if os.path.exists(ruta):
-            try:
-                with open(ruta, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                for k, v in data.items():
-                    if isinstance(v, str):
-                        data[k] = {"nombre": v, "nrc": ""}
-                return data
-            except Exception:
-                pass
-    return {}
+    """
+    Carga los contactos conocidos de la organización activa desde Supabase
+    y los retorna en el formato dict{nit: {nombre, nrc}} que usa el extractor.
+    """
+    try:
+        from utils.supabase_client import cargar_clientes_db
+        lista = cargar_clientes_db()
+        return {
+            c["nit"]: {
+                "nombre": c.get("nombre_comercial", ""),
+                "nrc":    c.get("nrc", ""),
+            }
+            for c in lista
+        }
+    except Exception:
+        return {}
 
 
 def guardar_proveedor_rapido(nit: str, nombre: str) -> None:
+    """Registra o actualiza un proveedor/contacto en la organización activa (Supabase)."""
     if not nit or not safe_str(nombre).strip():
         return
-    ruta = "data/proveedores.json"
-    if not os.path.exists("data"):
-        os.makedirs("data")
-    db  = cargar_proveedores_json()
-    nrc = db.get(nit, {}).get("nrc", "") if isinstance(db.get(nit), dict) else ""
-    db[nit] = {"nombre": safe_str(nombre).strip().upper(), "nrc": nrc}
-    with open(ruta, "w", encoding="utf-8") as f:
-        json.dump(db, f, indent=4, ensure_ascii=False)
+    try:
+        from utils.supabase_client import guardar_cliente_db
+        guardar_cliente_db(nit=nit, nombre=safe_str(nombre).strip())
+    except Exception:
+        pass
 
 
 def actualizar_nombre_en_db(nit: str, nombre: str) -> None:
