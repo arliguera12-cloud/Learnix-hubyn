@@ -45,11 +45,10 @@ st.set_page_config(page_title="Extractor DTE · Sujetos Excluidos", layout="wide
 st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 3. VERIFICACIÓN DE SEGURIDAD
+# 3. SEGURIDAD — Multi-tenant SaaS
 # ─────────────────────────────────────────────
-if not st.session_state.get("autenticado"):
-    st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
-    st.stop()
+from utils.auth_guard import check_auth
+check_auth()
 
 if not st.session_state.get("cliente_activo"):
     st.warning("⚠️ Debes seleccionar un Cliente Activo en el Dashboard antes de extraer Sujetos Excluidos.")
