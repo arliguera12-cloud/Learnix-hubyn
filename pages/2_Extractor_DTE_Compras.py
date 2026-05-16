@@ -59,11 +59,11 @@ st.set_page_config(page_title="Extractor DTE · Compras", layout="wide", page_ic
 st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 3. SEGURIDAD
+# 3. SEGURIDAD — Multi-tenant SaaS
 # ─────────────────────────────────────────────
-if not st.session_state.get("autenticado"):
-    st.warning("Acceso denegado. Por favor, inicia sesion en la pagina principal.")
-    st.stop()
+from utils.auth_guard import check_auth
+check_auth()
+
 if not st.session_state.get("cliente_activo"):
     st.warning("Debes seleccionar un Cliente Activo en el Dashboard antes de extraer Compras.")
     st.stop()

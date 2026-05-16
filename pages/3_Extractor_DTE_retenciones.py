@@ -3,7 +3,6 @@ import streamlit as st
 import pdfplumber
 import pandas as pd
 import re
-import json
 import os
 import sys
 from io import BytesIO
@@ -46,11 +45,10 @@ st.set_page_config(page_title="Extractor DTE · Retenciones", layout="wide", pag
 st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 3. SEGURIDAD
+# 3. SEGURIDAD — Multi-tenant SaaS
 # ─────────────────────────────────────────────
-if not st.session_state.get("autenticado"):
-    st.warning("⚠️ Acceso denegado. Por favor, inicia sesión en la página principal.")
-    st.stop()
+from utils.auth_guard import check_auth
+check_auth()
 
 if not st.session_state.get("cliente_activo"):
     st.warning("⚠️ Debes seleccionar un Cliente Activo en el Dashboard antes de extraer Retenciones.")
@@ -62,16 +60,14 @@ cliente = st.session_state.cliente_activo
 # 4. FUNCIONES AUXILIARES
 # ─────────────────────────────────────────────
 def cargar_proveedores_json() -> dict:
-    archivo = "data/proveedores.json"
-    if not os.path.exists(archivo):
-        return {}
+    """
+    Retorna dict combinado {nit: {nombre, nrc}}:
+    - Catálogo global (proveedores_globales) como base
+    - Catálogo privado de la org encima con prioridad
+    """
     try:
-        with open(archivo, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        for k, v in data.items():
-            if isinstance(v, str):
-                data[k] = {"nombre": v, "nrc": ""}
-        return data
+        from utils.supabase_client import cargar_proveedores_combinados
+        return cargar_proveedores_combinados()
     except Exception:
         return {}
 
