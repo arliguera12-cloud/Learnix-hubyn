@@ -11,3 +11,5 @@ pytesseract>=0.3.1
 pyzbar
 # Supabase backend
 supabase>=2.4.0
+# Persistencia de sesión via cookies del browser (Pilar 3 — SaaS Auth)
+streamlit-cookies-controller>=0.0.4
