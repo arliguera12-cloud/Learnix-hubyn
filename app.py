@@ -176,36 +176,85 @@ with st.sidebar:
     )
     st.divider()
 
-    # ── Información de la organización ──────────────────────────────────────
-    org = get_org_info()
-    if org:
-        _plan    = org.get("plan_suscripcion", "starter").upper()
-        _activa  = org.get("estado_activa", True)
-        _dtes    = org.get("dtes_procesados_mes", 0)
-        _limite  = org.get("limite_dtes_mes", 500)
-        _nombre  = org.get("nombre", "Mi Firma")
-        _rol     = st.session_state.get("sb_rol", "contador")
+    # ── Card: usuario conectado + organización ───────────────────────────────
+    org     = get_org_info()
+    perfil  = st.session_state.get("sb_perfil", {})
+    _nombre_contador = perfil.get("nombre_contador") or st.session_state.get("sb_user_email", "—")
+    _rol             = st.session_state.get("sb_rol", "contador")
+    _rol_label       = {"admin": "Administrador", "contador": "Contador", "viewer": "Visor"}.get(_rol, _rol.title())
+    _rol_color       = {"admin": "#E3B341", "contador": "#58A6FF", "viewer": "#8B949E"}.get(_rol, "#8B949E")
 
-        _plan_color = {"STARTER": "#58A6FF", "PROFESIONAL": "#56D364", "ENTERPRISE": "#E3B341"}.get(_plan, "#8B949E")
-        _estado_html = (
-            "<span style='color:#56D364'>● Activa</span>" if _activa
-            else "<span style='color:#F85149'>● Suspendida</span>"
+    if org:
+        _plan       = org.get("plan_suscripcion", "starter").upper()
+        _activa     = org.get("estado_activa", True)
+        _dtes       = org.get("dtes_procesados_mes", 0)
+        _limite     = org.get("limite_dtes_mes", 500)
+        _nombre_org = org.get("nombre", "Mi Firma")
+        _uso_pct    = int(_dtes / _limite * 100) if _limite else 0
+
+        _plan_color   = {"STARTER": "#58A6FF", "PROFESIONAL": "#56D364", "ENTERPRISE": "#E3B341"}.get(_plan, "#8B949E")
+        _estado_color = "#56D364" if _activa else "#F85149"
+        _estado_txt   = "Activa" if _activa else "Suspendida"
+        _barra_color  = "#56D364" if _uso_pct < 80 else ("#E3B341" if _uso_pct < 100 else "#F85149")
+
+        st.markdown(
+            # ── Card contador ────────────────────────────────────────────────
+            f"<div style='background:#07142B; border:1px solid #21262D; border-radius:8px;"
+            f" padding:11px 13px; margin-bottom:8px;'>"
+
+            f"<div style='display:flex; align-items:center; gap:9px; margin-bottom:8px;'>"
+            f"  <div style='width:34px; height:34px; border-radius:50%; background:#0D2137;"
+            f"    border:2px solid {_rol_color}; display:flex; align-items:center;"
+            f"    justify-content:center; font-size:1rem; flex-shrink:0;'>👤</div>"
+            f"  <div style='min-width:0;'>"
+            f"    <div style='color:#E6EDF3; font-weight:600; font-size:0.82rem;"
+            f"      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;'>"
+            f"      {_nombre_contador}</div>"
+            f"    <div style='color:{_rol_color}; font-size:0.65rem; font-weight:700;"
+            f"      letter-spacing:1px; text-transform:uppercase;'>{_rol_label}</div>"
+            f"  </div>"
+            f"</div>"
+
+            # ── Separador ────────────────────────────────────────────────────
+            f"<div style='border-top:1px solid #21262D; margin:0 -1px 8px;'></div>"
+
+            # ── Card firma ───────────────────────────────────────────────────
+            f"<div style='display:flex; align-items:center; gap:8px; margin-bottom:7px;'>"
+            f"  <span style='font-size:0.9rem;'>🏢</span>"
+            f"  <div style='min-width:0;'>"
+            f"    <div style='color:#8B949E; font-size:0.60rem; letter-spacing:2px;"
+            f"      text-transform:uppercase;'>FIRMA CONTABLE</div>"
+            f"    <div style='color:#E6EDF3; font-size:0.80rem; font-weight:600;"
+            f"      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;'>{_nombre_org}</div>"
+            f"  </div>"
+            f"</div>"
+
+            f"<div style='display:flex; justify-content:space-between; align-items:center;"
+            f" margin-bottom:6px;'>"
+            f"  <span style='color:{_plan_color}; font-size:0.65rem; font-weight:700;"
+            f"    letter-spacing:1px;'>● {_plan}</span>"
+            f"  <span style='color:{_estado_color}; font-size:0.65rem;'>● {_estado_txt}</span>"
+            f"</div>"
+
+            # ── Barra de uso DTEs ─────────────────────────────────────────────
+            f"<div style='font-size:0.65rem; color:#8B949E; margin-bottom:4px;'>"
+            f"  DTEs este mes: <strong style='color:#E6EDF3;'>{_dtes}</strong> / {_limite}"
+            f"</div>"
+            f"<div style='background:#0D2137; border-radius:4px; height:5px; overflow:hidden;'>"
+            f"  <div style='background:{_barra_color}; width:{min(_uso_pct,100)}%; height:100%;"
+            f"    border-radius:4px; transition:width 0.3s;'></div>"
+            f"</div>"
+
+            f"</div>",
+            unsafe_allow_html=True,
         )
+    else:
+        # Fallback si la org aún no cargó
         st.markdown(
             f"<div style='background:#07142B; border:1px solid #21262D; border-radius:8px;"
-            f" padding:10px 12px; margin-bottom:10px; font-size:0.78rem;'>"
-            f"<div style='color:#8B949E; font-size:0.65rem; letter-spacing:2px;"
-            f" text-transform:uppercase; margin-bottom:4px;'>ORGANIZACIÓN</div>"
-            f"<div style='color:#E6EDF3; font-weight:600; margin-bottom:6px;"
-            f" white-space:nowrap; overflow:hidden; text-overflow:ellipsis;'>{_nombre}</div>"
-            f"<div style='display:flex; justify-content:space-between; align-items:center;'>"
-            f"  <span style='color:{_plan_color}; font-size:0.68rem; font-weight:700;'>{_plan}</span>"
-            f"  <span style='font-size:0.68rem;'>{_estado_html}</span>"
-            f"</div>"
-            f"<div style='margin-top:6px; color:#8B949E; font-size:0.68rem;'>"
-            f"DTEs: <strong style='color:#E6EDF3'>{_dtes}</strong>/{_limite} · "
-            f"Rol: <strong style='color:#E6EDF3'>{_rol}</strong>"
-            f"</div>"
+            f" padding:10px 13px; margin-bottom:8px; font-size:0.78rem;'>"
+            f"<div style='color:#E6EDF3; font-weight:600;'>{_nombre_contador}</div>"
+            f"<div style='color:{_rol_color}; font-size:0.65rem;'>{_rol_label}</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
