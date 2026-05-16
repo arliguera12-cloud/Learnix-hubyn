@@ -145,30 +145,28 @@ def es_linea_direccion(texto: str) -> bool:
 # ─────────────────────────────────────────────
 def cargar_proveedores_json() -> dict:
     """
-    Carga los contactos conocidos de la organización activa desde Supabase
-    y los retorna en el formato dict{nit: {nombre, nrc}} que usa el extractor.
+    Retorna dict combinado {nit: {nombre, nrc}} para el motor de extracción:
+      - Catálogo global (proveedores_globales) como base
+      - Catálogo privado de la org encima con prioridad máxima
+    Compatible con el formato interno dict{nit:{nombre,nrc}} del extractor.
     """
     try:
-        from utils.supabase_client import cargar_clientes_db
-        lista = cargar_clientes_db()
-        return {
-            c["nit"]: {
-                "nombre": c.get("nombre_comercial", ""),
-                "nrc":    c.get("nrc", ""),
-            }
-            for c in lista
-        }
+        from utils.supabase_client import cargar_proveedores_combinados
+        return cargar_proveedores_combinados()
     except Exception:
         return {}
 
 
 def guardar_proveedor_rapido(nit: str, nombre: str) -> None:
-    """Registra o actualiza un proveedor/contacto en la organización activa (Supabase)."""
+    """
+    Auto-registra el proveedor en el catálogo PRIVADO de la org activa.
+    Solo escribe si el NIT no existe ya en la tabla privada (sin duplicados).
+    """
     if not nit or not safe_str(nombre).strip():
         return
     try:
-        from utils.supabase_client import guardar_cliente_db
-        guardar_cliente_db(nit=nit, nombre=safe_str(nombre).strip())
+        from utils.supabase_client import auto_registrar_proveedor
+        auto_registrar_proveedor(nit=nit, nombre=safe_str(nombre).strip())
     except Exception:
         pass
 

@@ -334,3 +334,148 @@ def puede_procesar_mas_dtes() -> bool:
     except Exception as exc:
         logger.warning("puede_procesar_mas_dtes falló, permitiendo por defecto: %s", exc)
         return True
+
+
+# ── DB helpers — Proveedores (sistema híbrido) ─────────────────────────────────
+
+def cargar_proveedores_db() -> list[dict]:
+    """Carga los proveedores privados de la organización activa."""
+    try:
+        return (
+            get_supabase()
+            .table("proveedores")
+            .select("*")
+            .eq("organizacion_id", _org_id())
+            .order("nombre_comercial")
+            .execute()
+            .data or []
+        )
+    except Exception as exc:
+        logger.error("cargar_proveedores_db: %s", exc)
+        return []
+
+
+def guardar_proveedor_db(nit: str, nombre: str, nrc: str = "") -> bool:
+    """Inserta o actualiza un proveedor en el catálogo privado de la org activa."""
+    try:
+        get_supabase().table("proveedores").upsert(
+            {
+                "organizacion_id":  _org_id(),
+                "nit":              nit,
+                "nombre_comercial": nombre.strip().upper(),
+                "nrc":              nrc,
+            },
+            on_conflict="organizacion_id,nit",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("guardar_proveedor_db: %s", exc)
+        return False
+
+
+def eliminar_proveedor_db(proveedor_id: str) -> bool:
+    """Elimina un proveedor por UUID (solo admins, forzado por RLS)."""
+    try:
+        get_supabase().table("proveedores").delete().eq("id", proveedor_id).execute()
+        return True
+    except Exception as exc:
+        logger.error("eliminar_proveedor_db: %s", exc)
+        return False
+
+
+def buscar_proveedor_por_nit(nit: str) -> dict | None:
+    """
+    Búsqueda inteligente en 2 niveles:
+      1. Catálogo privado: tabla `proveedores` (org activa, prioridad alta)
+      2. Catálogo global:  tabla `proveedores_globales` (lectura para todos)
+
+    Retorna {"nombre": str, "nrc": str, "fuente": "privado"|"global"} o None.
+    """
+    if not nit:
+        return None
+    sb = get_supabase()
+
+    # Nivel 1: catálogo privado de la organización
+    try:
+        resp = (
+            sb.table("proveedores")
+            .select("nombre_comercial, nrc")
+            .eq("organizacion_id", _org_id())
+            .eq("nit", nit)
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            row = resp.data[0]
+            return {
+                "nombre": row["nombre_comercial"],
+                "nrc":    row.get("nrc", ""),
+                "fuente": "privado",
+            }
+    except Exception as exc:
+        logger.warning("buscar_proveedor_por_nit (privado): %s", exc)
+
+    # Nivel 2: catálogo maestro global
+    try:
+        resp = (
+            sb.table("proveedores_globales")
+            .select("nombre_comercial")
+            .eq("nit", nit)
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            return {
+                "nombre": resp.data[0]["nombre_comercial"],
+                "nrc":    "",
+                "fuente": "global",
+            }
+    except Exception as exc:
+        logger.warning("buscar_proveedor_por_nit (global): %s", exc)
+
+    return None
+
+
+def auto_registrar_proveedor(nit: str, nombre: str, nrc: str = "") -> bool:
+    """
+    Registra el proveedor en el catálogo privado SOLO si no existe ya.
+    Llámalo después de extraer un DTE: la BD se alimenta sola con cada factura.
+    Si ya existe en el catálogo privado, no hace nada (evita escrituras innecesarias).
+    """
+    if not nit or not nombre.strip():
+        return False
+    existente = buscar_proveedor_por_nit(nit)
+    if existente and existente["fuente"] == "privado":
+        return True  # Ya está registrado, no tocar
+    return guardar_proveedor_db(nit=nit, nombre=nombre, nrc=nrc)
+
+
+def cargar_proveedores_combinados() -> dict:
+    """
+    Retorna dict {nit: {nombre, nrc}} con el catálogo combinado.
+    Globales como base, privados encima (mayor prioridad).
+    Formato compatible con el extractor de compras.
+    """
+    combinado: dict = {}
+
+    # Base: globales (prioridad baja)
+    try:
+        resp = (
+            get_supabase()
+            .table("proveedores_globales")
+            .select("nit, nombre_comercial")
+            .execute()
+        )
+        for row in (resp.data or []):
+            combinado[row["nit"]] = {"nombre": row["nombre_comercial"], "nrc": ""}
+    except Exception as exc:
+        logger.warning("cargar_proveedores_combinados (global): %s", exc)
+
+    # Encima: privados de la org (prioridad alta, sobreescriben)
+    for p in cargar_proveedores_db():
+        combinado[p["nit"]] = {
+            "nombre": p.get("nombre_comercial", ""),
+            "nrc":    p.get("nrc", ""),
+        }
+
+    return combinado
