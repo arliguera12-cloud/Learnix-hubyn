@@ -137,6 +137,8 @@ def _cargar_perfil_y_org(user_id: str) -> None:
         st.session_state["sb_organizacion"] = org
         st.session_state["sb_rol"]          = perfil.get("rol", "contador")
         st.session_state["sb_org_activa"]   = org.get("estado_activa", True)
+        # Acceso directo usado por las páginas para filtrar consultas
+        st.session_state["organizacion_id"] = org.get("id")
 
     except Exception as exc:
         logger.error("Error cargando perfil/org de user %s: %s", user_id, exc)

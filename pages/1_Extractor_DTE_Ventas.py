@@ -134,30 +134,34 @@ def es_linea_direccion(texto: str) -> bool:
 # 6. FUNCIONES AUXILIARES
 # ─────────────────────────────────────────────
 def cargar_clientes_json() -> dict:
-    for ruta in ("data/clientes.json", "data/proveedores.json"):
-        if os.path.exists(ruta):
-            try:
-                with open(ruta, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                for k, v in data.items():
-                    if isinstance(v, str):
-                        data[k] = {"nombre": v, "nrc": ""}
-                return data
-            except Exception:
-                pass
-    return {}
+    """
+    Carga los clientes de la organización activa desde Supabase y los retorna
+    en el formato dict{nit: {nombre, nrc, dui, actividad}} que usa el extractor.
+    """
+    try:
+        from utils.supabase_client import cargar_clientes_db
+        lista = cargar_clientes_db()
+        return {
+            c["nit"]: {
+                "nombre":    c.get("nombre_comercial", ""),
+                "nrc":       c.get("nrc", ""),
+                "dui":       c.get("dui", ""),
+                "actividad": c.get("actividad", ""),
+            }
+            for c in lista
+        }
+    except Exception:
+        return {}
 
 def guardar_cliente_rapido(nit: str, nombre: str) -> None:
+    """Registra o actualiza un cliente en la organización activa (Supabase)."""
     if not nit or not safe_str(nombre).strip():
         return
-    ruta = "data/clientes.json"
-    if not os.path.exists("data"):
-        os.makedirs("data")
-    db = cargar_clientes_json()
-    db[nit] = {"nombre": safe_str(nombre).strip().upper(),
-               "nrc": db.get(nit, {}).get("nrc", "")}
-    with open(ruta, "w", encoding="utf-8") as f:
-        json.dump(db, f, indent=4, ensure_ascii=False)
+    try:
+        from utils.supabase_client import guardar_cliente_db
+        guardar_cliente_db(nit=nit, nombre=safe_str(nombre).strip())
+    except Exception:
+        pass
 
 def actualizar_nombre_en_db_ventas(nit: str, nombre: str) -> None:
     if not nit or not safe_str(nombre).strip():

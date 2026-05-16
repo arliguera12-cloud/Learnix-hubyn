@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
-import json
-import os
 import sys
+import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
@@ -20,7 +19,7 @@ st.set_page_config(
 # 2. SEGURIDAD — Multi-tenant SaaS
 # ─────────────────────────────────────────────
 from utils.auth_guard import check_auth
-check_auth()   # Verifica sesión + suscripción activa
+check_auth()
 
 # ─────────────────────────────────────────────
 # 3. ESTILOS
@@ -28,21 +27,13 @@ check_auth()   # Verifica sesión + suscripción activa
 st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 4. CARGA DE CLIENTES
+# 4. CARGA DE CLIENTES — Supabase (filtrado por org)
 # ─────────────────────────────────────────────
-def cargar_clientes() -> dict:
-    archivo = os.path.join(os.path.dirname(__file__), "..", "data", "clientes.json")
-    if not os.path.exists(archivo):
-        return {}
-    try:
-        with open(archivo, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except json.JSONDecodeError as e:
-        st.warning(f"⚠️ Error de formato en el archivo de clientes: {e}")
-        return {}
-    except Exception as e:
-        st.warning(f"⚠️ No se pudo cargar el directorio de clientes: {e}")
-        return {}
+from utils.supabase_client import cargar_clientes_db
+
+clientes_list: list[dict] = cargar_clientes_db()
+# Índice rápido por NIT para lookups en el resto de la página
+clientes_por_nit: dict[str, dict] = {c["nit"]: c for c in clientes_list}
 
 # ─────────────────────────────────────────────
 # 5. ENCABEZADO
@@ -61,11 +52,13 @@ with col_hdr:
         unsafe_allow_html=True
     )
 with col_badge:
+    org_plan = (st.session_state.get("sb_organizacion") or {}).get("plan_suscripcion", "starter").upper()
     st.markdown(
-        "<div style='text-align:right; margin-top:18px;'>"
-        "<span style='background:#152015; border:1px solid #2E4828; border-radius:20px;"
-        " padding:4px 14px; font-size:0.7rem; color:#5EA830; letter-spacing:2px;'>v3.1 · PRODUCCIÓN</span>"
-        "</div>",
+        f"<div style='text-align:right; margin-top:18px;'>"
+        f"<span style='background:#152015; border:1px solid #2E4828; border-radius:20px;"
+        f" padding:4px 14px; font-size:0.7rem; color:#5EA830; letter-spacing:2px;'>"
+        f"v4.0 · {org_plan}</span>"
+        f"</div>",
         unsafe_allow_html=True
     )
 
@@ -74,20 +67,27 @@ st.divider()
 # ─────────────────────────────────────────────
 # 6. SELECTOR DE EMPRESA
 # ─────────────────────────────────────────────
-db_clientes = cargar_clientes()
-
 _, col_sel, _ = st.columns([1, 2.2, 1])
 with col_sel:
-    if not db_clientes:
-        st.warning("⚠️ El Directorio de Clientes está vacío. Agrégalos desde el menú lateral.")
+    if not clientes_list:
+        st.warning("⚠️ Tu organización no tiene clientes registrados. Agrégalos en **Directorio Clientes**.")
     else:
         opciones: list[str] = ["— Selecciona una empresa —"]
         mapa: dict[str, dict] = {}
 
-        for nit, datos in db_clientes.items():
-            nombre = datos.get("nombre", "Sin nombre")
+        for cliente in clientes_list:
+            nombre = cliente.get("nombre_comercial", "Sin nombre")
+            nit    = cliente.get("nit", "")
             label  = f"{nombre}  ·  {nit}"
-            mapa[label] = {**datos, "nit": nit}
+            # Normalizamos el dict al formato que usan las páginas de extracción
+            mapa[label] = {
+                "id":       cliente.get("id"),
+                "nit":      nit,
+                "nombre":   nombre,
+                "nrc":      cliente.get("nrc", ""),
+                "dui":      cliente.get("dui", ""),
+                "actividad":cliente.get("actividad", ""),
+            }
             opciones.append(label)
 
         cliente_previo = st.session_state.get("cliente_activo")
@@ -101,7 +101,7 @@ with col_sel:
             "Empresa",
             opciones,
             index=idx_previo,
-            help="Selecciona la empresa para la cual procesarás los DTE"
+            help="Selecciona la empresa de tu organización para la cual procesarás los DTE"
         )
 
         if seleccion != "— Selecciona una empresa —":
@@ -139,7 +139,6 @@ if cliente_activo:
     n_compras = len(df_compras)
     n_ret     = len(df_ret)
 
-    # buscar columna de totales compatible
     sum_ventas  = (
         float(df_ventas["total"].sum()) if not df_ventas.empty and "total" in df_ventas.columns
         else float(df_ventas["tot"].sum()) if not df_ventas.empty and "tot" in df_ventas.columns
@@ -160,11 +159,11 @@ if cliente_activo:
     k1, k2, k3, k4, k5 = st.columns(5)
 
     kpi_data = [
-        (k1, str(n_ventas),        "DTE Ventas procesados",    "Documentos cargados"),
-        (k2, f"${sum_ventas:,.0f}","Total Ventas",             "Monto acumulado"),
-        (k3, str(n_compras),       "DTE Compras procesados",   "Documentos cargados"),
-        (k4, f"${sum_compras:,.0f}","Total Compras",           "Monto acumulado"),
-        (k5, str(n_ret),           "Retenciones DTE-07",       "Comprobantes cargados"),
+        (k1, str(n_ventas),         "DTE Ventas procesados",  "Documentos cargados"),
+        (k2, f"${sum_ventas:,.0f}", "Total Ventas",           "Monto acumulado"),
+        (k3, str(n_compras),        "DTE Compras procesados", "Documentos cargados"),
+        (k4, f"${sum_compras:,.0f}","Total Compras",          "Monto acumulado"),
+        (k5, str(n_ret),            "Retenciones DTE-07",     "Comprobantes cargados"),
     ]
     for col, val, lbl, sub in kpi_data:
         with col:
@@ -249,7 +248,7 @@ with c2:
 # ─────────────────────────────────────────────
 # 9. ESTADO VACÍO
 # ─────────────────────────────────────────────
-if not cliente_activo and db_clientes:
+if not cliente_activo and clientes_list:
     st.markdown("")
     st.markdown("""
     <div style="text-align:center; padding: 32px 20px;
@@ -269,7 +268,7 @@ st.markdown("")
 st.divider()
 st.markdown(
     "<p style='text-align:center; font-size:0.72rem; color:#5EA830;'>"
-    "Learnix DTE Hub &nbsp;·&nbsp; v3.1 &nbsp;·&nbsp; El Salvador &nbsp;·&nbsp; "
-    "Todos los datos se procesan localmente sin envío a terceros.</p>",
+    "Learnix DTE Hub &nbsp;·&nbsp; v4.0 SaaS &nbsp;·&nbsp; El Salvador &nbsp;·&nbsp; "
+    "Datos aislados por organización vía Supabase RLS.</p>",
     unsafe_allow_html=True
 )
