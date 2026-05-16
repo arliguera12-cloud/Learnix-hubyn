@@ -119,33 +119,49 @@ def _poblar_session_state(session, user) -> None:
 def _cargar_perfil_y_org(user_id: str) -> None:
     """
     Carga el perfil + la organización del usuario y los guarda en session_state.
-    Hace JOIN en una sola query para minimizar round-trips.
+    Usa 2 queries separadas en lugar de un JOIN para ser robusto ante esquemas
+    parcialmente migrados (columna organizacion_id podría no existir aún).
+    Siempre garantiza que 'organizacion_id' queda definido en session_state.
     """
+    sb = get_supabase()
+
+    # ── Paso 1: cargar el perfil (sin JOIN) ───────────────────────────────────
+    perfil: dict = {}
+    org_id: str | None = None
     try:
-        resp = (
-            get_supabase()
-            .table("perfiles")
-            .select("*, organizaciones(*)")
+        resp_p = (
+            sb.table("perfiles")
+            .select("*")
             .eq("id", user_id)
             .single()
             .execute()
         )
-        perfil = resp.data or {}
-        org    = perfil.pop("organizaciones", None) or {}
-
-        st.session_state["sb_perfil"]       = perfil
-        st.session_state["sb_organizacion"] = org
-        st.session_state["sb_rol"]          = perfil.get("rol", "contador")
-        st.session_state["sb_org_activa"]   = org.get("estado_activa", True)
-        # Acceso directo usado por las páginas para filtrar consultas
-        st.session_state["organizacion_id"] = org.get("id")
-
+        perfil = resp_p.data or {}
+        org_id = perfil.get("organizacion_id")   # None si columna no existe o es NULL
     except Exception as exc:
-        logger.error("Error cargando perfil/org de user %s: %s", user_id, exc)
-        st.session_state.setdefault("sb_perfil",       {})
-        st.session_state.setdefault("sb_organizacion", {})
-        st.session_state.setdefault("sb_rol",          "contador")
-        st.session_state.setdefault("sb_org_activa",   True)
+        logger.error("Error cargando perfil de user %s: %s", user_id, exc)
+
+    # ── Paso 2: cargar la organización (solo si tenemos el ID) ────────────────
+    org: dict = {}
+    if org_id:
+        try:
+            resp_o = (
+                sb.table("organizaciones")
+                .select("*")
+                .eq("id", org_id)
+                .single()
+                .execute()
+            )
+            org = resp_o.data or {}
+        except Exception as exc:
+            logger.error("Error cargando org %s para user %s: %s", org_id, user_id, exc)
+
+    # ── Siempre escribir todas las claves (nunca dejar KeyError pendiente) ────
+    st.session_state["sb_perfil"]       = perfil
+    st.session_state["sb_organizacion"] = org
+    st.session_state["sb_rol"]          = perfil.get("rol", "contador")
+    st.session_state["sb_org_activa"]   = org.get("estado_activa", True)
+    st.session_state["organizacion_id"] = org_id   # puede ser None → check_auth lo captura
 
 
 # ── Auth helpers ───────────────────────────────────────────────────────────────
