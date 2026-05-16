@@ -5,7 +5,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from styles import DARK_PRO_CSS
-from utils.supabase_client import login, logout, session_activa
+from utils.supabase_client import (
+    login, logout, session_activa,
+    restaurar_sesion_desde_cookie, get_org_info,
+)
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG
@@ -23,17 +26,25 @@ st.set_page_config(
 st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# SESSION STATE
+# SESSION STATE — valores por defecto
 # ─────────────────────────────────────────────
 defaults = {
-    "autenticado":     False,
-    "intentos_login":  0,
-    "bloqueado_hasta": 0,
+    "autenticado":      False,
+    "intentos_login":   0,
+    "bloqueado_hasta":  0,
     "confirmar_logout": False,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+# ─────────────────────────────────────────────
+# RESTAURAR SESIÓN DESDE COOKIE (si la hay)
+# Esto permite que al cerrar y reabrir la pestaña
+# el usuario no tenga que volver a ingresar su clave.
+# ─────────────────────────────────────────────
+if not st.session_state["autenticado"]:
+    restaurar_sesion_desde_cookie()
 
 # ─────────────────────────────────────────────
 # PANTALLA DE LOGIN
@@ -165,6 +176,40 @@ with st.sidebar:
     )
     st.divider()
 
+    # ── Información de la organización ──────────────────────────────────────
+    org = get_org_info()
+    if org:
+        _plan    = org.get("plan_suscripcion", "starter").upper()
+        _activa  = org.get("estado_activa", True)
+        _dtes    = org.get("dtes_procesados_mes", 0)
+        _limite  = org.get("limite_dtes_mes", 500)
+        _nombre  = org.get("nombre", "Mi Firma")
+        _rol     = st.session_state.get("sb_rol", "contador")
+
+        _plan_color = {"STARTER": "#58A6FF", "PROFESIONAL": "#56D364", "ENTERPRISE": "#E3B341"}.get(_plan, "#8B949E")
+        _estado_html = (
+            "<span style='color:#56D364'>● Activa</span>" if _activa
+            else "<span style='color:#F85149'>● Suspendida</span>"
+        )
+        st.markdown(
+            f"<div style='background:#07142B; border:1px solid #21262D; border-radius:8px;"
+            f" padding:10px 12px; margin-bottom:10px; font-size:0.78rem;'>"
+            f"<div style='color:#8B949E; font-size:0.65rem; letter-spacing:2px;"
+            f" text-transform:uppercase; margin-bottom:4px;'>ORGANIZACIÓN</div>"
+            f"<div style='color:#E6EDF3; font-weight:600; margin-bottom:6px;"
+            f" white-space:nowrap; overflow:hidden; text-overflow:ellipsis;'>{_nombre}</div>"
+            f"<div style='display:flex; justify-content:space-between; align-items:center;'>"
+            f"  <span style='color:{_plan_color}; font-size:0.68rem; font-weight:700;'>{_plan}</span>"
+            f"  <span style='font-size:0.68rem;'>{_estado_html}</span>"
+            f"</div>"
+            f"<div style='margin-top:6px; color:#8B949E; font-size:0.68rem;'>"
+            f"DTEs: <strong style='color:#E6EDF3'>{_dtes}</strong>/{_limite} · "
+            f"Rol: <strong style='color:#E6EDF3'>{_rol}</strong>"
+            f"</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
     if st.session_state.get("cliente_activo"):
         cliente = st.session_state.cliente_activo
         st.markdown(
@@ -228,6 +273,6 @@ with st.sidebar:
 
     st.markdown(
         "<p style='text-align:center; font-size:0.62rem; color:#30363D;"
-        " margin-top:10px;'>v3.1 &nbsp;·&nbsp; El Salvador</p>",
+        " margin-top:10px;'>v4.0 SaaS &nbsp;·&nbsp; El Salvador</p>",
         unsafe_allow_html=True
     )
