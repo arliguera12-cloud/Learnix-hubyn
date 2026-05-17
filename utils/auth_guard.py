@@ -118,6 +118,13 @@ def _bloquear(titulo: str, mensaje: str, enlace_soporte: bool = False) -> None:
                 "</p>",
                 unsafe_allow_html=True,
             )
-        if st.button("← Volver al inicio", use_container_width=True):
-            st.switch_page("app.py")
+        st.markdown(
+            "<div style='text-align:center; margin-top:8px'>"
+            "<a href='/' target='_self' style='"
+            "display:inline-block; width:100%; padding:10px 0;"
+            "background:#21262D; color:#C9D1D9; text-decoration:none;"
+            "border:1px solid #30363D; border-radius:6px; font-size:14px'>"
+            "← Volver al inicio</a></div>",
+            unsafe_allow_html=True,
+        )
     st.stop()
