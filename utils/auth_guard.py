@@ -34,7 +34,19 @@ def check_auth(
             "Tu sesión ha finalizado. Vuelve al inicio e ingresa de nuevo.",
         )
 
-    # 2) Suscripción de la organización
+    # 2) Organización asignada (usuarios pre-migración o sin trigger ejecutado)
+    if not st.session_state.get("organizacion_id"):
+        _bloquear(
+            "⚙️ Cuenta sin organización",
+            "Tu cuenta de usuario no tiene una firma contable asignada todavía. "
+            "Esto ocurre cuando la cuenta se creó antes de la migración SaaS. "
+            "Por favor contacta al administrador del sistema para que ejecute "
+            "el script de migración (PASO M3 de <code>supabase_schema_saas.sql</code>) "
+            "y asigne tu cuenta a una organización.",
+            enlace_soporte=True,
+        )
+
+    # 3) Suscripción de la organización
     if verificar_suscripcion:
         org = get_org_info()
         if org and not org.get("estado_activa", True):
