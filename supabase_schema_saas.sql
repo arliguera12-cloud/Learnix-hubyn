@@ -248,13 +248,13 @@ $$;
 -- ─────────────────────────────────────────────────────────────
 ALTER TABLE organizaciones ENABLE ROW LEVEL SECURITY;
 
--- Miembros ven solo su propia organización
+DROP POLICY IF EXISTS "org_select_miembros" ON organizaciones;
 CREATE POLICY "org_select_miembros" ON organizaciones
     FOR SELECT USING (
         id = get_mi_organizacion_id()
     );
 
--- Solo admins actualizan datos de su organización
+DROP POLICY IF EXISTS "org_update_admin" ON organizaciones;
 CREATE POLICY "org_update_admin" ON organizaciones
     FOR UPDATE USING (
         id = get_mi_organizacion_id()
@@ -266,20 +266,22 @@ CREATE POLICY "org_update_admin" ON organizaciones
 -- ─────────────────────────────────────────────────────────────
 ALTER TABLE perfiles ENABLE ROW LEVEL SECURITY;
 
--- Cada usuario siempre puede ver su propio perfil
+DROP POLICY IF EXISTS "perfil_select_own" ON perfiles;
 CREATE POLICY "perfil_select_own" ON perfiles
     FOR SELECT USING (auth.uid() = id);
 
--- Un admin puede ver todos los perfiles de su organización
+DROP POLICY IF EXISTS "perfil_select_admin_org" ON perfiles;
 CREATE POLICY "perfil_select_admin_org" ON perfiles
     FOR SELECT USING (
         organizacion_id = get_mi_organizacion_id()
         AND es_admin_de_mi_org()
     );
 
+DROP POLICY IF EXISTS "perfil_insert" ON perfiles;
 CREATE POLICY "perfil_insert" ON perfiles
     FOR INSERT WITH CHECK (auth.uid() = id);
 
+DROP POLICY IF EXISTS "perfil_update_own" ON perfiles;
 CREATE POLICY "perfil_update_own" ON perfiles
     FOR UPDATE USING (auth.uid() = id);
 
@@ -288,16 +290,19 @@ CREATE POLICY "perfil_update_own" ON perfiles
 -- ─────────────────────────────────────────────────────────────
 ALTER TABLE clientes ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "clientes_select_org" ON clientes;
 CREATE POLICY "clientes_select_org" ON clientes
     FOR SELECT USING (organizacion_id = get_mi_organizacion_id());
 
+DROP POLICY IF EXISTS "clientes_insert_org" ON clientes;
 CREATE POLICY "clientes_insert_org" ON clientes
     FOR INSERT WITH CHECK (organizacion_id = get_mi_organizacion_id());
 
+DROP POLICY IF EXISTS "clientes_update_org" ON clientes;
 CREATE POLICY "clientes_update_org" ON clientes
     FOR UPDATE USING (organizacion_id = get_mi_organizacion_id());
 
--- Solo admins pueden eliminar clientes
+DROP POLICY IF EXISTS "clientes_delete_admin" ON clientes;
 CREATE POLICY "clientes_delete_admin" ON clientes
     FOR DELETE USING (
         organizacion_id = get_mi_organizacion_id()
@@ -309,16 +314,19 @@ CREATE POLICY "clientes_delete_admin" ON clientes
 -- ─────────────────────────────────────────────────────────────
 ALTER TABLE dte_procesados ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "dte_select_org" ON dte_procesados;
 CREATE POLICY "dte_select_org" ON dte_procesados
     FOR SELECT USING (organizacion_id = get_mi_organizacion_id());
 
+DROP POLICY IF EXISTS "dte_insert_org" ON dte_procesados;
 CREATE POLICY "dte_insert_org" ON dte_procesados
     FOR INSERT WITH CHECK (organizacion_id = get_mi_organizacion_id());
 
+DROP POLICY IF EXISTS "dte_update_org" ON dte_procesados;
 CREATE POLICY "dte_update_org" ON dte_procesados
     FOR UPDATE USING (organizacion_id = get_mi_organizacion_id());
 
--- Solo admins pueden eliminar DTEs
+DROP POLICY IF EXISTS "dte_delete_admin" ON dte_procesados;
 CREATE POLICY "dte_delete_admin" ON dte_procesados
     FOR DELETE USING (
         organizacion_id = get_mi_organizacion_id()
