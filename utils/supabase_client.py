@@ -163,6 +163,7 @@ def _cargar_perfil_y_org(user_id: str) -> None:
     # ── Paso 2: cargar la organización (solo si tenemos el ID) ────────────────
     org: dict = {}
     if org_id:
+        # Intento 1: SELECT directo (puede fallar si RLS filtra por algún motivo)
         try:
             resp_o = (
                 sb.table("organizaciones")
@@ -173,7 +174,17 @@ def _cargar_perfil_y_org(user_id: str) -> None:
             )
             org = resp_o.data or {}
         except Exception as exc:
-            logger.error("Error cargando org %s para user %s: %s", org_id, user_id, exc)
+            logger.warning("SELECT directo en organizaciones falló para user %s: %s", user_id, exc)
+
+        # Intento 2: RPC SECURITY DEFINER (bypasea RLS completamente)
+        if not org:
+            try:
+                resp_rpc = sb.rpc("get_mi_org_info", {}).execute()
+                if resp_rpc.data:
+                    org = resp_rpc.data
+                    logger.info("Org cargada via RPC para user %s", user_id)
+            except Exception as exc:
+                logger.warning("get_mi_org_info RPC falló para user %s: %s", user_id, exc)
 
     # ── Siempre escribir todas las claves (nunca dejar KeyError pendiente) ────
     st.session_state["sb_perfil"]       = perfil
@@ -245,7 +256,11 @@ def get_org_info() -> dict:
 
 def get_organizacion_id() -> str | None:
     """Retorna el UUID de la organización activa o None."""
-    return get_org_info().get("id")
+    org_id = get_org_info().get("id")
+    # Fallback: si el dict de la org no cargó pero la sesión tiene el UUID directamente
+    if not org_id:
+        org_id = st.session_state.get("organizacion_id")
+    return org_id
 
 
 def _org_id() -> str:

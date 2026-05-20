@@ -177,6 +177,22 @@ AS $$
     WHERE o.id = p_organizacion_id
 $$;
 
+-- Retorna los datos completos de la organización del usuario autenticado como JSONB.
+-- SECURITY DEFINER: bypasea RLS para garantizar que siempre se devuelven los datos,
+-- incluso si la política org_select_miembros falla por algún motivo.
+CREATE OR REPLACE FUNCTION get_mi_org_info()
+RETURNS JSONB
+LANGUAGE SQL
+SECURITY DEFINER
+STABLE
+SET search_path = public
+AS $$
+    SELECT row_to_json(o)::JSONB
+    FROM   organizaciones o
+    JOIN   perfiles p ON p.organizacion_id = o.id
+    WHERE  p.id = auth.uid()
+$$;
+
 -- Auto-repara perfiles sin organización (usuarios pre-migración o con trigger fallido).
 -- Crea una org nueva y vincula al usuario como admin, migrando sus datos existentes.
 -- SECURITY DEFINER: se ejecuta con privilegios de superusuario, bypaseando RLS.
