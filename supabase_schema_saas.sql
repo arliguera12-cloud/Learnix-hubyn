@@ -177,6 +177,66 @@ AS $$
     WHERE o.id = p_organizacion_id
 $$;
 
+-- Auto-repara perfiles sin organización (usuarios pre-migración o con trigger fallido).
+-- Crea una org nueva y vincula al usuario como admin, migrando sus datos existentes.
+-- SECURITY DEFINER: se ejecuta con privilegios de superusuario, bypaseando RLS.
+CREATE OR REPLACE FUNCTION reparar_perfil_sin_org()
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_user_id  UUID;
+    v_email    TEXT;
+    v_org_id   UUID;
+BEGIN
+    v_user_id := auth.uid();
+    IF v_user_id IS NULL THEN
+        RAISE EXCEPTION 'No hay usuario autenticado';
+    END IF;
+
+    -- Si ya tiene org, devolverla sin hacer nada
+    SELECT organizacion_id INTO v_org_id FROM perfiles WHERE id = v_user_id;
+    IF v_org_id IS NOT NULL THEN
+        RETURN v_org_id;
+    END IF;
+
+    SELECT email INTO v_email FROM auth.users WHERE id = v_user_id;
+
+    -- Crear la organización
+    INSERT INTO organizaciones (nombre, plan_suscripcion, email_contacto)
+    VALUES ('Firma de ' || split_part(v_email, '@', 1), 'starter', v_email)
+    RETURNING id INTO v_org_id;
+
+    -- Vincular perfil como admin
+    UPDATE perfiles
+    SET    organizacion_id = v_org_id,
+           rol             = 'admin'
+    WHERE  id = v_user_id;
+
+    -- Migrar datos huérfanos del usuario
+    UPDATE clientes
+    SET    organizacion_id = v_org_id
+    WHERE  user_id = v_user_id AND organizacion_id IS NULL;
+
+    UPDATE dte_procesados
+    SET    organizacion_id = v_org_id
+    WHERE  user_id = v_user_id AND organizacion_id IS NULL;
+
+    -- Sincronizar contador mensual
+    UPDATE organizaciones
+    SET    dtes_procesados_mes = (
+               SELECT COUNT(*) FROM dte_procesados
+               WHERE  organizacion_id = v_org_id
+                 AND  DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())
+           )
+    WHERE  id = v_org_id;
+
+    RETURN v_org_id;
+END;
+$$;
+
 
 -- =============================================================
 -- BLOQUE 3: HABILITAR RLS + POLÍTICAS
@@ -334,10 +394,26 @@ BEGIN
     RETURN NEW;
 
 EXCEPTION WHEN OTHERS THEN
-    -- Salvaguarda: nunca bloquear el registro por un error aquí
-    INSERT INTO perfiles (id, nombre_contador)
-    VALUES (NEW.id, v_nombre)
-    ON CONFLICT (id) DO NOTHING;
+    -- Salvaguarda: nunca bloquear el registro, pero siempre crear una org de emergencia
+    -- para evitar que el usuario quede sin organización asignada.
+    DECLARE
+        v_emergency_org UUID;
+    BEGIN
+        INSERT INTO organizaciones (nombre, email_contacto)
+        VALUES ('Org de ' || split_part(NEW.email, '@', 1), NEW.email)
+        RETURNING id INTO v_emergency_org;
+
+        INSERT INTO perfiles (id, nombre_contador, organizacion_id, rol)
+        VALUES (NEW.id, v_nombre, v_emergency_org, 'admin')
+        ON CONFLICT (id) DO UPDATE
+            SET organizacion_id = EXCLUDED.organizacion_id,
+                rol             = EXCLUDED.rol;
+    EXCEPTION WHEN OTHERS THEN
+        -- Último recurso: al menos crear el perfil vacío para no bloquear el registro
+        INSERT INTO perfiles (id, nombre_contador)
+        VALUES (NEW.id, v_nombre)
+        ON CONFLICT (id) DO NOTHING;
+    END;
     RETURN NEW;
 END;
 $$;

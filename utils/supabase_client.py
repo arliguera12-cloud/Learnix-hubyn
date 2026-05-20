@@ -141,6 +141,25 @@ def _cargar_perfil_y_org(user_id: str) -> None:
     except Exception as exc:
         logger.error("Error cargando perfil de user %s: %s", user_id, exc)
 
+    # ── Paso 1.5: auto-reparar si el usuario no tiene org asignada ───────────
+    # Ocurre con cuentas pre-migración o cuando el trigger falló silenciosamente.
+    if not org_id:
+        try:
+            resp_fix = sb.rpc("reparar_perfil_sin_org", {}).execute()
+            if resp_fix.data:
+                org_id = resp_fix.data
+                resp_p2 = (
+                    sb.table("perfiles")
+                    .select("*")
+                    .eq("id", user_id)
+                    .single()
+                    .execute()
+                )
+                perfil = resp_p2.data or perfil
+                logger.info("Org auto-creada para user %s: %s", user_id, org_id)
+        except Exception as exc:
+            logger.warning("Auto-reparación de org fallida para user %s: %s", user_id, exc)
+
     # ── Paso 2: cargar la organización (solo si tenemos el ID) ────────────────
     org: dict = {}
     if org_id:
