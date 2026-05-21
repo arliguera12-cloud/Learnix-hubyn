@@ -100,7 +100,7 @@ with col1:
                 if len(nit_limpio) not in (9, 14):
                     st.warning("⚠️ El NIT debe tener 9 o 14 dígitos. Verifica el formato.")
                 else:
-                    ok = guardar_cliente_db(
+                    ok, err_msg = guardar_cliente_db(
                         nit      = nit_limpio,
                         nombre   = f_nombre.strip(),
                         nrc      = limpiar_numero(f_nrc),
@@ -111,7 +111,11 @@ with col1:
                         st.success(f"✅ {f_nombre.strip().upper()} guardada correctamente.")
                         st.rerun()
                     else:
-                        st.error("No se pudo guardar. Verifica que el NIT no esté duplicado en tu organización.")
+                        st.error(
+                            f"No se pudo guardar. "
+                            + (f"Detalle: {err_msg}" if err_msg else
+                               "Verifica permisos o contacta al administrador.")
+                        )
 
 with col2:
     st.markdown("### 📋 Tu Portafolio Actual")

@@ -287,25 +287,52 @@ def guardar_cliente_db(
     nrc: str = "",
     dui: str = "",
     actividad: str = "",
-) -> bool:
-    """Inserta o actualiza un cliente dentro de la organización activa."""
+) -> tuple[bool, str]:
+    """
+    Inserta o actualiza un cliente dentro de la organización activa.
+    Usa SELECT → INSERT/UPDATE en lugar de upsert para evitar problemas
+    con el nombre del constraint en diferentes entornos de Supabase.
+    Retorna (éxito, mensaje_error).
+    """
     try:
-        get_supabase().table("clientes").upsert(
-            {
-                "organizacion_id":  _org_id(),
-                "user_id":          st.session_state["sb_user"].id,
-                "nit":              nit,
-                "nombre_comercial": nombre.strip().upper(),
-                "nrc":              nrc,
-                "dui":              dui,
-                "actividad":        actividad.strip().upper(),
-            },
-            on_conflict="organizacion_id,nit",
-        ).execute()
-        return True
+        org_id = _org_id()
+        sb     = get_supabase()
+        user_id = st.session_state["sb_user"].id
+
+        data = {
+            "organizacion_id":  org_id,
+            "user_id":          user_id,
+            "nit":              nit,
+            "nombre_comercial": nombre.strip().upper(),
+            "nrc":              nrc or "",
+            "dui":              dui or "",
+            "actividad":        actividad.strip().upper(),
+        }
+
+        # ── ¿Ya existe este NIT en la org? ────────────────────────────────────
+        existing = (
+            sb.table("clientes")
+            .select("id")
+            .eq("organizacion_id", org_id)
+            .eq("nit", nit)
+            .limit(1)
+            .execute()
+        )
+
+        if existing.data:
+            # Actualizar sin tocar organizacion_id ni user_id originales
+            update_data = {k: v for k, v in data.items()
+                           if k not in ("organizacion_id", "user_id")}
+            sb.table("clientes").update(update_data).eq("id", existing.data[0]["id"]).execute()
+        else:
+            sb.table("clientes").insert(data).execute()
+
+        return True, ""
+
     except Exception as exc:
-        logger.error("guardar_cliente_db: %s", exc)
-        return False
+        err = str(exc)
+        logger.error("guardar_cliente_db: %s", err)
+        return False, err
 
 
 def eliminar_cliente_db(cliente_id: str) -> bool:
@@ -393,15 +420,32 @@ def cargar_proveedores_db() -> list[dict]:
 def guardar_proveedor_db(nit: str, nombre: str, nrc: str = "") -> bool:
     """Inserta o actualiza un proveedor en el catálogo privado de la org activa."""
     try:
-        get_supabase().table("proveedores").upsert(
-            {
-                "organizacion_id":  _org_id(),
-                "nit":              nit,
-                "nombre_comercial": nombre.strip().upper(),
-                "nrc":              nrc,
-            },
-            on_conflict="organizacion_id,nit",
-        ).execute()
+        org_id = _org_id()
+        sb     = get_supabase()
+
+        existing = (
+            sb.table("proveedores")
+            .select("id")
+            .eq("organizacion_id", org_id)
+            .eq("nit", nit)
+            .limit(1)
+            .execute()
+        )
+
+        data = {
+            "organizacion_id":  org_id,
+            "nit":              nit,
+            "nombre_comercial": nombre.strip().upper(),
+            "nrc":              nrc or "",
+        }
+
+        if existing.data:
+            sb.table("proveedores").update(
+                {"nombre_comercial": data["nombre_comercial"], "nrc": data["nrc"]}
+            ).eq("id", existing.data[0]["id"]).execute()
+        else:
+            sb.table("proveedores").insert(data).execute()
+
         return True
     except Exception as exc:
         logger.error("guardar_proveedor_db: %s", exc)
