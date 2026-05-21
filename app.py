@@ -22,7 +22,7 @@ st.set_page_config(
     page_title="Learnix DTE Hub",
     layout="wide",
     page_icon="⚡",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # ─────────────────────────────────────────────

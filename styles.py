@@ -98,8 +98,26 @@ footer                               { display: none !important; }
 [data-testid="stMainMenuButton"]     { display: none !important; }
 .stDecoration                        { display: none !important; }
 #MainMenu                            { display: none !important; }
-[data-testid="stHeader"]             { background: transparent !important; height: 0 !important; }
-[data-testid="stToolbar"]            { display: none !important; }
+/* Mantener el header pero invisible — conserva el botón de abrir/cerrar sidebar */
+[data-testid="stHeader"]             { background: transparent !important; }
+[data-testid="stToolbar"]            { right: 0 !important; }
+
+/* Botón de colapsar/expandir sidebar — asegurar visibilidad */
+[data-testid="stSidebarCollapseButton"] button,
+[data-testid="stSidebarCollapsedControl"] button {
+  background: var(--sidebar-bg) !important;
+  border: 1px solid rgba(255,255,255,0.15) !important;
+  color: rgba(255,255,255,0.75) !important;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0 !important;
+  width: 24px !important;
+  transition: var(--transition-fast) !important;
+}
+[data-testid="stSidebarCollapseButton"] button:hover,
+[data-testid="stSidebarCollapsedControl"] button:hover {
+  background: var(--sidebar-surface) !important;
+  color: #FFFFFF !important;
+  border-color: var(--accent) !important;
+}
 
 [data-testid="column"],
 [data-testid="stVerticalBlock"]      { background: transparent !important; }
