@@ -251,13 +251,30 @@ def get_organizacion_id() -> str | None:
 def _org_id() -> str:
     """
     Helper interno: organizacion_id garantizado.
-    Lanza ValueError si no hay org asignada (no debería ocurrir en producción).
+    Si el usuario no tiene org asignada, intenta auto-repararlo llamando
+    a la función SECURITY DEFINER reparar_perfil_sin_org() en Supabase.
+    Solo lanza ValueError si la auto-reparación también falla.
     """
     oid = get_organizacion_id()
+    if oid:
+        return oid
+
+    # ── Auto-reparación: el perfil quedó sin organizacion_id ─────────────────
+    user = st.session_state.get("sb_user")
+    if user:
+        try:
+            resp = get_supabase().rpc("reparar_perfil_sin_org", {}).execute()
+            if resp.data:
+                _cargar_perfil_y_org(user.id)
+                oid = get_organizacion_id()
+                logger.info("Org auto-reparada para user %s: %s", user.id, oid)
+        except Exception as exc:
+            logger.error("Auto-reparación de org falló: %s", exc)
+
     if not oid:
         raise ValueError(
-            "El usuario no tiene organización asignada. "
-            "Verifica que el trigger handle_new_user creó el perfil correctamente."
+            "El usuario no tiene organización asignada y la auto-reparación falló. "
+            "Verifica que la función reparar_perfil_sin_org existe en Supabase."
         )
     return oid
 
