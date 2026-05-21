@@ -99,7 +99,6 @@ footer                               { display: none !important; }
 [data-testid="stMainMenuButton"]     { display: none !important; }
 .stDecoration                        { display: none !important; }
 #MainMenu                            { display: none !important; }
-
 [data-testid="stHeader"]             { background: transparent !important; }
 [data-testid="stToolbar"]            { right: 0 !important; }
 
