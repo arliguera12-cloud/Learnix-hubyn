@@ -9,6 +9,11 @@ from utils.supabase_client import (
     login, logout, session_activa,
     restaurar_sesion_desde_cookie, get_org_info,
 )
+from components.ui_components import (
+    sidebar_logo,
+    sidebar_org_card,
+    sidebar_cliente_card,
+)
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG
@@ -39,9 +44,7 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 # ─────────────────────────────────────────────
-# RESTAURAR SESIÓN DESDE COOKIE (si la hay)
-# Esto permite que al cerrar y reabrir la pestaña
-# el usuario no tenga que volver a ingresar su clave.
+# RESTAURAR SESIÓN DESDE COOKIE
 # ─────────────────────────────────────────────
 if not st.session_state["autenticado"]:
     restaurar_sesion_desde_cookie()
@@ -51,17 +54,20 @@ if not st.session_state["autenticado"]:
 # ─────────────────────────────────────────────
 if not st.session_state["autenticado"]:
 
-    st.markdown("<div style='height:6vh'></div>", unsafe_allow_html=True)
-    _, col, _ = st.columns([1, 1.2, 1])
+    st.markdown("<div style='height:5vh'></div>", unsafe_allow_html=True)
+    _, col, _ = st.columns([1, 1.1, 1])
 
     with col:
-        st.markdown('<div class="login-box">', unsafe_allow_html=True)
+        st.markdown('<div class="login-box animate-fade-in-up">', unsafe_allow_html=True)
 
         # Logo + branding
         st.markdown('<div class="login-logo">YN</div>', unsafe_allow_html=True)
         st.markdown('<span class="login-badge">LEARNIX &nbsp;·&nbsp; DTE HUB</span>', unsafe_allow_html=True)
         st.markdown('<p class="login-title">Bienvenido de nuevo</p>', unsafe_allow_html=True)
-        st.markdown('<p class="login-sub">Ingresa tu correo y contraseña para acceder al sistema.</p>', unsafe_allow_html=True)
+        st.markdown(
+            '<p class="login-sub">Ingresa tus credenciales para acceder<br>al sistema de procesamiento tributario.</p>',
+            unsafe_allow_html=True
+        )
 
         # Estado de bloqueo / intentos
         ahora        = time.time()
@@ -71,19 +77,17 @@ if not st.session_state["autenticado"]:
 
         if bloqueado:
             st.error(
-                f"⛔ Cuenta bloqueada temporalmente. "
+                f"Cuenta bloqueada temporalmente. "
                 f"Vuelve a intentarlo en **{seg_rest} segundos**.",
                 icon="🔒"
             )
         else:
             if intentos_act > 0:
                 restantes = max(0, 5 - intentos_act)
-                color = "#F85149" if restantes <= 1 else "#D29922"
-                icono = "🔴" if restantes <= 1 else "⚠️"
                 st.markdown(
                     f'<div class="intentos-badge">'
-                    f'{icono} Intento {intentos_act} de 5 &nbsp;·&nbsp; '
-                    f'<strong style="color:{color}">{restantes} restante{"s" if restantes != 1 else ""}</strong>'
+                    f'{"🔴" if restantes <= 1 else "⚠️"} Intento {intentos_act} de 5 &nbsp;·&nbsp; '
+                    f'<strong>{restantes} restante{"s" if restantes != 1 else ""}</strong>'
                     f'</div>',
                     unsafe_allow_html=True
                 )
@@ -124,7 +128,7 @@ if not st.session_state["autenticado"]:
                             n = st.session_state["intentos_login"]
                             if n >= 5:
                                 st.session_state["bloqueado_hasta"] = time.time() + 60
-                                st.error("⛔ Demasiados intentos. Sistema bloqueado **60 segundos**.")
+                                st.error("Demasiados intentos. Sistema bloqueado **60 segundos**.")
                             else:
                                 restantes = 5 - n
                                 st.error(
@@ -161,28 +165,22 @@ nav = st.navigation({
 })
 
 # ─────────────────────────────────────────────
-# SIDEBAR — LOGO + CLIENTE ACTIVO
+# SIDEBAR
 # ─────────────────────────────────────────────
 with st.sidebar:
+    sidebar_logo()
     st.markdown(
-        "<h2 style='font-family:Courier New,monospace; color:#56D364;"
-        " letter-spacing:6px; text-align:center; margin:12px 0 2px; font-size:1.6rem;'>YN</h2>",
-        unsafe_allow_html=True
+        "<div style='margin:0 10px;border-top:1px solid rgba(255,255,255,0.07);'></div>",
+        unsafe_allow_html=True,
     )
-    st.markdown(
-        "<p style='text-align:center; font-size:0.60rem; color:#6E7681;"
-        " letter-spacing:3px; margin:0 0 12px; text-transform:uppercase;'>LEARNIX DTE HUB</p>",
-        unsafe_allow_html=True
-    )
-    st.divider()
 
-    # ── Card: usuario conectado + organización ───────────────────────────────
-    org     = get_org_info()
-    perfil  = st.session_state.get("sb_perfil", {})
+    # ── Card: usuario + organización ──────────────────────────────────────────
+    org    = get_org_info()
+    perfil = st.session_state.get("sb_perfil", {})
     _nombre_contador = perfil.get("nombre_contador") or st.session_state.get("sb_user_email", "—")
     _rol             = st.session_state.get("sb_rol", "contador")
     _rol_label       = {"admin": "Administrador", "contador": "Contador", "viewer": "Visor"}.get(_rol, _rol.title())
-    _rol_color       = {"admin": "#E3B341", "contador": "#58A6FF", "viewer": "#8B949E"}.get(_rol, "#8B949E")
+    _rol_color       = {"admin": "#F59E0B", "contador": "#3B82F6", "viewer": "#94A3B8"}.get(_rol, "#94A3B8")
 
     if org:
         _plan       = org.get("plan_suscripcion", "starter").upper()
@@ -190,87 +188,40 @@ with st.sidebar:
         _dtes       = org.get("dtes_procesados_mes", 0)
         _limite     = org.get("limite_dtes_mes", 500)
         _nombre_org = org.get("nombre", "Mi Firma")
-        _uso_pct    = int(_dtes / _limite * 100) if _limite else 0
+        _plan_color = {
+            "STARTER":     "#3B82F6",
+            "PROFESIONAL": "#10B981",
+            "ENTERPRISE":  "#F59E0B",
+        }.get(_plan, "#94A3B8")
 
-        _plan_color   = {"STARTER": "#58A6FF", "PROFESIONAL": "#56D364", "ENTERPRISE": "#E3B341"}.get(_plan, "#8B949E")
-        _estado_color = "#56D364" if _activa else "#F85149"
-        _estado_txt   = "Activa" if _activa else "Suspendida"
-        _barra_color  = "#56D364" if _uso_pct < 80 else ("#E3B341" if _uso_pct < 100 else "#F85149")
-
-        st.markdown(
-            # ── Card contador ────────────────────────────────────────────────
-            f"<div style='background:#07142B; border:1px solid #21262D; border-radius:8px;"
-            f" padding:11px 13px; margin-bottom:8px;'>"
-
-            f"<div style='display:flex; align-items:center; gap:9px; margin-bottom:8px;'>"
-            f"  <div style='width:34px; height:34px; border-radius:50%; background:#0D2137;"
-            f"    border:2px solid {_rol_color}; display:flex; align-items:center;"
-            f"    justify-content:center; font-size:1rem; flex-shrink:0;'>👤</div>"
-            f"  <div style='min-width:0;'>"
-            f"    <div style='color:#E6EDF3; font-weight:600; font-size:0.82rem;"
-            f"      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;'>"
-            f"      {_nombre_contador}</div>"
-            f"    <div style='color:{_rol_color}; font-size:0.65rem; font-weight:700;"
-            f"      letter-spacing:1px; text-transform:uppercase;'>{_rol_label}</div>"
-            f"  </div>"
-            f"</div>"
-
-            # ── Separador ────────────────────────────────────────────────────
-            f"<div style='border-top:1px solid #21262D; margin:0 -1px 8px;'></div>"
-
-            # ── Card firma ───────────────────────────────────────────────────
-            f"<div style='display:flex; align-items:center; gap:8px; margin-bottom:7px;'>"
-            f"  <span style='font-size:0.9rem;'>🏢</span>"
-            f"  <div style='min-width:0;'>"
-            f"    <div style='color:#8B949E; font-size:0.60rem; letter-spacing:2px;"
-            f"      text-transform:uppercase;'>FIRMA CONTABLE</div>"
-            f"    <div style='color:#E6EDF3; font-size:0.80rem; font-weight:600;"
-            f"      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;'>{_nombre_org}</div>"
-            f"  </div>"
-            f"</div>"
-
-            f"<div style='display:flex; justify-content:space-between; align-items:center;"
-            f" margin-bottom:6px;'>"
-            f"  <span style='color:{_plan_color}; font-size:0.65rem; font-weight:700;"
-            f"    letter-spacing:1px;'>● {_plan}</span>"
-            f"  <span style='color:{_estado_color}; font-size:0.65rem;'>● {_estado_txt}</span>"
-            f"</div>"
-
-            # ── Barra de uso DTEs ─────────────────────────────────────────────
-            f"<div style='font-size:0.65rem; color:#8B949E; margin-bottom:4px;'>"
-            f"  DTEs este mes: <strong style='color:#E6EDF3;'>{_dtes}</strong> / {_limite}"
-            f"</div>"
-            f"<div style='background:#0D2137; border-radius:4px; height:5px; overflow:hidden;'>"
-            f"  <div style='background:{_barra_color}; width:{min(_uso_pct,100)}%; height:100%;"
-            f"    border-radius:4px; transition:width 0.3s;'></div>"
-            f"</div>"
-
-            f"</div>",
-            unsafe_allow_html=True,
+        sidebar_org_card(
+            nombre_contador=_nombre_contador,
+            rol_label=_rol_label,
+            rol_color=_rol_color,
+            nombre_org=_nombre_org,
+            plan=_plan,
+            plan_color=_plan_color,
+            estado_activa=_activa,
+            dtes=_dtes,
+            limite=_limite,
         )
     else:
-        # Fallback si la org aún no cargó
         st.markdown(
-            f"<div style='background:#07142B; border:1px solid #21262D; border-radius:8px;"
-            f" padding:10px 13px; margin-bottom:8px; font-size:0.78rem;'>"
-            f"<div style='color:#E6EDF3; font-weight:600;'>{_nombre_contador}</div>"
-            f"<div style='color:{_rol_color}; font-size:0.65rem;'>{_rol_label}</div>"
+            f"<div style='margin:8px 10px;padding:10px 14px;"
+            f"background:rgba(255,255,255,0.05);border-radius:10px;"
+            f"border:1px solid rgba(255,255,255,0.08);'>"
+            f"<div style='color:#fff;font-weight:600;font-size:0.83rem;'>{_nombre_contador}</div>"
+            f"<div style='color:{_rol_color};font-size:0.62rem;font-weight:700;"
+            f"text-transform:uppercase;letter-spacing:1.5px;'>{_rol_label}</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
 
+    # ── Cliente activo ─────────────────────────────────────────────────────────
     if st.session_state.get("cliente_activo"):
-        cliente = st.session_state.cliente_activo
-        st.markdown(
-            f"<div class='card-cliente-activo'>"
-            f"<span class='label'>CLIENTE ACTIVO</span><br>"
-            f"<span class='nombre'>{cliente.get('nombre','—')}</span><br>"
-            f"<span class='nit'>NIT: {cliente.get('nit','—')}</span>"
-            f"</div>",
-            unsafe_allow_html=True
-        )
+        sidebar_cliente_card(st.session_state.cliente_activo)
 
-    # ── Gemini API Key (fallback de extracción) ───────────────────────────────
+    # ── Gemini API Key ─────────────────────────────────────────────────────────
     try:
         _gemini_secret = st.secrets.get("gemini", {}).get("api_key", "")
     except Exception:
@@ -299,10 +250,13 @@ with st.sidebar:
 nav.run()
 
 # ─────────────────────────────────────────────
-# CIERRE DE SESIÓN
+# CIERRE DE SESIÓN (sidebar, después del nav)
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.divider()
+    st.markdown(
+        "<div style='margin:8px 10px;border-top:1px solid rgba(255,255,255,0.07);'></div>",
+        unsafe_allow_html=True,
+    )
 
     if not st.session_state["confirmar_logout"]:
         if st.button("↩ Cerrar sesión", use_container_width=True, type="secondary"):
@@ -321,7 +275,6 @@ with st.sidebar:
                 st.rerun()
 
     st.markdown(
-        "<p style='text-align:center; font-size:0.62rem; color:#30363D;"
-        " margin-top:10px;'>v4.0 SaaS &nbsp;·&nbsp; El Salvador</p>",
-        unsafe_allow_html=True
+        "<div class='sidebar-version'>v4.0 SaaS &nbsp;·&nbsp; El Salvador</div>",
+        unsafe_allow_html=True,
     )
