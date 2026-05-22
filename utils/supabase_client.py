@@ -31,7 +31,17 @@ def get_supabase() -> Client:
             st.secrets["SUPABASE_URL"],
             st.secrets["SUPABASE_KEY"],
         )
-    return st.session_state["sb_client"]
+    client = st.session_state["sb_client"]
+    # Re-inyectar JWT en PostgREST en cada llamada.
+    # Streamlit puede perder el estado interno del cliente entre reruns,
+    # haciendo que las queries vayan como anon y RLS filtre todo.
+    session = st.session_state.get("sb_session")
+    if session and hasattr(session, "access_token"):
+        try:
+            client.postgrest.auth(session.access_token)
+        except Exception:
+            pass
+    return client
 
 
 # ── Persistencia de sesión via cookies ────────────────────────────────────────
