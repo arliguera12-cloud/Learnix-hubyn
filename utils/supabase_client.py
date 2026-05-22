@@ -113,6 +113,13 @@ def _poblar_session_state(session, user) -> None:
     st.session_state["sb_user_email"]   = user.email
     st.session_state["intentos_login"]  = 0
     st.session_state["bloqueado_hasta"] = 0
+    # Forzar JWT en PostgREST: en algunas versiones de supabase-py el evento
+    # SIGNED_IN no propaga automáticamente el access_token al cliente REST,
+    # dejando las queries como anon y haciendo que RLS filtre todo.
+    try:
+        get_supabase().postgrest.auth(session.access_token)
+    except Exception as exc:
+        logger.warning("No se pudo propagar JWT a PostgREST: %s", exc)
     _cargar_perfil_y_org(user.id)
 
 
