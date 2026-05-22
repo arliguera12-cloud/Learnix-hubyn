@@ -119,13 +119,11 @@ def _poblar_session_state(session, user) -> None:
 def _cargar_perfil_y_org(user_id: str) -> None:
     """
     Carga el perfil + la organización del usuario y los guarda en session_state.
-    Usa 2 queries separadas en lugar de un JOIN para ser robusto ante esquemas
-    parcialmente migrados (columna organizacion_id podría no existir aún).
-    Siempre garantiza que 'organizacion_id' queda definido en session_state.
+    Usa .limit(1) en lugar de .single() para no lanzar excepción si no hay filas.
     """
     sb = get_supabase()
 
-    # ── Paso 1: cargar el perfil (sin JOIN) ───────────────────────────────────
+    # ── Paso 1: cargar el perfil ──────────────────────────────────────────────
     perfil: dict = {}
     org_id: str | None = None
     try:
@@ -133,34 +131,33 @@ def _cargar_perfil_y_org(user_id: str) -> None:
             sb.table("perfiles")
             .select("*")
             .eq("id", user_id)
-            .single()
+            .limit(1)
             .execute()
         )
-        perfil = resp_p.data or {}
-        org_id = perfil.get("organizacion_id")   # None si columna no existe o es NULL
+        perfil = resp_p.data[0] if resp_p.data else {}
+        org_id = perfil.get("organizacion_id")
     except Exception as exc:
         logger.error("Error cargando perfil de user %s: %s", user_id, exc)
 
     # ── Paso 1.5: auto-reparar si el usuario no tiene org asignada ───────────
-    # Ocurre con cuentas pre-migración o cuando el trigger falló silenciosamente.
     if not org_id:
         try:
             resp_fix = sb.rpc("reparar_perfil_sin_org", {}).execute()
             if resp_fix.data:
-                org_id = resp_fix.data
+                org_id = str(resp_fix.data)
                 resp_p2 = (
                     sb.table("perfiles")
                     .select("*")
                     .eq("id", user_id)
-                    .single()
+                    .limit(1)
                     .execute()
                 )
-                perfil = resp_p2.data or perfil
+                perfil = resp_p2.data[0] if resp_p2.data else perfil
                 logger.info("Org auto-creada para user %s: %s", user_id, org_id)
         except Exception as exc:
-            logger.warning("Auto-reparación de org fallida para user %s: %s", user_id, exc)
+            logger.warning("Auto-reparación via RPC fallida para user %s: %s", user_id, exc)
 
-    # ── Paso 2: cargar la organización (solo si tenemos el ID) ────────────────
+    # ── Paso 2: cargar la organización ────────────────────────────────────────
     org: dict = {}
     if org_id:
         try:
@@ -168,10 +165,10 @@ def _cargar_perfil_y_org(user_id: str) -> None:
                 sb.table("organizaciones")
                 .select("*")
                 .eq("id", org_id)
-                .single()
+                .limit(1)
                 .execute()
             )
-            org = resp_o.data or {}
+            org = resp_o.data[0] if resp_o.data else {}
         except Exception as exc:
             logger.error("Error cargando org %s para user %s: %s", org_id, user_id, exc)
 
@@ -251,30 +248,55 @@ def get_organizacion_id() -> str | None:
 def _org_id() -> str:
     """
     Helper interno: organizacion_id garantizado.
-    Si el usuario no tiene org asignada, intenta auto-repararlo llamando
-    a la función SECURITY DEFINER reparar_perfil_sin_org() en Supabase.
-    Solo lanza ValueError si la auto-reparación también falla.
+    Intenta 3 estrategias antes de lanzar ValueError:
+      1. Sesión cacheada en session_state
+      2. Releer perfiles directamente desde la BD
+      3. RPC reparar_perfil_sin_org (crea org si no existe)
     """
     oid = get_organizacion_id()
     if oid:
         return oid
 
-    # ── Auto-reparación: el perfil quedó sin organizacion_id ─────────────────
     user = st.session_state.get("sb_user")
-    if user:
-        try:
-            resp = get_supabase().rpc("reparar_perfil_sin_org", {}).execute()
-            if resp.data:
-                _cargar_perfil_y_org(user.id)
-                oid = get_organizacion_id()
-                logger.info("Org auto-reparada para user %s: %s", user.id, oid)
-        except Exception as exc:
-            logger.error("Auto-reparación de org falló: %s", exc)
+    if not user:
+        raise ValueError("No hay usuario autenticado en sesión.")
+
+    sb = get_supabase()
+
+    # ── Estrategia 2: releer perfiles directo ─────────────────────────────────
+    try:
+        resp_p = (
+            sb.table("perfiles")
+            .select("organizacion_id")
+            .eq("id", user.id)
+            .limit(1)
+            .execute()
+        )
+        if resp_p.data and resp_p.data[0].get("organizacion_id"):
+            oid = resp_p.data[0]["organizacion_id"]
+            _cargar_perfil_y_org(user.id)   # recarga todo para session_state
+            oid = get_organizacion_id() or oid
+            logger.info("Org encontrada en perfiles para user %s: %s", user.id, oid)
+    except Exception as exc:
+        logger.error("Relecura de perfiles falló para user %s: %s", user.id, exc)
+
+    if oid:
+        return oid
+
+    # ── Estrategia 3: RPC reparar_perfil_sin_org ──────────────────────────────
+    try:
+        resp = sb.rpc("reparar_perfil_sin_org", {}).execute()
+        if resp.data:
+            _cargar_perfil_y_org(user.id)
+            oid = get_organizacion_id()
+            logger.info("Org auto-reparada via RPC para user %s: %s", user.id, oid)
+    except Exception as exc:
+        logger.error("RPC reparar_perfil_sin_org falló: %s", exc)
 
     if not oid:
         raise ValueError(
-            "El usuario no tiene organización asignada y la auto-reparación falló. "
-            "Verifica que la función reparar_perfil_sin_org existe en Supabase."
+            "El usuario no tiene organización asignada. "
+            "Por favor cierra sesión y vuelve a ingresar para refrescar la sesión."
         )
     return oid
 
