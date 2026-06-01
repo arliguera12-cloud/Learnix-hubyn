@@ -26,7 +26,7 @@ st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 # ─────────────────────────────────────────────
 # 4. IMPORTS DE BD
 # ─────────────────────────────────────────────
-from utils.supabase_client import (
+from utils.local_db import (
     cargar_clientes_db,
     guardar_cliente_db,
     eliminar_cliente_db,
@@ -48,10 +48,9 @@ with col_logo:
 with col_titulo:
     st.title("👥 Directorio de Clientes")
 
-org_nombre = (st.session_state.get("sb_organizacion") or {}).get("nombre", "tu organización")
 st.write(
-    f"Administra las empresas que audita **{org_nombre}**. "
-    "Estos datos son exclusivos de tu firma y no los ven otras organizaciones."
+    "Administra las empresas que auditas. "
+    "Los datos se guardan localmente en el sistema."
 )
 
 # ─────────────────────────────────────────────

@@ -66,7 +66,7 @@ def cargar_proveedores_json() -> dict:
     - Catálogo privado de la org encima con prioridad
     """
     try:
-        from utils.supabase_client import cargar_proveedores_combinados
+        from utils.local_db import cargar_proveedores_combinados
         return cargar_proveedores_combinados()
     except Exception:
         return {}

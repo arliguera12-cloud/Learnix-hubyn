@@ -139,7 +139,7 @@ def cargar_clientes_json() -> dict:
     en el formato dict{nit: {nombre, nrc, dui, actividad}} que usa el extractor.
     """
     try:
-        from utils.supabase_client import cargar_clientes_db
+        from utils.local_db import cargar_clientes_db
         lista = cargar_clientes_db()
         return {
             c["nit"]: {
@@ -158,7 +158,7 @@ def guardar_cliente_rapido(nit: str, nombre: str) -> None:
     if not nit or not safe_str(nombre).strip():
         return
     try:
-        from utils.supabase_client import guardar_cliente_db
+        from utils.local_db import guardar_cliente_db
         guardar_cliente_db(nit=nit, nombre=safe_str(nombre).strip())
     except Exception:
         pass
