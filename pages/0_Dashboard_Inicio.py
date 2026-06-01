@@ -37,19 +37,18 @@ from components.ui_components import (
 # ─────────────────────────────────────────────
 # 5. CARGA DE CLIENTES
 # ─────────────────────────────────────────────
-from utils.supabase_client import cargar_clientes_db
+from utils.local_db import cargar_clientes_db
 
 clientes_list: list[dict] = cargar_clientes_db()
 
 # ─────────────────────────────────────────────
 # 6. ENCABEZADO
 # ─────────────────────────────────────────────
-org_plan = (st.session_state.get("sb_organizacion") or {}).get("plan_suscripcion", "starter").upper()
 page_header(
     icon="🏠",
     title="Hub DTE — El Salvador",
     subtitle="Procesamiento inteligente de Documentos Tributarios Electrónicos · Anexos F-07 y F-14",
-    badge=f"v4.0 · {org_plan}",
+    badge="v5.0",
 )
 
 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
@@ -266,8 +265,7 @@ if not cliente_activo and clientes_list:
 st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
 st.markdown(
     "<p class='app-footer'>"
-    "<strong>Learnix DTE Hub</strong> &nbsp;·&nbsp; v4.0 SaaS "
-    "&nbsp;·&nbsp; El Salvador &nbsp;·&nbsp; "
-    "Datos aislados por organización vía Supabase RLS</p>",
+    "<strong>Learnix DTE Hub</strong> &nbsp;·&nbsp; v5.0 "
+    "&nbsp;·&nbsp; El Salvador</p>",
     unsafe_allow_html=True,
 )

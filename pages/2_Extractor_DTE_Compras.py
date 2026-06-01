@@ -151,7 +151,7 @@ def cargar_proveedores_json() -> dict:
     Compatible con el formato interno dict{nit:{nombre,nrc}} del extractor.
     """
     try:
-        from utils.supabase_client import cargar_proveedores_combinados
+        from utils.local_db import cargar_proveedores_combinados
         return cargar_proveedores_combinados()
     except Exception:
         return {}
@@ -165,7 +165,7 @@ def guardar_proveedor_rapido(nit: str, nombre: str) -> None:
     if not nit or not safe_str(nombre).strip():
         return
     try:
-        from utils.supabase_client import auto_registrar_proveedor
+        from utils.local_db import auto_registrar_proveedor
         auto_registrar_proveedor(nit=nit, nombre=safe_str(nombre).strip())
     except Exception:
         pass

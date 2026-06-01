@@ -5,13 +5,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from styles import DARK_PRO_CSS
-from utils.supabase_client import (
-    login, logout, session_activa,
-    restaurar_sesion_desde_cookie, get_org_info,
-)
+from utils.supabase_client import login, logout
 from components.ui_components import (
     sidebar_logo,
-    sidebar_org_card,
     sidebar_cliente_card,
 )
 
@@ -44,12 +40,6 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 # ─────────────────────────────────────────────
-# RESTAURAR SESIÓN DESDE COOKIE
-# ─────────────────────────────────────────────
-if not st.session_state["autenticado"]:
-    restaurar_sesion_desde_cookie()
-
-# ─────────────────────────────────────────────
 # PANTALLA DE LOGIN
 # ─────────────────────────────────────────────
 if not st.session_state["autenticado"]:
@@ -60,16 +50,14 @@ if not st.session_state["autenticado"]:
     with col:
         st.markdown('<div class="login-box animate-fade-in-up">', unsafe_allow_html=True)
 
-        # Logo + branding
         st.markdown('<div class="login-logo">YN</div>', unsafe_allow_html=True)
         st.markdown('<span class="login-badge">LEARNIX &nbsp;·&nbsp; DTE HUB</span>', unsafe_allow_html=True)
         st.markdown('<p class="login-title">Bienvenido de nuevo</p>', unsafe_allow_html=True)
         st.markdown(
-            '<p class="login-sub">Ingresa tus credenciales para acceder<br>al sistema de procesamiento tributario.</p>',
+            '<p class="login-sub">Ingresa la contraseña para acceder<br>al sistema de procesamiento tributario.</p>',
             unsafe_allow_html=True
         )
 
-        # Estado de bloqueo / intentos
         ahora        = time.time()
         bloqueado    = st.session_state["bloqueado_hasta"] > ahora
         seg_rest     = int(st.session_state["bloqueado_hasta"] - ahora)
@@ -77,8 +65,7 @@ if not st.session_state["autenticado"]:
 
         if bloqueado:
             st.error(
-                f"Cuenta bloqueada temporalmente. "
-                f"Vuelve a intentarlo en **{seg_rest} segundos**.",
+                f"Demasiados intentos. Vuelve a intentarlo en **{seg_rest} segundos**.",
                 icon="🔒"
             )
         else:
@@ -93,11 +80,6 @@ if not st.session_state["autenticado"]:
                 )
 
             with st.form("login_form", clear_on_submit=False):
-                email = st.text_input(
-                    "Correo electrónico",
-                    placeholder="contador@firma.com",
-                    label_visibility="visible"
-                )
                 clave = st.text_input(
                     "Contraseña",
                     type="password",
@@ -114,12 +96,10 @@ if not st.session_state["autenticado"]:
                 )
 
                 if submitted:
-                    if not email.strip():
-                        st.error("El correo electrónico es obligatorio.")
-                    elif not clave:
+                    if not clave:
                         st.error("La contraseña es obligatoria.")
                     else:
-                        exito, msg_error = login(email.strip(), clave)
+                        exito, msg_error = login("", clave)
                         if exito:
                             st.session_state["confirmar_logout"] = False
                             st.rerun()
@@ -174,54 +154,20 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # ── Card: usuario + organización ──────────────────────────────────────────
-    org    = get_org_info()
-    perfil = st.session_state.get("sb_perfil", {})
-    _nombre_contador = perfil.get("nombre_contador") or st.session_state.get("sb_user_email", "—")
-    _rol             = st.session_state.get("sb_rol", "contador")
-    _rol_label       = {"admin": "Administrador", "contador": "Contador", "viewer": "Visor"}.get(_rol, _rol.title())
-    _rol_color       = {"admin": "#F59E0B", "contador": "#3B82F6", "viewer": "#94A3B8"}.get(_rol, "#94A3B8")
+    st.markdown(
+        "<div style='margin:8px 10px;padding:10px 14px;"
+        "background:rgba(255,255,255,0.05);border-radius:10px;"
+        "border:1px solid rgba(255,255,255,0.08);'>"
+        "<div style='color:#fff;font-weight:600;font-size:0.83rem;'>Learnix DTE Hub</div>"
+        "<div style='color:#3B82F6;font-size:0.62rem;font-weight:700;"
+        "text-transform:uppercase;letter-spacing:1.5px;'>Sistema Activo</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
-    if org:
-        _plan       = org.get("plan_suscripcion", "starter").upper()
-        _activa     = org.get("estado_activa", True)
-        _dtes       = org.get("dtes_procesados_mes", 0)
-        _limite     = org.get("limite_dtes_mes", 500)
-        _nombre_org = org.get("nombre", "Mi Firma")
-        _plan_color = {
-            "STARTER":     "#3B82F6",
-            "PROFESIONAL": "#10B981",
-            "ENTERPRISE":  "#F59E0B",
-        }.get(_plan, "#94A3B8")
-
-        sidebar_org_card(
-            nombre_contador=_nombre_contador,
-            rol_label=_rol_label,
-            rol_color=_rol_color,
-            nombre_org=_nombre_org,
-            plan=_plan,
-            plan_color=_plan_color,
-            estado_activa=_activa,
-            dtes=_dtes,
-            limite=_limite,
-        )
-    else:
-        st.markdown(
-            f"<div style='margin:8px 10px;padding:10px 14px;"
-            f"background:rgba(255,255,255,0.05);border-radius:10px;"
-            f"border:1px solid rgba(255,255,255,0.08);'>"
-            f"<div style='color:#fff;font-weight:600;font-size:0.83rem;'>{_nombre_contador}</div>"
-            f"<div style='color:{_rol_color};font-size:0.62rem;font-weight:700;"
-            f"text-transform:uppercase;letter-spacing:1.5px;'>{_rol_label}</div>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-
-    # ── Cliente activo ─────────────────────────────────────────────────────────
     if st.session_state.get("cliente_activo"):
         sidebar_cliente_card(st.session_state.cliente_activo)
 
-    # ── Gemini API Key ─────────────────────────────────────────────────────────
     try:
         _gemini_secret = st.secrets.get("gemini", {}).get("api_key", "")
     except Exception:
@@ -275,6 +221,6 @@ with st.sidebar:
                 st.rerun()
 
     st.markdown(
-        "<div class='sidebar-version'>v4.0 SaaS &nbsp;·&nbsp; El Salvador</div>",
+        "<div class='sidebar-version'>v5.0 Local &nbsp;·&nbsp; El Salvador</div>",
         unsafe_allow_html=True,
     )

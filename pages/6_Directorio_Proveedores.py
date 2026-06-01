@@ -13,7 +13,7 @@ from styles import DARK_PRO_CSS
 st.set_page_config(page_title="Directorio Proveedores", layout="wide", page_icon="🏢")
 
 # ─────────────────────────────────────────────
-# 2. SEGURIDAD — Multi-tenant SaaS
+# 2. SEGURIDAD
 # ─────────────────────────────────────────────
 from utils.auth_guard import check_auth
 check_auth()
@@ -24,13 +24,12 @@ check_auth()
 st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 4. IMPORTS DE BD
+# 4. IMPORTS DE BD LOCAL
 # ─────────────────────────────────────────────
-from utils.supabase_client import (
+from utils.local_db import (
     cargar_proveedores_db,
     guardar_proveedor_db,
     eliminar_proveedor_db,
-    get_supabase,
 )
 
 def limpiar_numero(num: str) -> str:
@@ -49,15 +48,14 @@ with col_logo:
 with col_titulo:
     st.title("🏢 Directorio de Proveedores")
 
-org_nombre = (st.session_state.get("sb_organizacion") or {}).get("nombre", "tu organización")
 st.write(
-    f"Base de conocimiento de proveedores para **{org_nombre}**. "
+    "Base de conocimiento de proveedores. "
     "El extractor de compras consulta esta lista automáticamente al procesar cada DTE."
 )
 st.divider()
 
 # ─────────────────────────────────────────────
-# 6. CARGA DESDE SUPABASE
+# 6. CARGA LOCAL
 # ─────────────────────────────────────────────
 proveedores: list[dict] = cargar_proveedores_db()
 prov_por_id: dict[str, dict] = {p["id"]: p for p in proveedores}
@@ -65,10 +63,9 @@ prov_por_id: dict[str, dict] = {p["id"]: p for p in proveedores}
 # ─────────────────────────────────────────────
 # 7. TABS
 # ─────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3 = st.tabs([
     "➕ Agregar / Actualizar",
-    "📋 Tu Catálogo Privado",
-    "🌐 Catálogo Global",
+    "📋 Catálogo de Proveedores",
     "🚀 Carga Masiva",
 ])
 
@@ -95,7 +92,7 @@ with tab1:
                     nrc    = nrc_limpio,
                 )
                 if ok:
-                    st.success(f"✅ **{nuevo_nombre.strip().upper()}** guardado en tu catálogo privado.")
+                    st.success(f"✅ **{nuevo_nombre.strip().upper()}** guardado en el catálogo.")
                     st.rerun()
                 else:
                     st.error("No se pudo guardar. Intenta de nuevo.")
@@ -105,7 +102,7 @@ with tab1:
         "los nuevos proveedores se agregan aquí automáticamente."
     )
 
-# ── TAB 2: Catálogo privado ──────────────────────────────────────────────────
+# ── TAB 2: Catálogo ──────────────────────────────────────────────────────────
 with tab2:
     if proveedores:
         df_prov = pd.DataFrame([
@@ -113,18 +110,14 @@ with tab2:
                 "NIT / DUI": p.get("nit", ""),
                 "NRC":       p.get("nrc", ""),
                 "Nombre":    p.get("nombre_comercial", ""),
-                "Agregado":  str(p.get("created_at", ""))[:10],
             }
             for p in proveedores
         ])
         st.dataframe(df_prov, use_container_width=True, hide_index=True)
-        st.markdown(f"**{len(proveedores)} proveedores** en tu catálogo privado.")
+        st.markdown(f"**{len(proveedores)} proveedores** en el catálogo.")
         st.divider()
 
-        # ── Eliminación ─────────────────────────────────────────────────────
         st.markdown("#### 🗑️ Eliminar Proveedor")
-        st.caption("Solo administradores pueden eliminar. Acción irreversible.")
-
         opciones_borrar = {
             f"{p['nit']} · {p['nombre_comercial']}": p["id"]
             for p in proveedores
@@ -140,57 +133,17 @@ with tab2:
                 st.success("Proveedor eliminado.")
                 st.rerun()
             else:
-                st.error("No se pudo eliminar. Verifica que tienes permisos de administrador.")
+                st.error("No se pudo eliminar.")
     else:
         st.info(
-            "Tu catálogo privado está vacío. "
-            "Se irá poblando automáticamente al procesar DTEs de compras, "
+            "El catálogo está vacío. Se irá poblando automáticamente al procesar DTEs de compras, "
             "o agrégalos manualmente en la pestaña **Agregar / Actualizar**."
         )
 
-# ── TAB 3: Catálogo global (solo lectura) ────────────────────────────────────
+# ── TAB 3: Carga masiva ───────────────────────────────────────────────────────
 with tab3:
-    st.markdown(
-        "Lista maestra curada por Learnix. "
-        "Estos proveedores están disponibles para **todas las organizaciones** "
-        "y el extractor los consulta automáticamente como fallback."
-    )
-    try:
-        resp = get_supabase().table("proveedores_globales").select("*").order("nombre_comercial").execute()
-        globales: list[dict] = resp.data or []
-    except Exception:
-        globales = []
-
-    if globales:
-        df_global = pd.DataFrame([
-            {
-                "NIT":       g.get("nit", ""),
-                "Nombre":    g.get("nombre_comercial", ""),
-                "Categoría": g.get("categoria", "").title(),
-            }
-            for g in globales
-        ])
-        st.dataframe(df_global, use_container_width=True, hide_index=True)
-        st.caption(f"{len(globales)} proveedores en el catálogo global.")
-    else:
-        st.info("El catálogo global aún no tiene entradas.")
-
-    st.markdown(
-        "<div style='background:#07142B; border:1px solid #21262D; border-radius:8px;"
-        " padding:12px 16px; margin-top:12px; font-size:0.80rem; color:#8B949E;'>"
-        "<strong style='color:#E6EDF3;'>¿Cómo funciona la búsqueda híbrida?</strong><br><br>"
-        "1. El extractor extrae el NIT del PDF<br>"
-        "2. Busca en tu <strong style='color:#58A6FF'>catálogo privado</strong> → nombre exacto de tu experiencia<br>"
-        "3. Si no lo encuentra, busca en el <strong style='color:#56D364'>catálogo global</strong> → nombre estándar<br>"
-        "4. Si tampoco está, extrae el nombre del texto del PDF y lo guarda en tu catálogo privado"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-# ── TAB 4: Carga masiva ───────────────────────────────────────────────────────
-with tab4:
     st.subheader("Carga Masiva desde Excel o CSV")
-    st.write("Sube tu catálogo completo. El sistema lo importará a tu catálogo privado.")
+    st.write("Sube tu catálogo completo para importarlo al sistema.")
 
     archivo_subido = st.file_uploader("Selecciona tu archivo", type=["xlsx", "csv"])
 
@@ -213,7 +166,7 @@ with tab4:
             st.write(f"Vista previa: **{len(df_import)} filas** detectadas.")
             st.dataframe(df_import.head(5), use_container_width=True)
 
-            if st.button("🚀 Importar al Catálogo Privado", type="primary"):
+            if st.button("🚀 Importar al Catálogo", type="primary"):
                 agregados   = 0
                 errores     = 0
                 progreso    = st.progress(0, text="Importando...")
@@ -247,7 +200,7 @@ with tab4:
 
                 progreso.empty()
                 if agregados:
-                    st.success(f"🎉 **{agregados}** proveedores importados correctamente a tu catálogo privado.")
+                    st.success(f"🎉 **{agregados}** proveedores importados correctamente.")
                 if errores:
                     st.warning(f"⚠️ {errores} filas no pudieron importarse.")
                 if agregados:
