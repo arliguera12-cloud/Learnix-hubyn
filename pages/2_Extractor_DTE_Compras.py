@@ -698,9 +698,14 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             r'[Tt]otal\s+[Gg]ravad[ao]\s*:?\s*\$?\s*(\d[\d,.]+)',
             r'\b[Gg]ravado\s*:?\s*(\d[\d,.]+)',
             r'[Ss]umatoria\s+de\s+[Vv]entas\s*:?\s*\$?\s*(\d[\d,.]+)',
-            # CORREGIDO: Sub-Total solo cuando va seguido de dígito y es línea total,
-            # no subtotales de items individuales (evitar capturar cantidades de línea)
             r'[Ss]ub[\s\-]?[Tt]otal\s+(?:[Gg]ravad[ao]|[Vv]entas?)\s*:?\s*\$?\s*(\d[\d,.]+)',
+            # Layouts DTE comunes
+            r'[Mm]onto\s+[Ss]ujeto\s+a\s+(?:[Ii][Vv][Aa]|[Gg]ravar)\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Vv]entas\s+[Nn]etas?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Tt]otal\s+[Oo]peracion(?:es)?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Vv]alor\s+(?:de\s+)?[Vv]entas?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Bb]ase\s+[Ii]mponible\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Mm]onto\s+[Gg]ravado\s*:?\s*\$?\s*(\d[\d,.]+)',
         ]:
             m_grav = re.search(pat, t_clean)
             if m_grav:
@@ -795,7 +800,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
                 sello = v_sello
 
-        # ── QR ES EL REY: sobreescribe gen/ctrl si el QR encontró datos ─────────
+        # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
         try:
             _qr = _extraer_qr(file_bytes)
             if _qr.get("codigo_generacion"):
@@ -808,6 +813,17 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                     ctrl        = _qc
                     tipo        = _mq.group(1)
                     num_control = ctrl.replace("-", "")
+            # NIT del emisor del QR como respaldo si regex no lo encontró
+            if not nit_prov and _qr.get("nit_emisor_qr"):
+                _nq = re.sub(r'[^0-9]', '', str(_qr["nit_emisor_qr"]))
+                if len(_nq) == 14 and _nq not in excluir_nits:
+                    nit_prov = _nq
+            # Fecha del QR como respaldo si regex no la encontró
+            if not fecha and _qr.get("fecha_qr"):
+                _fq = str(_qr["fecha_qr"]).strip()
+                _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fq)
+                if _mf:
+                    fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
         except Exception:
             pass
 

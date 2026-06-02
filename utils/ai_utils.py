@@ -738,6 +738,10 @@ def procesar_dte_con_gemini(
 # ─── Compatibilidad con versión anterior ─────────────────────────────────────
 
 def necesita_verificacion(campos: dict, nit_receptor: str) -> tuple[bool, list[str]]:
+    """
+    Siempre retorna True cuando Groq está disponible para máxima precisión.
+    Acumula las razones específicas para logging/UI.
+    """
     razones = []
     _nit_p = re.sub(r'[^0-9]', '', str(campos.get("nit_prov") or ""))
     _nit_r = re.sub(r'[^0-9]', '', str(nit_receptor or ""))
@@ -751,7 +755,8 @@ def necesita_verificacion(campos: dict, nit_receptor: str) -> tuple[bool, list[s
         razones.append("Fecha de emisión no encontrada")
     if not campos.get("nit_prov", "").strip():
         razones.append("NIT del emisor no encontrado")
-    return bool(razones), razones
+    # Siempre verificar con Groq cuando está disponible — máxima precisión
+    return True, razones
 
 
 def verificar_compra_con_gemini(
