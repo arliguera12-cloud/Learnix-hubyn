@@ -622,13 +622,22 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     break
 
         # Ventas gravadas
-        m_grav = re.search(
-            r"(?:Ventas?\s+Gravadas?\s+Locales?|Subtotal\s+Gravado|Ventas?\s+Gravadas?)[^\d]{0,30}"
-            r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-            t_clean, re.I
-        )
-        if m_grav:
-            gravadas = limpiar_monto(m_grav.group(1))
+        _PATS_GRAVADAS = [
+            r"Ventas?\s+Gravadas?\s+Locales?[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"Subtotal\s+Gravado[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"Ventas?\s+Gravadas?[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"Monto\s+Sujeto\s+a\s+(?:IVA|Gravar)[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"Ventas?\s+Netas?[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"Base\s+Imponible[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"Monto\s+Gravado[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+            r"Total\s+Operacion(?:es)?[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+        ]
+        for _pg in _PATS_GRAVADAS:
+            m_grav = re.search(_pg, t_clean, re.I)
+            if m_grav:
+                gravadas = limpiar_monto(m_grav.group(1))
+                if gravadas > 0:
+                    break
 
         # Para DTE-01 (factura consumidor): gravadas incluyen IVA (campo N del anexo)
         # El total incluye IVA, las gravadas se reportan CON IVA incluido
@@ -715,7 +724,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
                 sello = v_sello
 
-        # ── QR ES EL REY: sobreescribe gen/ctrl si el QR encontró datos ─────────
+        # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
         try:
             _qr = _extraer_qr(file_bytes)
             if _qr.get("codigo_generacion"):
@@ -728,6 +737,12 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     ctrl        = _qc
                     tipo        = _mq.group(1)
                     num_control = ctrl.replace("-", "")
+            # Fecha del QR como respaldo si regex no la encontró
+            if not fecha and _qr.get("fecha_qr"):
+                _fq = str(_qr["fecha_qr"]).strip()
+                _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fq)
+                if _mf:
+                    fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
         except Exception:
             pass
 

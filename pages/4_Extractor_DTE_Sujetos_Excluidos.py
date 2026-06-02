@@ -329,7 +329,7 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             elif _corr_dict.get("dui_sujeto"):
                 id_sujeto = _corr_dict["dui_sujeto"]
 
-        # ── QR ES EL REY: sobreescribe gen/ctrl si el QR encontró datos ─────────
+        # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
         try:
             _qr = _extraer_qr(file_bytes)
             if _qr.get("codigo_generacion"):
@@ -340,6 +340,17 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if _mq:
                     num_control = _qc.replace("-", "")
                     tipo        = _mq.group(1)
+            # NIT del sujeto excluido del QR como respaldo
+            if not id_sujeto and _qr.get("nit_emisor_qr"):
+                _nq = re.sub(r'[^0-9]', '', str(_qr["nit_emisor_qr"]))
+                if len(_nq) >= 9 and _nq != nit_cliente:
+                    id_sujeto = _nq
+            # Fecha del QR como respaldo
+            if not fecha and _qr.get("fecha_qr"):
+                _fq = str(_qr["fecha_qr"]).strip()
+                _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fq)
+                if _mf:
+                    fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
         except Exception:
             pass
 
