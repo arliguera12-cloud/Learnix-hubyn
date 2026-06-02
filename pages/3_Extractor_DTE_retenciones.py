@@ -22,7 +22,7 @@ from utils.ai_utils import (
     gemini_ultimo_error,
     procesar_dte_con_gemini,
 )
-from utils.gemini_vision import (
+from utils.gemini_vision import (  # stub — siempre retorna vacío
     extraer_dte_con_vision,
     vision_disponible,
     vision_ultimo_error,
@@ -537,7 +537,7 @@ with st.sidebar:
             # ── Pre-lectura en hilo principal ───────────────────────────────────
             nombres_y_bytes: list[tuple[str, bytes]] = [(f.name, f.read()) for f in nuevos]
             estado_txt.caption(
-                f"⏳ Enviando {total} archivos en paralelo a Gemini..."
+                f"⏳ Procesando {total} archivos en paralelo..."
             )
 
             # ── Extracción paralela ─────────────────────────────────────────────

@@ -30,7 +30,7 @@ from utils.training_examples import registrar_correccion
 from utils.gemini_vision import (
     extraer_dte_con_vision,
     vision_disponible,
-    vision_ultimo_error,   # surfaces the actual API error for debugging
+    vision_ultimo_error,
 )
 from utils.qa_utils import (
     campos_invalidos_dte,
@@ -1211,13 +1211,13 @@ with st.sidebar:
                 f"{len(nombres_y_bytes_json)} JSON(s) a procesar..."
             )
 
-            # ── JSON nativo: procesar sin Gemini ────────────────────────────────
+            # ── JSON nativo: procesar directo ───────────────────────────────────
             resultados_json: list[tuple[str, bytes, dict]] = [
                 (fname, fb, procesar_json_nativo_ventas(fb))
                 for fname, fb in nombres_y_bytes_json
             ]
 
-            # ── PDFs: extracción paralela con Gemini Vision ──────────────────────
+            # ── PDFs: extracción paralela ────────────────────────────────────────
             fn_extraer = functools.partial(
                 extraer_venta_nativo_pro, cliente_activo=cliente, clientes_db=_clientes_db_cache
             )

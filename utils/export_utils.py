@@ -37,7 +37,7 @@ def _to_excel(df: pd.DataFrame, audit_info: dict | None = None) -> bytes:
             cliente_nit    = "—"
 
         try:
-            audit_log = st.session_state.get("gemini_audit_log", [])
+            audit_log = st.session_state.get("ai_audit_log", [])
             n_docs_ia = len(audit_log)
             confianza_prom = (
                 round(sum(e.get("confianza_extraccion", 0) for e in audit_log) / n_docs_ia)

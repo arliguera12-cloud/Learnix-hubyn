@@ -556,11 +556,11 @@ def _extraer_campos_corregidos(resultado: dict, campos_actuales: dict, tipo_dte:
     with _audit_lock:
         _ultimo_audit = audit_entry
         try:
-            if "gemini_audit_log" not in st.session_state:
-                st.session_state.gemini_audit_log = []
-            st.session_state.gemini_audit_log.append(audit_entry)
-            if len(st.session_state.gemini_audit_log) > 50:
-                st.session_state.gemini_audit_log = st.session_state.gemini_audit_log[-50:]
+            if "ai_audit_log" not in st.session_state:
+                st.session_state.ai_audit_log = []
+            st.session_state.ai_audit_log.append(audit_entry)
+            if len(st.session_state.ai_audit_log) > 50:
+                st.session_state.ai_audit_log = st.session_state.ai_audit_log[-50:]
         except Exception:
             pass
 
@@ -660,7 +660,7 @@ def mostrar_audit_gemini(archivo: str = "", container=None) -> None:
 
         audit_log = []
         try:
-            audit_log = st.session_state.get("gemini_audit_log", [])
+            audit_log = st.session_state.get("ai_audit_log", [])
         except Exception:
             pass
         if len(audit_log) > 1:
@@ -744,7 +744,7 @@ def limpiar_cache_gemini() -> None:
     """Limpia el audit log de la sesión actual."""
     try:
         import streamlit as _st
-        _st.session_state.pop("gemini_audit_log", None)
+        _st.session_state.pop("ai_audit_log", None)
         _st.session_state.pop("_cache_extracciones", None)
         _st.session_state.pop("_pdfs_procesados", None)
     except Exception:
