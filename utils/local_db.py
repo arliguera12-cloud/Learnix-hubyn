@@ -21,9 +21,13 @@ def _leer(path: str) -> dict:
 
 
 def _escribir(path: str, data: dict) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    """Escritura atómica: escribe en .tmp y renombra para evitar corrupción."""
+    dir_ = os.path.dirname(path)
+    os.makedirs(dir_, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
+    os.replace(tmp, path)
 
 
 # ── Clientes ──────────────────────────────────────────────────────────────────

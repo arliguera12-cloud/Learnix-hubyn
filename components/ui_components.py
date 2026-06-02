@@ -384,65 +384,6 @@ def sidebar_logo() -> None:
 
 
 # ─────────────────────────────────────────────────────────
-# CARD DE ORGANIZACIÓN EN SIDEBAR
-# ─────────────────────────────────────────────────────────
-def sidebar_org_card(
-    nombre_contador: str,
-    rol_label: str,
-    rol_color: str,
-    nombre_org: str,
-    plan: str,
-    plan_color: str,
-    estado_activa: bool,
-    dtes: int,
-    limite: int,
-) -> None:
-    uso_pct    = int(dtes / limite * 100) if limite else 0
-    estado_txt = "Activa" if estado_activa else "Suspendida"
-    estado_col = "var(--success)" if estado_activa else "var(--error)"
-    barra_col  = (
-        "var(--success)" if uso_pct < 80
-        else ("var(--warning)" if uso_pct < 100 else "var(--error)")
-    )
-    st.markdown(
-        f"""
-        <div class="sidebar-user-card">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-            <div class="sidebar-user-avatar">👤</div>
-            <div style="min-width:0;flex:1;">
-              <div class="sidebar-user-name">{nombre_contador}</div>
-              <div class="sidebar-user-role" style="color:{rol_color};">{rol_label}</div>
-            </div>
-          </div>
-          <div class="sidebar-divider"></div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            <span style="font-size:0.85rem;">🏢</span>
-            <div style="min-width:0;flex:1;">
-              <div class="sidebar-org-label">Firma contable</div>
-              <div class="sidebar-org-name">{nombre_org}</div>
-            </div>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <span class="sidebar-plan-badge"
-                  style="background:rgba(255,255,255,0.07);color:{plan_color};border:1px solid rgba(255,255,255,0.10);">
-              &#x25CF;&nbsp;{plan}
-            </span>
-            <span style="font-size:0.62rem;color:{estado_col};font-weight:700;">&#x25CF;&nbsp;{estado_txt}</span>
-          </div>
-          <div style="font-size:0.62rem;color:rgba(255,255,255,0.40);margin-bottom:4px;">
-            DTEs este mes: <strong style="color:rgba(255,255,255,0.75);">{dtes}</strong> / {limite}
-          </div>
-          <div class="sidebar-quota-track">
-            <div class="sidebar-quota-fill"
-                 style="width:{min(uso_pct,100)}%;background:{barra_col};"></div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# ─────────────────────────────────────────────────────────
 # CARD CLIENTE ACTIVO SIDEBAR
 # ─────────────────────────────────────────────────────────
 def sidebar_cliente_card(cliente: dict) -> None:
