@@ -48,20 +48,25 @@ def filtrar_duplicados(
     """
     Filtra archivos cuyos bytes ya fueron procesados en esta sesión (mismo hash SHA-256).
 
+    IMPORTANTE: llamar SIEMPRE desde el hilo principal de Streamlit, ANTES de
+    pasar la lista a leer_y_procesar_lote(). st.session_state no es accesible
+    desde threads secundarios del ThreadPoolExecutor.
+
     Args:
         nombres_y_bytes: lista de (nombre, bytes) a filtrar.
         session_key:     clave en st.session_state donde se acumula el set de hashes.
 
     Returns:
-        Sublista con solo los archivos nuevos.
-        Los hashes de los nuevos quedan registrados para futuras llamadas.
+        Sublista con solo los archivos nuevos (hashes no vistos en la sesión actual).
     """
+    # Leer y escribir session_state en el hilo principal antes de cualquier thread
+    vistos: set = set()
     try:
         if session_key not in st.session_state:
             st.session_state[session_key] = set()
-        vistos: set = st.session_state[session_key]
+        vistos = st.session_state[session_key]
     except Exception:
-        vistos = set()
+        pass  # fuera de contexto Streamlit — dedup desactivado silenciosamente
 
     nuevos = []
     for fname, fb in nombres_y_bytes:
