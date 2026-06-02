@@ -25,6 +25,7 @@ from utils.ai_utils import (
     gemini_disponible,
     gemini_ultimo_error,
     procesar_dte_con_gemini,
+    es_nombre_sospechoso,
 )
 from utils.training_examples import registrar_correccion
 from utils.gemini_vision import (
@@ -222,6 +223,9 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, cliente_activo: d
             if re.fullmatch(r'[\d\s\-\.\/]+', T):
                 return False
             if not re.search(r'[A-ZÁÉÍÓÚÑÜ]', T):
+                return False
+            # Red de seguridad: rechazar metadata fiscal (MODELO FACTURACIÓN, etc.)
+            if es_nombre_sospechoso(T):
                 return False
             return True
         except Exception:

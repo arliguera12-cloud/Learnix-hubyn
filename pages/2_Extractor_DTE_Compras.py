@@ -82,9 +82,12 @@ TIPOS_VALIDOS_COMPRAS = {"03", "05", "06", "11"}
 SKIP_LINEAS = re.compile(
     r'^(?:DOCUMENTO|TRIBUTARIO|ELECTR[OÓ]NICO|ELECTRONICO|COMPROBANTE|'
     r'CR[EÉ]DITO|CREDITO|FISCAL|C[OÓ]DIGO|CODIGO|SELLO|N[UÚ]MERO|NUMERO|'
-    r'MODELO\s+DE|M[OÓ]DULO\s+DE|TIPO\s+DE|'
-    r'FECHA\s*[:\s]|FECHA\s+Y\s+HORA|FECHA\s+PROCESADO|'
-    r'RECEPTOR|EMISOR|CLIENTE|DTE-|'
+    r'MODELO\s+(?:DE|FACTURACI)|M[OÓ]DULO\s+DE|TIPO\s+(?:DE|TRANSMISI)|'
+    r'TRANSMISI[OÓ]N|MONEDA|VERSI[OÓ]N\s+JSON|HORA\s+EMISI|'
+    r'ACTIVIDAD|CONDICI[OÓ]N|DISTRITO|DEPTO|DEPARTAMENTO|MUNICIPIO|'
+    r'SUCURSAL|DIRECCI[OÓ]N|TEL[EÉ]FONO|TELEFONO|'
+    r'FECHA\s*[:\s]|FECHA\s+Y\s+HORA|FECHA\s+PROCESADO|FECHA\s+EMISI|'
+    r'RECEPTOR|EMISOR|CLIENTE|DTE-|VENTA\s+A\s+CUENTA|DOCUMENTOS\s+RELAC|'
     r'P[AÁ]GINA|PAGINA|VER\.|VERSI[OÓ]N|VERSION|[A-F0-9]{8}-|'
     r'\d{2}[/\-]\d{2}[/\-]\d{4}|\d{2}:\d{2}:\d{2})',
     re.I
@@ -120,8 +123,9 @@ NOMBRES_INVALIDOS = {
 # CORREGIDO: patrón solo, se aplica con .sub("", s) en la función limpiar()
 CORTE_NOMBRE = re.compile(
     r"\s*(?:NIT|NRC|GIRO|ACTIVIDAD|DIRECCI[OÓ]N|CORREO|TEL[EÉ]F|"
-    r"TIPO\s+ESTAB|MUNICIPIO|DEPARTAMENTO|NUMERO\s+DE\s+CONTROL|"
-    r"MODELO\s+DE|TIPO\s+DE\s+TRANS|N\.?\s*I\.?\s*T\.?\s*[:\s]|"
+    r"TIPO\s+ESTAB|MUNICIPIO|DEPARTAMENTO|DISTRITO|DEPTO|NUMERO\s+DE\s+CONTROL|"
+    r"MODELO\s+(?:DE|FACTURACI)|TIPO\s+(?:DE\s+TRANS|TRANSMISI)|"
+    r"CONDICI[OÓ]N|SUCURSAL|N\.?\s*I\.?\s*T\.?\s*[:\s]|"
     r"N\.?\s*R\.?\s*C\.?\s*[:\s]|N[UÚ]MERO\s+DE|REGISTRO|PROCESAMIENTO|"
     r"\d{4}[\s\-]\d{6})"
     r".*$",
@@ -248,6 +252,9 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
         if not re.search(r'[A-ZÁÉÍÓÚÑÜ]', T):
             return False
         if SKIP_LINEAS.match(T):
+            return False
+        # Red de seguridad: rechazar metadata fiscal (MODELO FACTURACIÓN, etc.)
+        if es_nombre_sospechoso(T):
             return False
         return True
 
