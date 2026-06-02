@@ -229,6 +229,28 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+    # ── Estado de entrenamiento IA ───────────────────────────────────────────
+    try:
+        from utils.training_examples import contar_ejemplos
+        _conteos = contar_ejemplos()
+        _total_ej = sum(_conteos.values())
+        if _total_ej > 0:
+            _labels = ", ".join(
+                f"{v} {k}" for k, v in _conteos.items() if v > 0
+            )
+            st.markdown(
+                f"<div style='margin:4px 10px 8px;padding:8px 12px;"
+                f"background:rgba(29,184,170,0.08);border-radius:8px;"
+                f"border:1px solid rgba(29,184,170,0.20);font-size:0.72rem;"
+                f"color:rgba(255,255,255,0.65);'>"
+                f"🧠 <strong style='color:#1DB8AA;'>IA entrenada</strong> — "
+                f"{_total_ej} corrección{'es' if _total_ej != 1 else ''} "
+                f"<span style='color:rgba(255,255,255,0.35);'>({_labels})</span></div>",
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        pass
+
     if not st.session_state["confirmar_logout"]:
         if st.button("↩ Cerrar sesión", use_container_width=True, type="secondary"):
             st.session_state["confirmar_logout"] = True

@@ -26,7 +26,9 @@ from utils.ai_utils import (
     verificar_compra_con_gemini,
     necesita_verificacion,
     gemini_disponible,
+    procesar_dte_con_gemini,
 )
+from utils.training_examples import registrar_correccion
 from utils.gemini_vision import (
     extraer_dte_con_vision,
     vision_disponible,
@@ -1530,6 +1532,40 @@ if st.session_state.cola_revision:
                             if err:
                                 st.caption(f"**⚠️ Error:** `{err}`")
 
+                    # ── Botón Re-intentar con IA ──────────────────────────
+                    _campos_vacios = [
+                        k for k in ("fecha", "nit_prov", "nom_prov")
+                        if not datos_act.get(k, "").strip()
+                    ]
+                    if _campos_vacios and gemini_disponible():
+                        if st.button(
+                            f"🤖 Re-intentar con IA ({', '.join(_campos_vacios)})",
+                            key=f"retry_ia_{item_actual['archivo']}",
+                            type="secondary",
+                        ):
+                            with st.spinner("Consultando Groq…"):
+                                _nit_rec = st.session_state.cliente_activo.get("nit", "")
+                                _nom_rec = st.session_state.cliente_activo.get("nombre", "")
+                                _campos_act2 = {
+                                    "fecha"   : datos_act.get("fecha", ""),
+                                    "nit_prov": datos_act.get("nit_prov", ""),
+                                    "nom_prov": datos_act.get("nom_prov", ""),
+                                }
+                                _corr2, _ = verificar_compra_con_gemini(
+                                    texto_crudo, _campos_act2, _nit_rec, _nom_rec
+                                )
+                                _actualizado = False
+                                for _k in ("fecha", "nit_prov", "nom_prov"):
+                                    if _corr2.get(_k):
+                                        datos_act[_k] = _corr2[_k]
+                                        _actualizado = True
+                                if _actualizado:
+                                    st.success("✅ IA actualizó los campos. Revisa el formulario.")
+                                    st.rerun()
+                                else:
+                                    st.warning("⚠️ La IA no pudo extraer los campos faltantes de este documento.")
+                    # ─────────────────────────────────────────────────────────
+
                     st.markdown("**📝 Texto extraído:**")
                     st.text_area(
                         "", value=texto_crudo.strip(),
@@ -1753,6 +1789,30 @@ if st.session_state.cola_revision:
                                 "invalidos": [], "duplicados": [], "iva_calc": [],
                                 "nuevos_proveedores": np_dict, "corruptos": [],
                             }
+
+                    # ── Guardar como ejemplo de entrenamiento ────────────────
+                    try:
+                        _texto_train = ""
+                        with pdfplumber.open(BytesIO(item_actual["bytes"])) as _pdf_t:
+                            for _pg in _pdf_t.pages:
+                                _texto_train += safe_extract_text(_pg) + "\n"
+                        registrar_correccion(
+                            tipo_dte          = "compras",
+                            texto_pdf         = _texto_train,
+                            campos_originales = {
+                                "fecha"   : datos_act.get("fecha", ""),
+                                "nit_prov": datos_act.get("nit_prov", ""),
+                                "nom_prov": datos_act.get("nom_prov", ""),
+                            },
+                            campos_corregidos = {
+                                "fecha"   : f_fecha.strip(),
+                                "nit_prov": nit_act,
+                                "nom_prov": nombre_limpio,
+                            },
+                        )
+                    except Exception:
+                        pass
+                    # ─────────────────────────────────────────────────────────
 
                     st.session_state.cola_revision.pop(0)
                     st.success("✅ Documento aprobado y agregado al libro.")
