@@ -29,7 +29,7 @@ from utils.ai_utils import (
     procesar_dte_con_gemini,
 )
 from utils.training_examples import registrar_correccion
-from utils.gemini_vision import (
+from utils.gemini_vision import (  # stub — siempre retorna vacío
     extraer_dte_con_vision,
     vision_disponible,
     vision_ultimo_error,
@@ -1261,13 +1261,13 @@ with st.sidebar:
                 f"{len(nombres_y_bytes_json)} JSON(s) a procesar..."
             )
 
-            # ── JSON nativo: procesar sin Gemini ────────────────────────────────
+            # ── JSON nativo: procesar directo ───────────────────────────────────
             resultados_json: list[tuple[str, bytes, dict]] = [
                 (fname, fb, procesar_json_nativo_compras(fb))
                 for fname, fb in nombres_y_bytes_json
             ]
 
-            # ── PDFs: extracción paralela con Gemini Vision ──────────────────────
+            # ── PDFs: extracción paralela ────────────────────────────────────────
             fn_extraer = functools.partial(
                 extraer_compra_nativo_pro,
                 cliente_activo=cliente,
@@ -1312,7 +1312,7 @@ with st.sidebar:
 
                 # Regla contable: DTE-01 (Factura consumidor) no es válido en Compras
                 _tipo_res = safe_str(res.get("tipo", ""))
-                # Normalizar: extraer dígitos y formatear como "03" (Gemini puede devolver "CCF", "3")
+                # Normalizar: extraer dígitos y formatear como "03" (la IA puede devolver "CCF", "3")
                 _m_tipo_r = re.search(r'\d+', _tipo_res)
                 if _m_tipo_r:
                     _tipo_res = _m_tipo_r.group(0).zfill(2)

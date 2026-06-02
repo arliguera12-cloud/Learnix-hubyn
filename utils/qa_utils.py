@@ -334,17 +334,17 @@ def mostrar_indicador_vision(
     if not audit_vision:
         if error_vision:
             target.warning(
-                f"⚠️ **Gemini Vision falló** — se usó regex como respaldo.\n\n"
+                f"⚠️ **IA Vision falló** — se usó regex como respaldo.\n\n"
                 f"Error exacto: `{error_vision}`"
             )
         else:
-            target.caption("🔌 Gemini Vision no disponible — extracción solo por regex")
+            target.caption("🔌 IA Vision no disponible — extracción solo por regex")
         return
 
     confianza = audit_vision.get("confianza", 0)
     layout    = audit_vision.get("layout", "")
     notas     = audit_vision.get("notas", "")
-    modelo    = audit_vision.get("modelo", "gemini-2.5-flash-vision")
+    modelo    = audit_vision.get("modelo", "ai-vision")
 
     if confianza >= 85:
         color, nivel = "#6AB040", "Alta confianza"
@@ -356,7 +356,7 @@ def mostrar_indicador_vision(
     target.markdown(
         f"""<div style="background:#1A2C18;border-radius:6px;padding:6px 12px;margin:4px 0">
         <span style="color:{color};font-weight:bold">
-        👁️ Gemini Vision</span>
+        👁️ IA Vision</span>
         <span style="color:#8BAF72"> · {modelo}</span>
         <span style="color:#666"> · Layout: {layout or 'N/A'}</span>
         <div style="background:{color};width:{confianza}%;height:5px;

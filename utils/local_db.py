@@ -1,6 +1,6 @@
 """
 local_db.py — Almacenamiento local en JSON para clientes y proveedores.
-Reemplaza las funciones de Supabase.
+Almacenamiento persistente en JSON para clientes y proveedores.
 """
 from __future__ import annotations
 import json

@@ -1,6 +1,5 @@
 """
-supabase_client.py — Capa de compatibilidad sin Supabase.
-Auth por contraseña simple; datos en JSON local.
+supabase_client.py — Auth por contraseña simple; datos en JSON local (local_db).
 """
 from __future__ import annotations
 import streamlit as st
