@@ -6,6 +6,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from styles import DARK_PRO_CSS
 from utils.supabase_client import login, logout
+from utils.ai_utils import groq_disponible, gemini_ultimo_error, circuit_breaker_status
 from components.ui_components import (
     sidebar_logo,
     sidebar_cliente_card,
@@ -168,27 +169,51 @@ with st.sidebar:
     if st.session_state.get("cliente_activo"):
         sidebar_cliente_card(st.session_state.cliente_activo)
 
-    try:
-        _gemini_secret = st.secrets.get("gemini", {}).get("api_key", "")
-    except Exception:
-        _gemini_secret = ""
-    if not _gemini_secret:
-        with st.expander("⚡ IA · Gemini", expanded=False):
-            gemini_key = st.text_input(
-                "API Key Gemini 2.5 Flash",
-                type="password",
-                value=st.session_state.get("gemini_api_key", ""),
-                placeholder="AIza...",
-                help="Mejora la extracción de nombres cuando el PDF tiene formato inusual.",
-                label_visibility="collapsed",
+    # ── Estado de IA (Groq) ────────────────────────────────────────────────────
+    _groq_ok = groq_disponible()
+    _cb      = circuit_breaker_status()
+
+    with st.expander("⚡ IA · Groq", expanded=False):
+        if _groq_ok:
+            st.markdown(
+                "<div style='padding:6px 10px;background:#1A2C18;border-radius:6px;"
+                "border:1px solid #6AB040;font-size:0.78rem;color:#A8E870'>"
+                "⚡ <strong>Groq activo</strong> — llama3-8b-8192</div>",
+                unsafe_allow_html=True,
             )
-            if gemini_key != st.session_state.get("gemini_api_key", ""):
-                st.session_state["gemini_api_key"] = gemini_key
+        elif _cb["open"]:
+            secs = max(0, int(_cb["open_until"] - __import__("time").time()))
+            st.warning(f"⚠️ Circuit breaker abierto (~{secs}s). Demasiados errores consecutivos.")
+        else:
+            st.markdown(
+                "<div style='padding:6px 10px;background:#1A1212;border-radius:6px;"
+                "border:1px solid #555;font-size:0.78rem;color:#aaa'>"
+                "🔌 IA sin configurar — solo extracción por regex</div>",
+                unsafe_allow_html=True,
+            )
+            _err = gemini_ultimo_error()
+            if _err:
+                st.caption(f"Último error: {_err[:80]}")
+
+        _groq_secret = ""
+        try:
+            _groq_secret = st.secrets.get("GROQ_API_KEY", "")
+        except Exception:
+            pass
+        if not _groq_secret:
+            groq_key = st.text_input(
+                "GROQ_API_KEY",
+                type="password",
+                value=st.session_state.get("groq_api_key_input", ""),
+                placeholder="gsk_...",
+                help="Configura en secrets.toml para persistencia.",
+                label_visibility="visible",
+            )
+            if groq_key and groq_key != st.session_state.get("groq_api_key_input", ""):
+                st.session_state["groq_api_key_input"] = groq_key
+                import os
+                os.environ["GROQ_API_KEY"] = groq_key
                 st.rerun()
-            if st.session_state.get("gemini_api_key"):
-                st.success("Gemini activo", icon="⚡")
-            else:
-                st.caption("Sin clave — extracción solo con regex.")
 
 # ─────────────────────────────────────────────
 # EJECUTAR NAVEGACIÓN

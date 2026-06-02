@@ -17,7 +17,7 @@ from utils.pdf_utils import (
     extraer_y_formatear_fecha,
     extraer_texto_pdf,
 )
-from utils.gemini_utils import (
+from utils.ai_utils import (
     gemini_disponible,
     gemini_ultimo_error,
     procesar_dte_con_gemini,
