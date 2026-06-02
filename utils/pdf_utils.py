@@ -168,12 +168,31 @@ def extraer_y_formatear_fecha(texto: str) -> str:
         for m in re.finditer(
             r'(?:[Ff]echa\s+y\s+[Hh]ora\s+de\s+(?:[Gg]eneraci[oó]n|[Ee]misi[oó]n)|'
             r'[Ff]echa\s+(?:de\s+)?[Ee]misi[oó]n|[Ff]echa\s+[Gg]eneraci[oó]n|'
+            r'[Ff]echa\s+[Hh]ora\s+[Ee]misi[oó]n|[Ff]echa\s+[Dd]ocumento|'
             r'(?<!\w)[Ff]echa(?!\s+[Vv]enc))'
             r'\s*:?\s*'
             r'(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]20[2-3]\d|20[2-3]\d[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})',
             texto_clean, re.I,
         ):
             candidatas.append((m.start(), m.group(1)))
+
+        # Paso 1b: fecha escrita con mes en texto (ej: "02 de junio de 2024")
+        _MESES = {
+            'enero':1,'febrero':2,'marzo':3,'abril':4,'mayo':5,'junio':6,
+            'julio':7,'agosto':8,'septiembre':9,'octubre':10,'noviembre':11,'diciembre':12,
+        }
+        for m in re.finditer(
+            r'\b(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|'
+            r'septiembre|octubre|noviembre|diciembre)\s+de\s+(20[2-3]\d)\b',
+            texto_clean, re.I,
+        ):
+            ctx = texto_clean[max(0, m.start() - 30):m.start()].upper()
+            if not any(w in ctx for w in ['VENCE', 'LOTE', 'EXPIRA', 'CADUCIDAD']):
+                mes_num = _MESES.get(m.group(2).lower(), 0)
+                if mes_num:
+                    candidatas.append((m.start() - 5,
+                        f"{int(m.group(1)):02d}/{mes_num:02d}/{m.group(3)}"))
+
 
         # Paso 2: ISO YYYY-MM-DD
         for m in re.finditer(
