@@ -530,7 +530,6 @@ def _extraer_campos_corregidos(resultado: dict, campos_actuales: dict, tipo_dte:
     audit_entry  = {**auditoria, "razonamiento": razonamiento, "tipo_dte": tipo_dte}
 
     with _audit_lock:
-        global _ultimo_audit
         _ultimo_audit = audit_entry
         try:
             if "gemini_audit_log" not in st.session_state:
@@ -718,4 +717,11 @@ def verificar_compra_con_gemini(
 
 
 def limpiar_cache_gemini() -> None:
-    pass
+    """Limpia el audit log de la sesión actual."""
+    try:
+        import streamlit as _st
+        _st.session_state.pop("gemini_audit_log", None)
+        _st.session_state.pop("_cache_extracciones", None)
+        _st.session_state.pop("_pdfs_procesados", None)
+    except Exception:
+        pass

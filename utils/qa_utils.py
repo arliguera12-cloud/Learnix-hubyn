@@ -428,7 +428,7 @@ def _parse_fecha_dmy(fecha_str: str):
         if len(p) == 3:
             d, m, y = int(p[0]), int(p[1]), int(p[2])
             if 1 <= d <= 31 and 1 <= m <= 12 and 2000 <= y <= 2100:
-                return datetime.date(y, m, 1)
+                return datetime.date(y, m, d)
     except (ValueError, TypeError):
         pass
     return None
@@ -522,7 +522,7 @@ def razones_revisar_venta(row) -> str:
     sello  = str(d.get("sello", "") or "").strip()
     tipo   = str(d.get("tipo", ""))
     razones = []
-    if tipo == "03" and grav > 0 and debito > 0:
+    if tipo in ("03", "05", "06") and grav > 0 and debito > 0:
         iva_calc = round(grav * 0.13, 2)
         if abs(debito - iva_calc) > 0.05:
             razones.append(f"IVA ${debito:.2f} ≠ {grav:.2f}×13%=${iva_calc:.2f}")
@@ -638,7 +638,7 @@ def aplicar_autocorrecciones_df(df: "pd.DataFrame", tipo_dte: str) -> "pd.DataFr
 
     df = df.copy()
     for idx, row in df.iterrows():
-        correcciones = fn(row.to_dict())
+        correcciones = fn(row.to_dict() if hasattr(row, "to_dict") else dict(row))
         for campo, valor in correcciones.items():
             if campo not in df.columns:
                 df[campo] = None
@@ -695,9 +695,9 @@ def _contar_filas_con_error(df: "pd.DataFrame", tipo_dte: str) -> int:
     for _, row in df.iterrows():
         d = row.to_dict()
         if tipo_dte == "ventas":
-            grav = _monto(d.get("gravadas")); iva = _monto(d.get("debito") or d.get("iva"))
+            grav = _monto(d.get("gravadas")); iva = _monto(d.get("debito", 0))
             tipo = str(d.get("tipo", ""))
-            if tipo in ("03", "06") and grav > 0 and iva > 0 and abs(iva - round(grav * 0.13, 2)) > 0.05:
+            if tipo in ("03", "05", "06") and grav > 0 and iva > 0 and abs(iva - round(grav * 0.13, 2)) > 0.05:
                 n += 1
         elif tipo_dte == "compras":
             gra = _monto(d.get("gra")); iva = _monto(d.get("iva")); tipo = str(d.get("tipo", ""))
