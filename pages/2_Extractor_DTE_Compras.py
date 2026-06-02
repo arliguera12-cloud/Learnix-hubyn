@@ -280,20 +280,35 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
                 break
         if not _nom_line:
             continue
-        # Punto de corte = inicio de la 2ª etiqueta (columna derecha = receptor).
-        # Solo es fiable en layout visual: el corte debe caer sobre espacios
-        # (frontera de columna), no en medio de una palabra del modo lineal.
+        # Estrategia de corte (de más a menos confiable):
+        # 1) Gap de 3+ espacios en la línea de nombres  →  columna izquierda
+        # 2) Receptor conocido aparece en la línea      →  cortar antes de él
+        # 3) Posición de la 2ª etiqueta como referencia →  si cae en espacio
+        # 4) Tomar la línea completa (1 sola columna)
+        _izq = _nom_line  # default: una sola columna
         if len(_labels) >= 2:
-            _split = _labels[1]
-            if _split <= len(_nom_line) and _nom_line[max(0, _split - 1):_split + 1].strip() == "":
-                _izq = _nom_line[:_split]
+            _gap = re.search(r'\S(\s{3,})\S', _nom_line)
+            if _gap:
+                _izq = _nom_line[:_gap.start() + 1]
+            elif receptor_up and len(receptor_up) >= 5:
+                # Buscar las primeras 12 letras del receptor en la línea
+                _m_rec = re.search(re.escape(receptor_up[:12]), _nom_line, re.I)
+                if _m_rec:
+                    _izq = _nom_line[:_m_rec.start()]
+                else:
+                    # Cortar en el punto medio entre las dos etiquetas
+                    _mid = (_labels[0] + _labels[1]) // 2
+                    if _mid < len(_nom_line):
+                        _izq = _nom_line[:_mid]
             else:
-                # Sin frontera de columna real: usar gap grande de espacios
-                _gap = re.search(r'\S(\s{4,})\S', _nom_line)
-                _izq = _nom_line[:_gap.start() + 1] if _gap else _nom_line
+                _split = _labels[1]
+                if _split <= len(_nom_line) and not _nom_line[_split:_split+1].strip():
+                    _izq = _nom_line[:_split]
         else:
-            _gap = re.search(r'\S(\s{4,})\S', _nom_line)
-            _izq = _nom_line[:_gap.start() + 1] if _gap else _nom_line
+            # Una sola etiqueta: puede haber columnas separadas con gap
+            _gap = re.search(r'\S(\s{3,})\S', _nom_line)
+            if _gap:
+                _izq = _nom_line[:_gap.start() + 1]
         _cand = limpiar(_izq)
         if valido(_cand) and len(_cand) >= 4:
             return _cand
