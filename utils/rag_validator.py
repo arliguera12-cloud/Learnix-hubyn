@@ -4,10 +4,7 @@ Pilar 4 — Validación RAG con manuales oficiales de Hacienda.
 Flujo:
   1. Los PDFs de manuales se convierten a texto y se fragmentan (chunks).
   2. Al validar un DTE, se buscan los chunks más relevantes (búsqueda por palabras clave).
-  3. Gemini compara el DTE contra esos fragmentos y emite alertas de auditoría.
-
-Para escalar a producción: reemplaza la búsqueda por palabras clave con
-pgvector en Supabase (embeddings semánticos). El resto del flujo no cambia.
+  3. Groq (llama3-8b-8192) compara el DTE contra esos fragmentos y emite alertas de auditoría.
 """
 from __future__ import annotations
 
@@ -18,7 +15,7 @@ import hashlib
 import pdfplumber
 import streamlit as st
 
-from utils.gemini_utils import _get_api_key  # reutiliza la key ya configurada
+from utils.gemini_utils import _get_api_key
 
 
 # ─────────────────────────────────────────────
@@ -150,7 +147,7 @@ def validar_dte_con_rag(
     base_conocimiento: list[dict] | None = None,
 ) -> dict:
     """
-    Valida un DTE procesado contra los manuales de Hacienda usando Gemini.
+    Valida un DTE procesado contra los manuales de Hacienda usando Groq.
 
     Args:
         dte_data:          Dict con los campos extraídos del DTE.
@@ -161,14 +158,14 @@ def validar_dte_con_rag(
         Dict con claves: 'valido', 'alertas', 'resumen'.
         En caso de error retorna {'valido': None, 'alertas': [], 'resumen': str(error)}.
     """
-    import requests
+    from groq import Groq
 
     api_key = _get_api_key()
     if not api_key:
         return {
             "valido":  None,
             "alertas": [],
-            "resumen": "API Key de Gemini no configurada — validación RAG no disponible.",
+            "resumen": "GROQ_API_KEY no configurada — validación RAG no disponible.",
         }
 
     if base_conocimiento is None:
@@ -192,21 +189,26 @@ def validar_dte_con_rag(
         dte_json=json.dumps(dte_data, ensure_ascii=False, indent=2),
     )
 
-    url  = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1024},
-    }
-
     try:
-        resp = requests.post(f"{url}?key={api_key}", json=body, timeout=30)
-        resp.raise_for_status()
-        raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-        # Limpia markdown si Gemini lo envuelve
+        client   = Groq(api_key=api_key)
+        response = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Eres un auditor fiscal. Responde ÚNICAMENTE con JSON válido, sin texto adicional.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=1024,
+            response_format={"type": "json_object"},
+        )
+        raw = response.choices[0].message.content or ""
         raw = re.sub(r"^```json\s*|```$", "", raw.strip(), flags=re.MULTILINE).strip()
         return json.loads(raw)
     except json.JSONDecodeError:
-        return {"valido": None, "alertas": [], "resumen": "Respuesta de Gemini no parseable."}
+        return {"valido": None, "alertas": [], "resumen": "Respuesta de Groq no parseable."}
     except Exception as e:
         return {"valido": None, "alertas": [], "resumen": f"Error RAG: {str(e)[:120]}"}
 

@@ -9,7 +9,5 @@ PyMuPDF>=1.23.0
 # Plan C - OCR Tesseract para UUID en PDFs escaneados sin QR (packages.txt: tesseract-ocr)
 pytesseract>=0.3.1
 pyzbar
-# Supabase backend
-supabase>=2.4.0
-# Persistencia de sesión via cookies del browser (Pilar 3 — SaaS Auth)
-streamlit-cookies-controller>=0.0.4
+# IA — Groq Cloud (llama3-8b-8192) para extracción y validación de DTEs
+groq>=0.9.0
