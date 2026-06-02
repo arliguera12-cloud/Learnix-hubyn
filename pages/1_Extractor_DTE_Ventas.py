@@ -558,8 +558,9 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "nit_cli": nit_cli,
                 "dui_cli": dui_cli,
             }
+            _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
             _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
-                texto_lineal,
+                _texto_ia,
                 "ventas",
                 _campos_act,
                 {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},

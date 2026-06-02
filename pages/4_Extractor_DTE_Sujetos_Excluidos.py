@@ -314,8 +314,9 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
                 "nit_sujeto": _nit_suj,
                 "dui_sujeto": _dui_suj,
             }
+            _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
             _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
-                texto_lineal,
+                _texto_ia,
                 "sujetos_excluidos",
                 _campos_act,
                 {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
