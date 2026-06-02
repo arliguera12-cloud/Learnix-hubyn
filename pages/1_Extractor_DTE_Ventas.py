@@ -134,10 +134,7 @@ def es_linea_direccion(texto: str) -> bool:
 # 6. FUNCIONES AUXILIARES
 # ─────────────────────────────────────────────
 def cargar_clientes_json() -> dict:
-    """
-    Carga los clientes de la organización activa desde Supabase y los retorna
-    en el formato dict{nit: {nombre, nrc, dui, actividad}} que usa el extractor.
-    """
+    """Carga los clientes desde almacenamiento local y los retorna como dict{nit: {...}}."""
     try:
         from utils.local_db import cargar_clientes_db
         lista = cargar_clientes_db()
@@ -154,7 +151,7 @@ def cargar_clientes_json() -> dict:
         return {}
 
 def guardar_cliente_rapido(nit: str, nombre: str) -> None:
-    """Registra o actualiza un cliente en la organización activa (Supabase)."""
+    """Registra o actualiza un cliente en el almacenamiento local."""
     if not nit or not safe_str(nombre).strip():
         return
     try:
