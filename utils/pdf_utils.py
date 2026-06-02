@@ -96,7 +96,8 @@ def limpiar_monto(monto_str) -> float:
     Soporta: 1,234.56 | 1.234,56 | 1234.56 | 1234,56 | 1234
     """
     try:
-        s = re.sub(r'[^\d.,]', '', safe_str(monto_str).strip())
+        # Eliminar puntuación de cierre de oración antes de parsear
+        s = re.sub(r'[^\d.,]', '', safe_str(monto_str).strip().rstrip('.,;:)'))
         if not s:
             return 0.0
 
@@ -182,9 +183,9 @@ def extraer_y_formatear_fecha(texto: str) -> str:
             if not any(w in ctx for w in ['VENCE', 'LOTE', 'V:', 'EXPIRA', 'CADUCIDAD']):
                 candidatas.append((m.start(), f"{m.group(3)}/{m.group(2)}/{m.group(1)}"))
 
-        # Paso 3: DD/MM/YYYY genérico
+        # Paso 3: DD/MM/YYYY genérico (permite espacios opcionales alrededor del separador)
         for m in re.finditer(
-            r'\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](20[2-3]\d)\b', texto_clean
+            r'\b(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(20[2-3]\d)\b', texto_clean
         ):
             ctx = texto_clean[max(0, m.start() - 30):m.start()].upper()
             if any(w in ctx for w in ['VENCE', 'LOTE', 'V:', 'EXPIRA', 'CADUCIDAD']):

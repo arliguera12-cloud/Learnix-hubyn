@@ -446,9 +446,12 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
         if m_sello1:
             sello = m_sello1.group(1)[:40]
 
-        # Intento 2: año + 36 alfanuméricos en texto sin espacios (sin \b)
+        # Intento 2: año + 36 alfanuméricos en texto sin espacios
+        # Usamos lookahead/lookbehind en lugar de \b (que no funciona correctamente en strings sin espacios)
         if not sello:
-            m_sello2 = re.search(r'(20[2-3]\d[A-Z0-9]{36})', t_no_sp)
+            m_sello2 = re.search(r'(?<![A-Z0-9])(20[2-3]\d[A-Z0-9]{36})(?![A-Z0-9])', t_no_sp)
+            if not m_sello2:
+                m_sello2 = re.search(r'(20[2-3]\d[A-Z0-9]{36})', t_no_sp)
             if m_sello2:
                 sello = m_sello2.group(1)
 
@@ -2068,14 +2071,27 @@ if not st.session_state.db_compras.empty:
             hide_index=True,
         )
 
-        # Mini-descarga de auditoría en CSV
-        csv_bytes = df_filtrado[cols_disp].to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "📄 Descargar Auditoría CSV",
-            data=csv_bytes,
-            file_name=f"auditoria_compras_{safe_str(cliente.get('nombre','')).replace(' ','_')}.csv",
-            mime="text/csv",
-        )
+        # Descarga auditoría: Excel + CSV
+        _nombre_aud = safe_str(cliente.get("nombre", "")).replace(" ", "_")
+        _df_aud_exp = df_filtrado[cols_disp].copy()
+        _col_xl, _col_csv = st.columns(2)
+        with _col_xl:
+            from utils.export_utils import _to_excel as _export_xl
+            st.download_button(
+                "📊 Auditoría Excel",
+                data=_export_xl(_df_aud_exp),
+                file_name=f"auditoria_compras_{_nombre_aud}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        with _col_csv:
+            st.download_button(
+                "📄 Auditoría CSV",
+                data=_df_aud_exp.to_csv(index=False).encode("utf-8"),
+                file_name=f"auditoria_compras_{_nombre_aud}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
     # ── Tab 3: Resumen por Proveedor ──────────────────────────────────────────
     with tab3:
@@ -2163,13 +2179,32 @@ if not st.session_state.db_compras.empty:
             if not tipos_invalidos_a8:
                 csv_a8 = to_csv_anexo8(df_a8)
                 nombre_base = safe_str(cliente.get("nombre", "")).replace(" ", "_")
-                st.download_button(
-                    "📥 Descargar Anexo 8 CSV (para Hacienda)",
-                    data=csv_a8,
-                    file_name=f"Anexo8_Percepciones_{nombre_base}.csv",
-                    mime="text/csv",
-                    type="primary",
-                )
+                _col_a8_csv, _col_a8_xl = st.columns(2)
+                with _col_a8_csv:
+                    st.download_button(
+                        "📤 Anexo 8 CSV (Hacienda)",
+                        data=csv_a8,
+                        file_name=f"Anexo8_Percepciones_{nombre_base}.csv",
+                        mime="text/csv",
+                        type="primary",
+                        use_container_width=True,
+                    )
+                with _col_a8_xl:
+                    from utils.export_utils import _to_excel as _export_xl_a8
+                    # Excel legible con encabezados de columna
+                    _df_a8_xl = df_a8.rename(columns={
+                        "A": "NIT Emisor", "B": "Nombre Emisor", "C": "Tipo DTE",
+                        "D": "Sello Recepción", "E": "UUID sin guiones",
+                        "F": "Monto Gravado", "G": "IVA Percibido", "I": "Anexo",
+                    })
+                    st.download_button(
+                        "📊 Anexo 8 Excel (legible)",
+                        data=_export_xl_a8(_df_a8_xl),
+                        file_name=f"Anexo8_Percepciones_{nombre_base}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        type="secondary",
+                        use_container_width=True,
+                    )
                 st.caption(
                     "ℹ️ **Columna A**: NIT (vacío si persona natural con DUI desde ene 2022). "
                     "**Columna D**: Sello de Recepción. **Columna E**: UUID sin guiones. "

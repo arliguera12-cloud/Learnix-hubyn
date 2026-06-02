@@ -414,7 +414,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
 
         if not gen:
             m_uuid = re.search(
-                r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
+                r"([A-Fa-f0-9]{8}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{12})",
                 t_no_sp
             )
             if m_uuid:

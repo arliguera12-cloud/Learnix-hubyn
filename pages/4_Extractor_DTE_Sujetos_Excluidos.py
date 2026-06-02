@@ -221,12 +221,13 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         # ── UUID / Código de Generación ──
         gen = ""
         m_uuid = re.search(
-            r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
+            r"([A-Fa-f0-9]{8}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{12})",
             t_no_sp
         )
         if m_uuid:
             raw = m_uuid.group(1).replace("-", "")
-            gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
+            if len(raw) == 32:
+                gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}".upper()
 
         # ── Número de Control ──
         num_control = ""
@@ -969,14 +970,24 @@ if not st.session_state.db_sujetos.empty:
             tipo_cg=sel_tipocg[0],
             periodo_feb2024=(sel_periodo == "Feb 2024 en adelante"),
         )
+        _nb_suj = cliente['nombre'].replace(' ', '_')
         st.markdown("**Formato Hacienda**")
-        st.caption("CSV listo para cargar · Casilla 66 · Anexo 5")
+        st.caption("Casilla 66 · Anexo 5")
         st.download_button(
             "📤 CSV Hacienda — Casilla 66",
             data=to_csv_hacienda_c66(df_c66),
-            file_name=f"C66_SujetosExcluidos_{cliente['nombre'].replace(' ','_')}.csv",
+            file_name=f"C66_SujetosExcluidos_{_nb_suj}.csv",
             mime="text/csv",
             type="primary",
+            use_container_width=True,
+        )
+        from utils.export_utils import _to_excel as _export_xl_c66
+        st.download_button(
+            "📊 Excel Casilla 66 (legible)",
+            data=_export_xl_c66(df_c66),
+            file_name=f"C66_SujetosExcluidos_{_nb_suj}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="secondary",
             use_container_width=True,
         )
 
@@ -1090,14 +1101,24 @@ if not st.session_state.db_sujetos.empty:
         periodo_feb2024=(f14_per_lbl == "Feb 2024 en adelante"),
     )
 
-    col_f14_dl, _ = st.columns([2, 4])
+    col_f14_dl, col_f14_xl, _ = st.columns([2, 2, 2])
     with col_f14_dl:
         st.download_button(
-            "📤 CSV Hacienda — F-14 ISR (Retenciones Renta)",
+            "📤 CSV Hacienda — F-14 ISR",
             data=to_csv_f14_isr(df_f14),
             file_name=f"F14_ISR_{cliente['nombre'].replace(' ','_')}_{f14_periodo_str}.csv",
             mime="text/csv",
             type="primary",
+            use_container_width=True,
+        )
+    with col_f14_xl:
+        from utils.export_utils import _to_excel as _export_xl_f14
+        st.download_button(
+            "📊 Excel F-14 ISR (legible)",
+            data=_export_xl_f14(df_f14),
+            file_name=f"F14_ISR_{cliente['nombre'].replace(' ','_')}_{f14_periodo_str}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="secondary",
             use_container_width=True,
         )
     st.caption(
