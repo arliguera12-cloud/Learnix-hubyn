@@ -15,7 +15,7 @@ import hashlib
 import pdfplumber
 import streamlit as st
 
-from utils.gemini_utils import _get_api_key
+from utils.ai_utils import _get_api_key
 
 
 # ─────────────────────────────────────────────

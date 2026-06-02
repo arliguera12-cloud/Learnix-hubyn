@@ -1,33 +1,133 @@
 """
 Learnix Hub — Procesador paralelo de lotes de DTE.
 
-ThreadPoolExecutor con max_workers=10 para enviar PDFs simultáneamente a Gemini.
-Con 1,000 RPM en AI Studio cada hilo puede hacer ~100 req/min; 10 hilos usan
-hasta ~600 RPM en carga pico, dejando margen para la cuota diaria.
+ThreadPoolExecutor con max_workers=10.
+
+Mejoras v2.0:
+  - Deduplicación: filtra PDFs ya procesados en la sesión (por SHA-256).
+  - Caché de extracción: reutiliza resultados anteriores para el mismo archivo.
 
 Uso típico en una página:
-    from utils.concurrent_processor import leer_y_procesar_lote
+    from utils.concurrent_processor import leer_y_procesar_lote, filtrar_duplicados
 
-    nombres_bytes = leer_archivos_uploaded(nuevos)   # pre-lectura en hilo principal
+    nombres_bytes = leer_archivos_uploaded(nuevos)
+    nombres_bytes = filtrar_duplicados(nombres_bytes)   # elimina repetidos
     resultados    = leer_y_procesar_lote(
         nombres_bytes,
-        fn_extraccion,          # fn(bytes) -> dict
+        fn_extraccion,
         progreso_cb=lambda c, t, n: (bar.progress(c/t), txt.caption(f"⏳ {c}/{t}")),
     )
-    for fname, fbytes, res in resultados:
-        ...
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
+import streamlit as st
+
 log = logging.getLogger(__name__)
 
-MAX_WORKERS: int = 10   # hilos simultáneos — seguro bajo 1,000 RPM
+MAX_WORKERS: int = 10
+
+
+# ─── Deduplicación y caché por sesión ────────────────────────────────────────
+
+def _pdf_hash(pdf_bytes: bytes) -> str:
+    """SHA-256 hex del contenido del PDF."""
+    return hashlib.sha256(pdf_bytes).hexdigest()
+
+
+def filtrar_duplicados(
+    nombres_y_bytes: list[tuple[str, bytes]],
+    session_key: str = "_pdfs_procesados",
+) -> list[tuple[str, bytes]]:
+    """
+    Filtra archivos cuyos bytes ya fueron procesados en esta sesión (mismo hash SHA-256).
+
+    Args:
+        nombres_y_bytes: lista de (nombre, bytes) a filtrar.
+        session_key:     clave en st.session_state donde se acumula el set de hashes.
+
+    Returns:
+        Sublista con solo los archivos nuevos.
+        Los hashes de los nuevos quedan registrados para futuras llamadas.
+    """
+    try:
+        if session_key not in st.session_state:
+            st.session_state[session_key] = set()
+        vistos: set = st.session_state[session_key]
+    except Exception:
+        vistos = set()
+
+    nuevos = []
+    for fname, fb in nombres_y_bytes:
+        if not fb:
+            continue
+        h = _pdf_hash(fb)
+        if h in vistos:
+            log.info("Duplicado omitido: %s (%s…)", fname, h[:8])
+        else:
+            vistos.add(h)
+            nuevos.append((fname, fb))
+
+    try:
+        st.session_state[session_key] = vistos
+    except Exception:
+        pass
+
+    omitidos = len(nombres_y_bytes) - len(nuevos)
+    if omitidos:
+        log.info("filtrar_duplicados: %d archivo(s) omitido(s) por duplicado", omitidos)
+
+    return nuevos
+
+
+def con_cache_extraccion(
+    fn_extraccion: Callable[[bytes], dict],
+    tipo_dte: str = "",
+    session_key: str = "_cache_extracciones",
+) -> Callable[[bytes], dict]:
+    """
+    Envuelve fn_extraccion con un caché en session_state keyed por (sha256, tipo_dte).
+    Si el mismo PDF ya fue extraído, devuelve el resultado cacheado sin llamar a la IA.
+
+    Uso:
+        fn = con_cache_extraccion(mi_fn_extraccion, tipo_dte="compras")
+        resultados = leer_y_procesar_lote(nombres_bytes, fn, ...)
+    """
+    def _wrapper(pdf_bytes: bytes) -> dict:
+        h = _pdf_hash(pdf_bytes)
+        cache_key = f"{h}_{tipo_dte}"
+        try:
+            if session_key not in st.session_state:
+                st.session_state[session_key] = {}
+            cache: dict = st.session_state[session_key]
+            if cache_key in cache:
+                log.info("Caché hit: %s…_%s", h[:8], tipo_dte)
+                return dict(cache[cache_key])
+        except Exception:
+            cache = {}
+
+        resultado = fn_extraccion(pdf_bytes)
+
+        try:
+            cache[cache_key] = resultado
+            # Limitar tamaño del caché a 200 entradas
+            if len(cache) > 200:
+                oldest = list(cache.keys())[:50]
+                for k in oldest:
+                    del cache[k]
+            st.session_state[session_key] = cache
+        except Exception:
+            pass
+
+        return resultado
+
+    return _wrapper
 
 
 def _safe_float(value) -> float:

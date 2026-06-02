@@ -1,8 +1,11 @@
 """
-Learnix Hub — QA Fiscal Utils v1.0
+Learnix Hub — QA Fiscal Utils v2.0
 
 Validates mathematical and structural coherence of extracted DTE fields.
 Provides Streamlit UI helpers for the QA gate (banner + field highlighting).
+
+v2.0: agrega funciones de auto-corrección (auto_corregir_*) que calculan
+y proponen los valores correctos según las fórmulas DGII.
 
 Validation rules per DTE type:
   ventas          : IVA = gravadas × 13%;  total = gravadas + exentas + no_sujetas + iva
@@ -526,6 +529,189 @@ def razones_revisar_venta(row) -> str:
     if len(sello) < 30:
         razones.append(f"Sello vacío o corto ({len(sello)} chars)")
     return " | ".join(razones)
+
+
+# ─── Auto-corrección fiscal ───────────────────────────────────────────────────
+
+def auto_corregir_iva_ventas(row: dict) -> dict:
+    """
+    Calcula el IVA correcto (gravadas × 13%) y el total correcto.
+    Retorna un dict con los campos corregidos (solo los que cambian).
+    Si no hay inconsistencia, retorna {}.
+    """
+    grav    = _monto(row.get("gravadas"))
+    iva_doc = _monto(row.get("debito") or row.get("iva"))
+    exe     = _monto(row.get("exentas"))
+    no_suj  = _monto(row.get("no_sujetas"))
+    tipo    = str(row.get("tipo", ""))
+
+    if tipo not in ("03", "05", "06") or grav <= 0:
+        return {}
+
+    iva_correcto = round(grav * 0.13, 2)
+    if abs(iva_doc - iva_correcto) <= 0.05:
+        return {}
+
+    total_correcto = round(grav + exe + no_suj + iva_correcto, 2)
+    return {
+        "debito": iva_correcto,
+        "iva"   : iva_correcto,
+        "total" : total_correcto,
+        "_autocorregido_iva": True,
+    }
+
+
+def auto_corregir_iva_compras(row: dict) -> dict:
+    """
+    Calcula el IVA correcto (gra × 13%) para una fila de compras.
+    Retorna {} si no hay inconsistencia.
+    """
+    gra     = _monto(row.get("gra"))
+    iva_doc = _monto(row.get("iva"))
+    tipo    = str(row.get("tipo", ""))
+
+    if tipo not in ("03", "06") or gra <= 0:
+        return {}
+
+    iva_correcto = round(gra * 0.13, 2)
+    if abs(iva_doc - iva_correcto) <= 0.05:
+        return {}
+
+    return {
+        "iva"            : iva_correcto,
+        "_autocorregido_iva": True,
+    }
+
+
+def auto_corregir_retencion_07(row: dict) -> dict:
+    """Calcula retención correcta DTE-07 (base × 1%)."""
+    base    = _monto(row.get("base"))
+    ret_doc = _monto(row.get("ret"))
+    if base <= 0:
+        return {}
+    ret_correcto = round(base * 0.01, 2)
+    if abs(ret_doc - ret_correcto) <= 0.05:
+        return {}
+    return {"ret": ret_correcto, "_autocorregido_ret": True}
+
+
+def auto_corregir_retencion_14(row: dict) -> dict:
+    """Calcula retención correcta DTE-14 (base × 10%) y líquido (base × 90%)."""
+    base    = _monto(row.get("base"))
+    ret_doc = _monto(row.get("ret"))
+    if base <= 0:
+        return {}
+    ret_correcto    = round(base * 0.10, 2)
+    liquido_correcto = round(base * 0.90, 2)
+    if abs(ret_doc - ret_correcto) <= 0.05:
+        return {}
+    return {
+        "ret"               : ret_correcto,
+        "liquido"           : liquido_correcto,
+        "_autocorregido_ret": True,
+    }
+
+
+def aplicar_autocorrecciones_df(df: "pd.DataFrame", tipo_dte: str) -> "pd.DataFrame":
+    """
+    Aplica auto-correcciones fiscales a todo un DataFrame en memoria.
+    Marca las filas corregidas con _autocorregido_iva o _autocorregido_ret.
+
+    Args:
+        df       : DataFrame de resultados procesados.
+        tipo_dte : "ventas" | "compras" | "retenciones" | "sujetos_excluidos"
+
+    Returns:
+        DataFrame con filas corregidas (no modifica las correctas).
+    """
+    import pandas as pd
+
+    _fn_map = {
+        "ventas"           : auto_corregir_iva_ventas,
+        "compras"          : auto_corregir_iva_compras,
+        "retenciones"      : auto_corregir_retencion_07,
+        "sujetos_excluidos": auto_corregir_retencion_14,
+    }
+    fn = _fn_map.get(tipo_dte)
+    if fn is None or df.empty:
+        return df
+
+    df = df.copy()
+    for idx, row in df.iterrows():
+        correcciones = fn(row.to_dict())
+        for campo, valor in correcciones.items():
+            if campo not in df.columns:
+                df[campo] = None
+            df.at[idx, campo] = valor
+
+    return df
+
+
+def mostrar_boton_autocorreccion(
+    df: "pd.DataFrame",
+    tipo_dte: str,
+    session_key: str,
+    container=None,
+) -> "pd.DataFrame":
+    """
+    Muestra un botón "⚡ Auto-corregir IVA/Retención" en Streamlit.
+    Al presionarlo, aplica las correcciones fiscales al DataFrame y lo guarda
+    en session_state[session_key].
+
+    Returns:
+        DataFrame corregido (o el original si no se presionó el botón).
+    """
+    import streamlit as _st
+    target = container or _st
+
+    filas_con_error = _contar_filas_con_error(df, tipo_dte)
+    if filas_con_error == 0:
+        return df
+
+    label = (
+        f"⚡ Auto-corregir IVA ({filas_con_error} fila{'s' if filas_con_error > 1 else ''})"
+        if tipo_dte in ("ventas", "compras")
+        else f"⚡ Auto-corregir Retención ({filas_con_error} fila{'s' if filas_con_error > 1 else ''})"
+    )
+
+    if target.button(label, type="secondary", help="Recalcula IVA/retención según fórmulas DGII y actualiza las filas con error"):
+        df_corr = aplicar_autocorrecciones_df(df, tipo_dte)
+        try:
+            import streamlit as _st2
+            _st2.session_state[session_key] = df_corr
+        except Exception:
+            pass
+        target.success(f"✅ {filas_con_error} fila(s) corregida(s) automáticamente.")
+        return df_corr
+
+    return df
+
+
+def _contar_filas_con_error(df: "pd.DataFrame", tipo_dte: str) -> int:
+    """Cuenta cuántas filas tienen errores de cuadre fiscal."""
+    if df is None or (hasattr(df, "empty") and df.empty):
+        return 0
+    n = 0
+    for _, row in df.iterrows():
+        d = row.to_dict()
+        if tipo_dte == "ventas":
+            grav = _monto(d.get("gravadas")); iva = _monto(d.get("debito") or d.get("iva"))
+            tipo = str(d.get("tipo", ""))
+            if tipo in ("03", "06") and grav > 0 and iva > 0 and abs(iva - round(grav * 0.13, 2)) > 0.05:
+                n += 1
+        elif tipo_dte == "compras":
+            gra = _monto(d.get("gra")); iva = _monto(d.get("iva")); tipo = str(d.get("tipo", ""))
+            if tipo in ("03", "06") and gra > 0 and iva > 0 and abs(iva - round(gra * 0.13, 2)) > 0.05:
+                n += 1
+        elif tipo_dte == "retenciones":
+            base = _monto(d.get("base")); ret = _monto(d.get("ret"))
+            if base > 0 and ret > 0 and abs(ret - round(base * 0.01, 2)) > 0.05:
+                n += 1
+        elif tipo_dte == "sujetos_excluidos":
+            base = _monto(d.get("base")); ret = _monto(d.get("ret"))
+            if base > 0 and ret > 0 and abs(ret - round(base * 0.10, 2)) > 0.05:
+                n += 1
+    return n
 
 
 def razones_revisar_compra(row) -> str:

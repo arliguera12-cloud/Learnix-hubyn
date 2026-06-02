@@ -21,7 +21,7 @@ from utils.pdf_utils import (
     extraer_y_formatear_fecha as _extraer_fecha,
     extraer_texto_pdf,
 )
-from utils.gemini_utils import (
+from utils.ai_utils import (
     es_nombre_sospechoso,
     verificar_compra_con_gemini,
     necesita_verificacion,
