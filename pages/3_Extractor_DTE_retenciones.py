@@ -304,8 +304,9 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         if not _vision_campos and gemini_disponible():
             # Fallback textual solo cuando Vision no está disponible
             _campos_act = {"fecha": fecha, "nit_prov": nit_prov}
+            _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
             _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
-                texto_lineal,
+                _texto_ia,
                 "retenciones",
                 _campos_act,
                 {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},

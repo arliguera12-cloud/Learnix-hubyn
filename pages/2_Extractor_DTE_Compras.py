@@ -258,6 +258,29 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
             return False
         return True
 
+    # ── Estrategia -1 (MÁXIMA PRIORIDAD): nombre por sufijo legal ─────────────
+    # Las razones sociales salvadoreñas casi siempre terminan en una forma
+    # jurídica (S.A. DE C.V., S.A., LTDA, etc.). La metadata del DTE nunca.
+    # Capturamos las palabras previas + el sufijo legal y validamos.
+    # Match dentro de UNA línea ([^\n] en vez de \s para no cruzar saltos)
+    _SUFIJO_LEGAL = re.compile(
+        r'([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9&.,\- ]{2,70}?,?\s*'
+        r'(?:S\.?\s*A\.?\s+DE\s+C\.?\s*V\.?|'          # S.A. DE C.V.
+        r'S\.?\s*A\.?\s*S\.?|'                          # S.A.S.
+        r'S\.?\s*A\.?(?![A-Z])|'                        # S.A.
+        r'S\.?\s+DE\s+R\.?\s*L\.?(?:\s+DE\s+C\.?\s*V\.?)?|'  # S. DE R.L. (DE C.V.)
+        r'LTDA\.?|'                                     # LTDA
+        r'S\.?\s+EN\s+C\.?))',                          # S. EN C.
+        re.I,
+    )
+    for _ln in texto.split('\n'):
+        m_sl = _SUFIJO_LEGAL.search(_ln)
+        if not m_sl:
+            continue
+        candidato = limpiar(m_sl.group(1))
+        if valido(candidato) and len(candidato) >= 6:
+            return candidato
+
     # ── Estrategia 0: sección explícita [EMISOR] … [RECEPTOR] ────────────────
     # Busca un bloque etiquetado "EMISOR" y extrae el nombre dentro de él
     m_bloque = re.search(
@@ -605,8 +628,11 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "nom_prov": nom_prov}
             _necesita, _ = necesita_verificacion(_campos_act, nit_receptor)
             if _necesita:
+                # Pasar texto visual (preserva columnas EMISOR|RECEPTOR) + lineal.
+                # El visual ayuda al modelo a ubicar el nombre real del emisor.
+                _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
                 _corr_dict, gemini_correcciones = verificar_compra_con_gemini(
-                    texto_lineal,
+                    _texto_ia,
                     _campos_act,
                     nit_receptor,
                     nom_receptor,
