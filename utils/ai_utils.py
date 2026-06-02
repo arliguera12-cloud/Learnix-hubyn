@@ -120,23 +120,36 @@ _SOSPECHOSO = re.compile(
         MODELO\s+(?:DE\s+)?FACTURACI[OÓ]N|
         C[OÓ]DIGO\s+(?:DE\s+)?GENERACI[OÓ]N|
         NUMERO\s+DE\s+CONTROL|
-        SELLO|TIPO\s+DE|
+        N[UÚ]MERO\s+DE\s+CONTROL|
+        SELLO\s+DE|SELLO\s*:|
+        TIPO\s+DE|TIPO\s+DTE|
         RAZ[OÓ]N\s+SOCIAL\s*:|
-        NIT\s*:|NRC\s*:|
+        NOMBRE\s+(?:COMERCIAL|DEL\s+(?:EMISOR|RECEPTOR|PROVEEDOR|CLIENTE))\s*:|
+        NIT\s*:|NRC\s*:|DUI\s*:|
+        AMBIENTE\s*:|ESTADO\s*:|MONEDA\s*:|CONDICI[OÓ]N\s+DE\s+OPERACI|
         \d{2}[/\-]\d{2}[/\-]\d{4}
     )""",
     re.I | re.X,
 )
-_PAT_FECHA_STR = re.compile(r'\d{2}[/\-]\d{2}[/\-]\d{4}')
-_PAT_HORA      = re.compile(r'\b\d{2}:\d{2}:\d{2}\b')
-_PAT_META      = re.compile(r'\b(?:PROCESADO|MODELO\s+FACTURACI|GENERACI[OÓ]N\s*:)', re.I)
-_PAT_DDMMYYYY  = re.compile(r'^\d{2}/\d{2}/20\d{2}$')
+_PAT_FECHA_STR  = re.compile(r'\d{2}[/\-]\d{2}[/\-]\d{4}')
+_PAT_HORA       = re.compile(r'\b\d{2}:\d{2}:\d{2}\b')
+_PAT_META       = re.compile(r'\b(?:PROCESADO|MODELO\s+FACTURACI|GENERACI[OÓ]N\s*:)', re.I)
+_PAT_DDMMYYYY   = re.compile(r'^\d{2}/\d{2}/20\d{2}$')
+_PAT_SOLO_NUMS  = re.compile(r'^\d[\d\-]{5,}$')        # solo dígitos/guiones → es un ID no un nombre
+_PAT_UUID_LIKE  = re.compile(r'[A-F0-9]{8}-[A-F0-9]{4}', re.I)  # fragmento UUID
 
 _ANTIPATRONES_NOMBRE = re.compile(
-    r'\b(?:RAZ[OÓ]N\s+SOCIAL|NOMBRE\s+O\s+RAZ|NOMBRE\s+COMERCIAL|'
-    r'NIT\s*:|NRC\s*:|COD\.\s*GEN|CODIGO\s+DE\s+GENERACION|'
-    r'DTE-\d{2}|FACTURA\s+CAMBIARIA|COMPROBANTE\s+DE\s+CR[EÉ]DITO|'
-    r'DOCUMENTO\s+TRIBUTARIO|SELLO\s+DE\s+RECEP|NUMERO\s+DE\s+CONTROL)\b',
+    r'\b(?:'
+    r'RAZ[OÓ]N\s+SOCIAL|NOMBRE\s+O\s+RAZ|NOMBRE\s+COMERCIAL|'
+    r'NIT\s*:|NRC\s*:|DUI\s*:|COD\.\s*GEN|CODIGO\s+DE\s+GENERACION|'
+    r'DTE-\d{2}|FACTURA\s+(?:CAMBIARIA|DE\s+EXPORTACI[OÓ]N|CONSUMIDOR)|'
+    r'COMPROBANTE\s+DE\s+CR[EÉ]DITO|COMPROBANTE\s+DE\s+(?:RETENCI[OÓ]N|LIQUIDACI[OÓ]N)|'
+    r'DOCUMENTO\s+TRIBUTARIO|SELLO\s+DE\s+RECEP|NUMERO\s+DE\s+CONTROL|'
+    r'DATOS\s+DEL\s+(?:EMISOR|RECEPTOR|PROVEEDOR|CLIENTE)|'
+    r'ACTIVIDAD\s+ECON[OÓ]MICA|TIPO\s+(?:DE\s+)?ESTABLECIMIENTO|'
+    r'DIRECCI[OÓ]N|MUNICIPIO|DEPARTAMENTO|CASA\s+MATRIZ|SUCURSAL\s*\d|'
+    r'TEL[EÉ]FONO|CORREO\s+ELECTR[OÓ]NICO|P[AÁ]GINA\s+WEB'
+    r')\b',
     re.I,
 )
 
@@ -145,15 +158,29 @@ def es_nombre_sospechoso(nombre: str) -> bool:
     if not nombre:
         return False
     n = nombre.strip().upper()
+    # Demasiado corto para ser un nombre de empresa real
+    if len(n) < 3:
+        return True
     if _SOSPECHOSO.match(n):
         return True
     if _PAT_FECHA_STR.search(n) or _PAT_HORA.search(n) or _PAT_META.search(n):
         return True
     if _ANTIPATRONES_NOMBRE.search(n):
         return True
+    # Fragmento de UUID incrustado
+    if _PAT_UUID_LIKE.search(n):
+        return True
+    # Solo dígitos/guiones → es un ID, no un nombre
+    if _PAT_SOLO_NUMS.match(n):
+        return True
+    # Cadena hex larga sin espacios (hash o código de generación)
     if re.search(r'[A-F0-9]{20,}', n) and ' ' not in n:
         return True
+    # Más del 40% son dígitos → probablemente un campo numérico
     if len(n) > 5 and sum(c.isdigit() for c in n) / len(n) > 0.40:
+        return True
+    # Contiene @ o URLs
+    if re.search(r'@|https?://|www\.', n, re.I):
         return True
     return False
 
@@ -712,7 +739,9 @@ def procesar_dte_con_gemini(
 
 def necesita_verificacion(campos: dict, nit_receptor: str) -> tuple[bool, list[str]]:
     razones = []
-    if campos.get("nit_prov") and nit_receptor and campos["nit_prov"] == nit_receptor:
+    _nit_p = re.sub(r'[^0-9]', '', str(campos.get("nit_prov") or ""))
+    _nit_r = re.sub(r'[^0-9]', '', str(nit_receptor or ""))
+    if _nit_p and _nit_r and _nit_p == _nit_r:
         razones.append("NIT del emisor coincide con el del receptor")
     if not campos.get("nom_prov", "").strip():
         razones.append("Nombre del emisor vacío")

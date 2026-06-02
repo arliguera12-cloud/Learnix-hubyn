@@ -11,6 +11,7 @@ from io import BytesIO
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
 from utils.concurrent_processor import leer_y_procesar_lote
+from utils.qr_reader import extraer_datos_qr as _extraer_qr
 from utils.pdf_utils import (
     safe_str,
     normalizar_unicode,
@@ -327,6 +328,20 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
                 id_sujeto = _corr_dict["nit_sujeto"]
             elif _corr_dict.get("dui_sujeto"):
                 id_sujeto = _corr_dict["dui_sujeto"]
+
+        # ── QR ES EL REY: sobreescribe gen/ctrl si el QR encontró datos ─────────
+        try:
+            _qr = _extraer_qr(file_bytes)
+            if _qr.get("codigo_generacion"):
+                gen = _qr["codigo_generacion"].upper()
+            if _qr.get("num_control") and not num_control:
+                _qc = _qr["num_control"].upper()
+                _mq = re.search(r'DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18}', _qc, re.I)
+                if _mq:
+                    num_control = _qc.replace("-", "")
+                    tipo        = _mq.group(1)
+        except Exception:
+            pass
 
         return {
             "fecha"               : fecha,

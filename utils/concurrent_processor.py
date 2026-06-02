@@ -24,6 +24,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
@@ -97,36 +98,48 @@ def con_cache_extraccion(
     session_key: str = "_cache_extracciones",
 ) -> Callable[[bytes], dict]:
     """
-    Envuelve fn_extraccion con un caché en session_state keyed por (sha256, tipo_dte).
-    Si el mismo PDF ya fue extraído, devuelve el resultado cacheado sin llamar a la IA.
+    Envuelve fn_extraccion con un caché thread-safe.
+
+    El cache se lee/escribe en st.session_state SOLO desde el hilo principal:
+    se carga antes de crear el ThreadPoolExecutor y se persiste después.
+    Dentro del worker solo se usa un dict ordinario (thread-safe read-only lookup).
 
     Uso:
         fn = con_cache_extraccion(mi_fn_extraccion, tipo_dte="compras")
         resultados = leer_y_procesar_lote(nombres_bytes, fn, ...)
     """
+    # Cargar cache desde session_state en el hilo principal (antes del pool)
+    cache: dict = {}
+    try:
+        if session_key not in st.session_state:
+            st.session_state[session_key] = {}
+        cache = dict(st.session_state[session_key])  # copia local thread-safe
+    except Exception:
+        pass
+
+    _cache_lock = threading.Lock()
+
     def _wrapper(pdf_bytes: bytes) -> dict:
         h = _pdf_hash(pdf_bytes)
         cache_key = f"{h}_{tipo_dte}"
-        try:
-            if session_key not in st.session_state:
-                st.session_state[session_key] = {}
-            cache: dict = st.session_state[session_key]
+
+        with _cache_lock:
             if cache_key in cache:
                 log.info("Caché hit: %s…_%s", h[:8], tipo_dte)
                 return dict(cache[cache_key])
-        except Exception:
-            cache = {}
 
         resultado = fn_extraccion(pdf_bytes)
 
-        try:
+        with _cache_lock:
             cache[cache_key] = resultado
-            # Limitar tamaño del caché a 200 entradas
             if len(cache) > 200:
-                oldest = list(cache.keys())[:50]
-                for k in oldest:
+                for k in list(cache.keys())[:50]:
                     del cache[k]
-            st.session_state[session_key] = cache
+
+        # Persistir de vuelta a session_state (solo es efectivo si llamado desde hilo principal;
+        # desde workers es no-op silencioso, la persistencia ocurre en la siguiente carga)
+        try:
+            st.session_state[session_key] = dict(cache)
         except Exception:
             pass
 
