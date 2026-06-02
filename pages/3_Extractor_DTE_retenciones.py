@@ -212,12 +212,13 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         gen = ""
         m_uuid = re.search(
-            r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
+            r"([A-Fa-f0-9]{8}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{12})",
             t_no_sp
         )
         if m_uuid:
             raw = m_uuid.group(1).replace("-", "")
-            gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
+            if len(raw) == 32:
+                gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}".upper()
 
         sello = extraer_sello(t_clean)
         fecha = extraer_y_formatear_fecha(t_clean)
@@ -716,14 +717,29 @@ if not st.session_state.db_ret.empty:
     with col_h:
         # ── Formato Hacienda (Casilla 162 / Anexo 7) ─────────────────────────
         df_c162 = construir_df_hacienda_c162(df_fil)
+        _nb_ret = cliente['nombre'].replace(' ', '_')
         st.markdown("**Formato Hacienda**")
-        st.caption("CSV listo para cargar · Casilla 162 · Anexo 7")
+        st.caption("Casilla 162 · Anexo 7")
         st.download_button(
             "📤 CSV Hacienda — Casilla 162",
             data=to_csv_hacienda(df_c162),
-            file_name=f"C162_Ret1pct_{cliente['nombre'].replace(' ','_')}.csv",
+            file_name=f"C162_Ret1pct_{_nb_ret}.csv",
             mime="text/csv",
             type="primary",
+            use_container_width=True,
+        )
+        from utils.export_utils import _to_excel as _export_xl_ret
+        _df_c162_xl = df_c162.rename(columns={
+            "A": "NIT Agente Retenedor", "B": "Nombre Agente", "C": "Tipo DTE",
+            "D": "Sello Recepción", "E": "UUID sin guiones",
+            "F": "Base Retenida", "G": "Monto Retenido 1%", "I": "Anexo",
+        })
+        st.download_button(
+            "📊 Excel Casilla 162 (legible)",
+            data=_export_xl_ret(_df_c162_xl),
+            file_name=f"C162_Ret1pct_{_nb_ret}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="secondary",
             use_container_width=True,
         )
 

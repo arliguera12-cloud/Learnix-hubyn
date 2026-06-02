@@ -26,6 +26,7 @@ from utils.ai_utils import (
     gemini_ultimo_error,
     procesar_dte_con_gemini,
 )
+from utils.training_examples import registrar_correccion
 from utils.gemini_vision import (
     extraer_dte_con_vision,
     vision_disponible,
@@ -413,7 +414,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
 
         if not gen:
             m_uuid = re.search(
-                r"([A-F0-9]{8}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{4}-?[A-F0-9]{12})",
+                r"([A-Fa-f0-9]{8}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{12})",
                 t_no_sp
             )
             if m_uuid:
@@ -1721,6 +1722,30 @@ if st.session_state.cola_revision_v:
                         nc_dict[id_guardar] = nombre_limpio
                         if st.session_state.reporte_ventas:
                             st.session_state.reporte_ventas["nuevos_clientes"] = nc_dict
+
+                    # ── Guardar como ejemplo de entrenamiento ────────────────
+                    try:
+                        _texto_train = ""
+                        with pdfplumber.open(BytesIO(item_actual["bytes"])) as _pdf_t:
+                            for _pg in _pdf_t.pages:
+                                _texto_train += safe_extract_text(_pg) + "\n"
+                        registrar_correccion(
+                            tipo_dte          = "ventas",
+                            texto_pdf         = _texto_train,
+                            campos_originales = {
+                                "fecha"  : datos_act.get("fecha", ""),
+                                "nit_cli": datos_act.get("nit_cli", ""),
+                                "nom_cli": datos_act.get("nom_cli", ""),
+                            },
+                            campos_corregidos = {
+                                "fecha"  : datos_act.get("fecha", ""),
+                                "nit_cli": nit_act,
+                                "nom_cli": nombre_limpio,
+                            },
+                        )
+                    except Exception:
+                        pass
+                    # ─────────────────────────────────────────────────────────
 
                     st.session_state.cola_revision_v.pop(0)
                     st.success("✅ Documento aprobado y agregado al libro.")

@@ -230,6 +230,11 @@ Usa null (sin comillas) para campos que ya están correctos o no encontraste.
 # ─── Constructores de prompt por tipo de DTE ─────────────────────────────────
 
 def _prompt_compras(texto_pdf, campos, nit_receptor, nom_receptor) -> str:
+    try:
+        from utils.training_examples import cargar_ejemplos_prompt
+        _ejemplos = cargar_ejemplos_prompt("compras", max_ejemplos=3)
+    except Exception:
+        _ejemplos = ""
     return f"""Eres un AUDITOR FISCAL SENIOR especializado en DTEs de El Salvador (Manual de IVA DGII).
 {_CONTEXTO_FISCAL}
 ROL: El RECEPTOR es el cliente activo (comprador). El EMISOR es el proveedor — verifica sus datos.
@@ -246,6 +251,7 @@ CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores):
 TEXTO DEL PDF:
 {texto_pdf[:3500]}
 
+{_ejemplos}
 {_INSTRUCCIONES_COT}
 
 CAMPOS A VERIFICAR:
@@ -265,6 +271,11 @@ Estructura requerida:
 
 
 def _prompt_ventas(texto_pdf, campos, nit_emisor, nom_emisor) -> str:
+    try:
+        from utils.training_examples import cargar_ejemplos_prompt
+        _ejemplos = cargar_ejemplos_prompt("ventas", max_ejemplos=3)
+    except Exception:
+        _ejemplos = ""
     return f"""Eres un AUDITOR FISCAL SENIOR especializado en DTEs de El Salvador (Manual de IVA DGII).
 {_CONTEXTO_FISCAL}
 ROL: El EMISOR es el cliente activo (vendedor). El RECEPTOR es el comprador — verifica sus datos.
@@ -282,6 +293,7 @@ CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores):
 TEXTO DEL PDF:
 {texto_pdf[:3500]}
 
+{_ejemplos}
 {_INSTRUCCIONES_COT}
 
 CAMPOS A VERIFICAR:
@@ -303,6 +315,11 @@ Estructura requerida:
 
 
 def _prompt_retenciones(texto_pdf, campos, nit_cliente, nom_cliente) -> str:
+    try:
+        from utils.training_examples import cargar_ejemplos_prompt
+        _ejemplos = cargar_ejemplos_prompt("ret", max_ejemplos=3)
+    except Exception:
+        _ejemplos = ""
     return f"""Eres un AUDITOR FISCAL SENIOR especializado en DTEs de El Salvador (Manual de IVA DGII).
 {_CONTEXTO_FISCAL}
 ROL (DTE-07): El AGENTE RETENEDOR es el cliente activo. El SUJETO RETENIDO es el proveedor.
@@ -318,6 +335,7 @@ CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores):
 TEXTO DEL PDF:
 {texto_pdf[:3500]}
 
+{_ejemplos}
 {_INSTRUCCIONES_COT}
 
 CAMPOS A VERIFICAR:
@@ -335,6 +353,11 @@ Estructura requerida:
 
 
 def _prompt_sujetos_excluidos(texto_pdf, campos, nit_cliente, nom_cliente) -> str:
+    try:
+        from utils.training_examples import cargar_ejemplos_prompt
+        _ejemplos = cargar_ejemplos_prompt("sujetos", max_ejemplos=3)
+    except Exception:
+        _ejemplos = ""
     return f"""Eres un AUDITOR FISCAL SENIOR especializado en DTEs de El Salvador (Manual de IVA DGII).
 {_CONTEXTO_FISCAL}
 ROL (DTE-14): El COMPRADOR es el cliente activo. El SUJETO EXCLUIDO no está inscrito en IVA.
@@ -352,6 +375,7 @@ CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores):
 TEXTO DEL PDF:
 {texto_pdf[:3500]}
 
+{_ejemplos}
 {_INSTRUCCIONES_COT}
 
 CAMPOS A VERIFICAR:
