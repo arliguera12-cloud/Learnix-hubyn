@@ -258,6 +258,46 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
             return False
         return True
 
+    # ── Estrategia -2 (MÁXIMA PRIORIDAD): columna izquierda por posición ──────
+    # En el DTE estándar de Hacienda, emisor y receptor van en DOS columnas:
+    #   Nombre o razon social:            Nombre o razon social:
+    #   JULIO CÉSAR JOVEL SÁNCHEZ         JONATHAN GUILLERMO RUIZ HERNANDEZ
+    #   NIT:08193003731016 NRC:965596     # NIT: 05020905931015 NRC:2774784
+    # El EMISOR (proveedor) SIEMPRE es la columna IZQUIERDA. Esto funciona
+    # también para personas naturales (sin sufijo legal) y evita confundir el
+    # nombre del cliente (columna derecha) o truncar la razón social.
+    _lineas_vis = texto.split('\n')
+    for _i, _ln in enumerate(_lineas_vis):
+        _labels = [m.start() for m in re.finditer(
+            r'[Nn]ombre\s+[Oo]\s+[Rr]az[oó]n\s+[Ss]ocial', _ln)]
+        if not _labels:
+            continue
+        # Línea de nombres = siguiente línea no vacía
+        _nom_line = ""
+        for _j in range(_i + 1, min(_i + 4, len(_lineas_vis))):
+            if _lineas_vis[_j].strip():
+                _nom_line = _lineas_vis[_j]
+                break
+        if not _nom_line:
+            continue
+        # Punto de corte = inicio de la 2ª etiqueta (columna derecha = receptor).
+        # Solo es fiable en layout visual: el corte debe caer sobre espacios
+        # (frontera de columna), no en medio de una palabra del modo lineal.
+        if len(_labels) >= 2:
+            _split = _labels[1]
+            if _split <= len(_nom_line) and _nom_line[max(0, _split - 1):_split + 1].strip() == "":
+                _izq = _nom_line[:_split]
+            else:
+                # Sin frontera de columna real: usar gap grande de espacios
+                _gap = re.search(r'\S(\s{4,})\S', _nom_line)
+                _izq = _nom_line[:_gap.start() + 1] if _gap else _nom_line
+        else:
+            _gap = re.search(r'\S(\s{4,})\S', _nom_line)
+            _izq = _nom_line[:_gap.start() + 1] if _gap else _nom_line
+        _cand = limpiar(_izq)
+        if valido(_cand) and len(_cand) >= 4:
+            return _cand
+
     # ── Estrategia -1 (MÁXIMA PRIORIDAD): nombre por sufijo legal ─────────────
     # Las razones sociales salvadoreñas casi siempre terminan en una forma
     # jurídica (S.A. DE C.V., S.A., LTDA, etc.). La metadata del DTE nunca.
