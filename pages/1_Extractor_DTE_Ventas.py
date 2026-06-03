@@ -20,6 +20,7 @@ from utils.pdf_utils import (
     limpiar_monto as _limpiar_monto,
     extraer_y_formatear_fecha as _extraer_fecha,
     extraer_texto_pdf,
+    extraer_nombre_receptor_columna,
 )
 from utils.ai_utils import (
     gemini_disponible,
@@ -390,16 +391,34 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             anexo = "2"  # Ventas a Consumidor Final
 
         # ── Sello de Recepción (40 chars alfanuméricos, empieza con año) ───────
+        # NOTA: NO se busca en t_no_sp (sin espacios) porque ahí el sello queda
+        # pegado al texto vecino y los bordes \b fallan (el carácter contiguo es
+        # alfanumérico). Se busca en t_clean, que conserva los saltos de línea.
         sello = ""
-        # Patrón específico: 4 dígitos de año + 36 chars alfanuméricos = 40 total
-        m_sello = re.search(r"\b(20[2-3]\d[A-Z0-9]{36})\b", t_no_sp)
+        # 1) Anclado a la etiqueta (layout en línea: "Sello de Recepción: XXXX")
+        m_sello = re.search(
+            r"Sello\s+de\s+Recepci[oó]n\s*:?\s*([A-Z0-9]{36,44})",
+            t_clean, re.I
+        )
         if m_sello:
-            sello = m_sello.group(1)
-        # Fallback: buscar cadena de exactamente 40 chars alfanuméricos
+            sello = m_sello.group(1).upper()
+        # 2) Token con prefijo de año delimitado por no-alfanuméricos
+        #    (layout apilado: etiquetas y luego valores en líneas separadas)
         if not sello:
-            m_sello2 = re.search(r"\b([A-Z0-9]{40})\b", t_no_sp)
+            m_sello2 = re.search(
+                r"(?<![A-Z0-9])(20[2-3]\d[A-Z0-9]{36})(?![A-Z0-9])",
+                t_clean.upper()
+            )
             if m_sello2:
                 sello = m_sello2.group(1)
+        # 3) Último recurso: cualquier cadena de 40 alfanuméricos aislada
+        if not sello:
+            m_sello3 = re.search(
+                r"(?<![A-Z0-9])([A-Z0-9]{40})(?![A-Z0-9])",
+                t_clean.upper()
+            )
+            if m_sello3:
+                sello = m_sello3.group(1)
 
         # ── Código de Generación / UUID ────────────────────────────────────────
         gen = ""
@@ -523,10 +542,32 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             es_nuevo = False
 
         if es_nuevo:
+            # Fuente primaria: extracción por columnas (robusta ante el
+            # entrelazado de caracteres que produce pdfplumber cuando los
+            # nombres de EMISOR y RECEPTOR comparten la misma línea).
+            nombre_encontrado = ""
+            try:
+                nom_col = extraer_nombre_receptor_columna(file_bytes)
+            except Exception:
+                nom_col = ""
+            if nom_col:
+                nc = nom_col.strip().upper()
+                # Descartar si coincide con el emisor o es claramente inválido
+                mismo_emisor = bool(
+                    _nom_emisor_ctx and (
+                        nc == _nom_emisor_ctx or nc.startswith(_nom_emisor_ctx[:15])
+                    )
+                )
+                if (4 <= len(nc) <= 100 and re.search(r"[A-ZÁÉÍÓÚÑÜ]", nc)
+                        and not mismo_emisor and not es_nombre_sospechoso(nc)):
+                    nombre_encontrado = nc
+
+            # Respaldo: heurística textual sobre el texto lineal/visual
             pos_busqueda = pos_nit_rec if pos_nit_rec >= 0 else len(texto_completo) // 2
-            nombre_encontrado = extraer_nombre_receptor(
-                texto_completo, pos_busqueda, cliente_activo
-            )
+            if not nombre_encontrado:
+                nombre_encontrado = extraer_nombre_receptor(
+                    texto_completo, pos_busqueda, cliente_activo
+                )
             if not nombre_encontrado and texto_visual.strip():
                 pos_vis = pos_nit_rec
                 if pos_vis < 0:

@@ -87,6 +87,81 @@ def extraer_texto_pdf(file_bytes: bytes) -> tuple:
 
 
 # ──────────────────────────────────────────────
+# NOMBRE DEL RECEPTOR POR COLUMNAS (anti-entrelazado)
+# ──────────────────────────────────────────────
+
+def extraer_nombre_receptor_columna(file_bytes: bytes) -> str:
+    """
+    Extrae el nombre / razón social del RECEPTOR usando coordenadas de columna.
+
+    Los DTE del MH colocan EMISOR (columna izquierda) y RECEPTOR (columna
+    derecha) en la misma fila. Cuando ambos nombres caen en la misma línea
+    horizontal, pdfplumber entrelaza los caracteres de las dos columnas y el
+    texto extraído queda ilegible (p. ej. "L A O N G Ó I N..." mezcla
+    "LOGISTICA" + "ANÓNIMA"). Para evitarlo recortamos solo la columna derecha
+    (el receptor) por coordenadas y extraemos su texto de forma aislada.
+
+    Retorna el nombre en MAYÚSCULAS, o '' si no se pudo determinar con
+    seguridad (en cuyo caso conviene caer al método textual heurístico).
+    """
+    try:
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+            if not pdf.pages:
+                return ""
+            page  = pdf.pages[0]
+            W     = page.width
+            words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
+            if not words:
+                return ""
+
+            # Encabezado RECEPTOR: sin él no es seguro recortar por columna
+            recep = next(
+                (w for w in words if w["text"].strip().upper() == "RECEPTOR"),
+                None,
+            )
+            if not recep:
+                return ""
+            hdr_top   = recep["top"]
+            emisor_x1 = next(
+                (w["x1"] for w in words if w["text"].strip().upper() == "EMISOR"),
+                None,
+            )
+            # Divisor entre columnas: punto medio EMISOR/RECEPTOR (tope en W/2)
+            div = ((emisor_x1 + recep["x0"]) / 2) if emisor_x1 else (W / 2)
+            div = min(div, W / 2)
+
+            # Primera etiqueta NIT del receptor: delimita el bloque del nombre
+            nit_top = None
+            for w in sorted(words, key=lambda x: x["top"]):
+                if (w["top"] > hdr_top + 4 and w["x0"] >= div
+                        and re.match(r"(?i)^NIT", w["text"])):
+                    nit_top = w["top"]
+                    break
+            if nit_top is None:
+                nit_top = hdr_top + 45
+
+            top    = hdr_top + 6
+            bottom = max(nit_top - 1, top + 1)
+            crop   = page.crop((div, top, W, bottom))
+            txt    = normalizar_unicode(crop.extract_text(x_tolerance=1.5) or "")
+
+            # Quitar encabezado y etiquetas, dejando solo el nombre
+            txt = re.sub(r"(?i)\bRECEPTOR\b", " ", txt)
+            txt = re.sub(
+                r"(?i)nombre(?:\s+comercial|"
+                r"\s+o\s+raz[oó]n\s+social|"
+                r"\s+del\s+(?:cliente|receptor|adquiriente))?\s*:?",
+                " ", txt,
+            )
+            txt = re.sub(r"(?i)\braz[oó]n\s+social\s*:?", " ", txt)
+            txt = re.sub(r"\s+", " ", txt).strip(" :,-")
+            return txt.upper()
+    except Exception:
+        log.debug("extraer_nombre_receptor_columna error", exc_info=True)
+        return ""
+
+
+# ──────────────────────────────────────────────
 # MONTOS
 # ──────────────────────────────────────────────
 
