@@ -17,6 +17,10 @@ env/
 # Streamlit
 .streamlit/secrets.toml
 
+# Environment variables (local only)
+.env
+.env.*
+
 # Editors & OS
 .DS_Store
 .idea/
