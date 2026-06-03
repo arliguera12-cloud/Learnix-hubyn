@@ -2056,11 +2056,11 @@ if not st.session_state.db_compras.empty:
     if busqueda:
         t_bus = busqueda.strip()
         mask = (
-            df_filtrado['nom_prov'].str.contains(t_bus, case=False, na=False)    |
-            df_filtrado['nit_prov'].str.contains(t_bus, case=False, na=False)    |
-            df_filtrado['dui_prov'].str.contains(t_bus, case=False, na=False)    |
-            df_filtrado['gen'].str.contains(t_bus, case=False, na=False)         |
-            df_filtrado['num_control'].str.contains(t_bus, case=False, na=False)
+            df_filtrado['nom_prov'].str.contains(t_bus, case=False, na=False, regex=False)    |
+            df_filtrado['nit_prov'].str.contains(t_bus, case=False, na=False, regex=False)    |
+            df_filtrado['dui_prov'].str.contains(t_bus, case=False, na=False, regex=False)    |
+            df_filtrado['gen'].str.contains(t_bus, case=False, na=False, regex=False)         |
+            df_filtrado['num_control'].str.contains(t_bus, case=False, na=False, regex=False)
         )
         df_filtrado = df_filtrado[mask]
 
