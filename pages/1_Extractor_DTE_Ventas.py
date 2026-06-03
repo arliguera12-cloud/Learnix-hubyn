@@ -1913,11 +1913,11 @@ if not st.session_state.db_ventas.empty:
     if busqueda:
         t_bus = busqueda.strip()
         mask = (
-            df_filtrado['nom_cli'].str.contains(t_bus, case=False, na=False)        |
-            df_filtrado['nit_cli'].str.contains(t_bus, na=False)                    |
-            df_filtrado['dui_cli'].str.contains(t_bus, na=False)                    |
-            df_filtrado['num_control'].str.contains(t_bus, case=False, na=False)    |
-            df_filtrado['gen'].str.contains(t_bus, case=False, na=False)
+            df_filtrado['nom_cli'].str.contains(t_bus, case=False, na=False, regex=False)        |
+            df_filtrado['nit_cli'].str.contains(t_bus, na=False, regex=False)                    |
+            df_filtrado['dui_cli'].str.contains(t_bus, na=False, regex=False)                    |
+            df_filtrado['num_control'].str.contains(t_bus, case=False, na=False, regex=False)    |
+            df_filtrado['gen'].str.contains(t_bus, case=False, na=False, regex=False)
         )
         df_filtrado = df_filtrado[mask]
 

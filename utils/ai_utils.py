@@ -356,8 +356,9 @@ AGENTE RETENEDOR:
   Nombre: {nom_cliente}
 
 CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores):
-  fecha_emision : "{campos.get('fecha', '')}"
-  nit_proveedor : "{campos.get('nit_prov', '')}"
+  fecha_emision  : "{campos.get('fecha', '')}"
+  nit_proveedor  : "{campos.get('nit_prov', '')}"
+  nombre_sujeto  : "{campos.get('nom_prov', '')}"
 
 TEXTO DEL PDF:
 {texto_pdf[:6000]}
@@ -368,12 +369,14 @@ TEXTO DEL PDF:
 CAMPOS A VERIFICAR:
   • fecha   : Fecha de EMISIÓN en formato DD/MM/YYYY
   • nit_prov: NIT del SUJETO RETENIDO (14 dígitos); NO puede ser {nit_cliente}
+  • nom_prov: Razón social del SUJETO RETENIDO; NO puede ser "{nom_cliente}" ni metadata
 {_FORMATO_JSON_BASE}
 Estructura requerida:
 {{
   "razonamiento": {{"ubicacion_seccion": "...", "etiqueta_vs_valor": "...", "limpieza_aplicada": "...", "autovalidacion": "..."}},
   "fecha": "DD/MM/YYYY o null",
   "nit_prov": "14 dígitos o null",
+  "nom_prov": "nombre del sujeto retenido o null",
   "correcciones": ["descripción de cada campo modificado"],
   "auditoria_ia": {{"modelo_utilizado": "llama-3.3-70b-versatile", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
 }}"""
@@ -473,8 +476,13 @@ def _llamar_groq(prompt: str) -> dict | None:
 
         except json.JSONDecodeError as e:
             _ultimo_error = f"Groq devolvió JSON inválido: {e}"
-            log.warning("Groq JSON error: %s", e)
+            log.warning("Groq JSON error (intento %d/%d): %s", attempt + 1, _MAX_RETRIES, e)
             _cb_on_failure()
+            if attempt < _MAX_RETRIES - 1:
+                wait = _BACKOFF_DELAYS[attempt]
+                log.info("Reintentando en %ds...", wait)
+                time.sleep(wait)
+                continue
             return None
 
         except Exception as exc:
@@ -614,9 +622,12 @@ def _extraer_campos_corregidos(resultado: dict, campos_actuales: dict, tipo_dte:
         if nit and len(nit) == 14:
             campos_corr["nit_prov"] = nit
         elif nit and len(nit) == 9:
-            campos_corr["nit_prov"] = nit
+            campos_corr["dui_prov"] = nit
 
     elif tipo_dte == "retenciones":
+        nom = _validar_nombre(resultado.get("nom_prov"), campos_actuales.get("nom_prov", ""))
+        if nom:
+            campos_corr["nom_prov"] = nom
         nit = _validar_nit(resultado.get("nit_prov"), campos_actuales.get("nit_prov", ""), excluir)
         if nit and len(nit) == 14:
             campos_corr["nit_prov"] = nit

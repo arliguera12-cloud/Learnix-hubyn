@@ -637,9 +637,9 @@ if not st.session_state.db_ret.empty:
     if busqueda_ret:
         t = busqueda_ret.strip()
         mask = (
-            df_fil['nit_prov'].str.contains(t, case=False, na=False) |
-            df_fil['sello'].str.contains(t, case=False, na=False)    |
-            df_fil['gen'].str.contains(t, case=False, na=False)
+            df_fil['nit_prov'].str.contains(t, case=False, na=False, regex=False) |
+            df_fil['sello'].str.contains(t, case=False, na=False, regex=False)    |
+            df_fil['gen'].str.contains(t, case=False, na=False, regex=False)
         )
         df_fil = df_fil[mask]
 
