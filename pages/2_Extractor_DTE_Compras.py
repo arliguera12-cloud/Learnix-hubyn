@@ -1,4 +1,5 @@
 import functools
+import logging
 import streamlit as st
 import pdfplumber
 import pandas as pd
@@ -8,6 +9,8 @@ import json
 import os
 import gc
 import sys
+
+_log = logging.getLogger(__name__)
 from io import BytesIO
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -311,13 +314,20 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
                 _izq = _nom_line[:_gap.start() + 1]
         _cand = limpiar(_izq)
         if valido(_cand) and len(_cand) >= 4:
+            _log.debug("extraer_nombre_emisor: estrategia=-2 (columna izq) → %s", _cand)
             return _cand
 
-    # ── Estrategia -1 (MÁXIMA PRIORIDAD): nombre por sufijo legal ─────────────
+    # ── Estrategia -1 (ALTA PRIORIDAD): nombre por sufijo legal ─────────────
     # Las razones sociales salvadoreñas casi siempre terminan en una forma
     # jurídica (S.A. DE C.V., S.A., LTDA, etc.). La metadata del DTE nunca.
-    # Capturamos las palabras previas + el sufijo legal y validamos.
-    # Match dentro de UNA línea ([^\n] en vez de \s para no cruzar saltos)
+    # GUARD: solo busca en la sección EMISOR (antes de RECEPTOR/CLIENTE).
+    _texto_emisor_sl = texto
+    for _pat_sl in [r'(?i)\bEMISOR\s+RECEPTOR\b', r'(?i)DATOS\s+DEL\s+RECEPTOR',
+                    r'(?i)DATOS\s+DEL\s+CLIENTE', r'(?i)\bRECEPTOR\b', r'(?i)\bCLIENTE\b']:
+        _parts_sl = re.split(_pat_sl, texto, maxsplit=1)
+        if len(_parts_sl) >= 2:
+            _texto_emisor_sl = _parts_sl[0]
+            break
     _SUFIJO_LEGAL = re.compile(
         r'([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9&.,\- ]{2,70}?,?\s*'
         r'(?:S\.?\s*A\.?\s+DE\s+C\.?\s*V\.?|'          # S.A. DE C.V.
@@ -328,12 +338,13 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
         r'S\.?\s+EN\s+C\.?))',                          # S. EN C.
         re.I,
     )
-    for _ln in texto.split('\n'):
+    for _ln in _texto_emisor_sl.split('\n'):
         m_sl = _SUFIJO_LEGAL.search(_ln)
         if not m_sl:
             continue
         candidato = limpiar(m_sl.group(1))
         if valido(candidato) and len(candidato) >= 6:
+            _log.debug("extraer_nombre_emisor: estrategia=-1 (sufijo legal) → %s", candidato)
             return candidato
 
     # ── Estrategia 0: sección explícita [EMISOR] … [RECEPTOR] ────────────────
@@ -354,6 +365,7 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
                 continue
             candidato = limpiar(l)
             if valido(candidato):
+                _log.debug("extraer_nombre_emisor: estrategia=0 (bloque EMISOR) → %s", candidato)
                 return candidato
 
     # ── Estrategia 1: etiqueta "Nombre o Razón Social:" (primer match = emisor)
@@ -368,6 +380,7 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
             continue
         candidato = limpiar(m_nom.group(1))
         if valido(candidato):
+            _log.debug("extraer_nombre_emisor: estrategia=1 (etiqueta NRS) → %s", candidato)
             return candidato
 
     # ── Estrategia 2: texto antes del receptor ───────────────────────────────
@@ -396,6 +409,7 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
         tiene_comercial = any(w in l.upper() for w in PALABRAS_COMERCIALES)
         candidato = limpiar(l)
         if valido(candidato) and (tiene_comercial or len(candidato) >= 8):
+            _log.debug("extraer_nombre_emisor: estrategia=3 (palabras comerciales) → %s", candidato)
             return candidato
 
     # ── Estrategia 4: primera línea no-metadata del documento ────────────────
@@ -409,6 +423,7 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
             continue
         candidato = limpiar(l)
         if valido(candidato):
+            _log.debug("extraer_nombre_emisor: estrategia=4 (primeras líneas) → %s", candidato)
             return candidato
 
     # ── Estrategia 5: líneas anteriores al NIT del proveedor ─────────────────
@@ -420,8 +435,10 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
                     if i - offset >= 0:
                         candidato = limpiar(lineas[i - offset].strip())
                         if valido(candidato):
+                            _log.debug("extraer_nombre_emisor: estrategia=5 (cerca NIT) → %s", candidato)
                             return candidato
 
+    _log.debug("extraer_nombre_emisor: todas las estrategias fallaron")
     return ""
 
 
@@ -632,12 +649,13 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                     nit_prov = nit_cand
                     break
 
-        # Fallback: cualquier número de 14 dígitos no excluido
+        # Fallback: formato DGII explícito (XXXX-XXXXXX-XXX-X) — evita capturar
+        # fechas concatenadas o códigos de barras de 14 dígitos sin guiones.
         if not nit_prov:
             for m in re.finditer(
-                r'\b(\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d|\d{14})\b', texto_completo
+                r'\b(\d{4}[\s\-]\d{6}[\s\-]\d{3}[\s\-]\d)\b', texto_completo
             ):
-                nit_cand = re.sub(r'[^0-9]', '', m.group(0))
+                nit_cand = re.sub(r'[^0-9]', '', m.group(1))
                 if nit_cand not in excluir_nits and len(nit_cand) == 14:
                     nit_prov = nit_cand
                     break
@@ -678,25 +696,28 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
         if _vision_campos.get("nit_prov"):
             nit_prov = _vision_campos["nit_prov"]
 
-        if not _vision_campos and gemini_disponible():
-            # Fallback textual solo cuando Vision no está disponible
+        # ── Groq: corrige campos vacíos/dudosos independientemente de Vision ──
+        # Se ejecuta siempre que Groq esté disponible, no solo cuando Vision falla.
+        # Vision puede haber llenado algunos campos pero dejado otros vacíos.
+        if gemini_disponible():
             _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "nom_prov": nom_prov}
             _necesita, _ = necesita_verificacion(_campos_act, nit_receptor)
             if _necesita:
-                # Pasar texto visual (preserva columnas EMISOR|RECEPTOR) + lineal.
-                # El visual ayuda al modelo a ubicar el nombre real del emisor.
-                _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
+                # texto_visual preserva columnas EMISOR|RECEPTOR — mejor para el modelo.
+                # Evitar concatenar lineal+visual (duplica contenido y gasta contexto).
+                _texto_ia = texto_visual if texto_visual.strip() else texto_lineal
                 _corr_dict, gemini_correcciones = verificar_compra_con_gemini(
                     _texto_ia,
                     _campos_act,
                     nit_receptor,
                     nom_receptor,
                 )
-                if _corr_dict.get("fecha"):
+                # Solo aplicar corrección si el campo estaba vacío o Groq da uno mejor
+                if _corr_dict.get("fecha") and not fecha:
                     fecha    = _corr_dict["fecha"]
-                if _corr_dict.get("nom_prov"):
+                if _corr_dict.get("nom_prov") and (not nom_prov or nom_prov == nom_receptor):
                     nom_prov = _corr_dict["nom_prov"]
-                if _corr_dict.get("nit_prov"):
+                if _corr_dict.get("nit_prov") and not nit_prov:
                     nit_prov = _corr_dict["nit_prov"]
 
         # ── FOVIAL y COTRANS ───────────────────────────────────────────────────
