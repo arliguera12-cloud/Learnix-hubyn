@@ -1,5 +1,5 @@
 """
-Learnix Hub — AI Utils v2.0 (Groq Cloud / llama3-8b-8192).
+Learnix Hub — AI Utils v2.0 (Groq Cloud / llama-3.3-70b-versatile).
 
 Mejoras sobre v1.0:
   - Circuit breaker: pausa envíos si error_rate supera el umbral (evita thundering herd)
@@ -18,7 +18,7 @@ from groq import Groq
 
 log = logging.getLogger(__name__)
 
-_GROQ_MODEL     = "llama3-8b-8192"
+_GROQ_MODEL     = "llama-3.3-70b-versatile"
 _MAX_RETRIES    = 3
 _BACKOFF_DELAYS = [2, 4, 8]
 
@@ -239,7 +239,7 @@ ESCALA DE CONFIANZA (auditoria_ia.confianza_extraccion):
   0-59  : alta incertidumbre — se recomienda revisión manual
 
 SIEMPRE completa auditoria_ia con:
-  modelo_utilizado      = "llama3-8b-8192"
+  modelo_utilizado      = "llama-3.3-70b-versatile"
   confianza_extraccion  = número entero 0-100
   notas_de_razonamiento = resumen en 1-2 oraciones
 """
@@ -276,7 +276,7 @@ CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores):
   nombre_emisor : "{campos.get('nom_prov', '')}"
 
 TEXTO DEL PDF:
-{texto_pdf[:3500]}
+{texto_pdf[:6000]}
 
 {_ejemplos}
 {_INSTRUCCIONES_COT}
@@ -293,7 +293,7 @@ Estructura requerida:
   "nit_prov": "14 dígitos o null",
   "nom_prov": "nombre del emisor o null",
   "correcciones": ["descripción de cada campo modificado"],
-  "auditoria_ia": {{"modelo_utilizado": "llama3-8b-8192", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
+  "auditoria_ia": {{"modelo_utilizado": "llama-3.3-70b-versatile", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
 }}"""
 
 
@@ -318,7 +318,7 @@ CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores):
   nombre_receptor: "{campos.get('nom_cli', '')}"
 
 TEXTO DEL PDF:
-{texto_pdf[:3500]}
+{texto_pdf[:6000]}
 
 {_ejemplos}
 {_INSTRUCCIONES_COT}
@@ -337,7 +337,7 @@ Estructura requerida:
   "dui_cli": "9 dígitos o null",
   "nom_cli": "nombre del receptor o null",
   "correcciones": ["descripción de cada campo modificado"],
-  "auditoria_ia": {{"modelo_utilizado": "llama3-8b-8192", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
+  "auditoria_ia": {{"modelo_utilizado": "llama-3.3-70b-versatile", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
 }}"""
 
 
@@ -360,7 +360,7 @@ CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores):
   nit_proveedor : "{campos.get('nit_prov', '')}"
 
 TEXTO DEL PDF:
-{texto_pdf[:3500]}
+{texto_pdf[:6000]}
 
 {_ejemplos}
 {_INSTRUCCIONES_COT}
@@ -375,7 +375,7 @@ Estructura requerida:
   "fecha": "DD/MM/YYYY o null",
   "nit_prov": "14 dígitos o null",
   "correcciones": ["descripción de cada campo modificado"],
-  "auditoria_ia": {{"modelo_utilizado": "llama3-8b-8192", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
+  "auditoria_ia": {{"modelo_utilizado": "llama-3.3-70b-versatile", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
 }}"""
 
 
@@ -400,7 +400,7 @@ CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores):
   nombre_sujeto : "{campos.get('nom_sujeto', '')}"
 
 TEXTO DEL PDF:
-{texto_pdf[:3500]}
+{texto_pdf[:6000]}
 
 {_ejemplos}
 {_INSTRUCCIONES_COT}
@@ -419,7 +419,7 @@ Estructura requerida:
   "dui_sujeto": "9 dígitos o null",
   "nom_sujeto": "nombre del sujeto o null",
   "correcciones": ["descripción de cada campo modificado"],
-  "auditoria_ia": {{"modelo_utilizado": "llama3-8b-8192", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
+  "auditoria_ia": {{"modelo_utilizado": "llama-3.3-70b-versatile", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
 }}"""
 
 
@@ -457,7 +457,7 @@ def _llamar_groq(prompt: str) -> dict | None:
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.1,
-                max_tokens=1024,
+                max_tokens=2048,
                 response_format={"type": "json_object"},
             )
 
@@ -703,7 +703,7 @@ def procesar_dte_con_gemini(
     contexto_receptor: dict,
 ) -> tuple[dict, list[str]]:
     """
-    Verificador universal de DTEs con Groq (llama3-8b-8192).
+    Verificador universal de DTEs con Groq (llama-3.3-70b-versatile).
     Mantiene la misma firma que la versión original para compatibilidad total.
     """
     if not gemini_disponible():
