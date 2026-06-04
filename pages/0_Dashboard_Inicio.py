@@ -227,33 +227,41 @@ c1, c2 = st.columns(2, gap="large")
 cols = [c1, c2, c1, c2]
 
 for mod, col in zip(_MODULOS, cols):
+    _bg     = mod["bg"]
+    _border = mod["border"]
+    _color  = mod["color"]
+    _icon   = mod["icon"]
+    _sub    = mod["sub"]
+    _title  = mod["title"]
+    _desc   = mod["desc"]
+    _delay  = mod["delay"]
     badges_html = "".join(
-        f"<span style='background:{mod[\"bg\"]};border:1px solid {mod[\"border\"]};"
-        f"color:{mod[\"color\"]};font-size:0.62rem;font-weight:700;padding:2px 9px;"
+        f"<span style='background:{_bg};border:1px solid {_border};"
+        f"color:{_color};font-size:0.62rem;font-weight:700;padding:2px 9px;"
         f"border-radius:99px;letter-spacing:0.5px;white-space:nowrap;'>{b}</span>"
         for b in mod["badges"]
     )
     with col:
         st.markdown(
             f"""
-            <div class="modulo-card {mod['delay']} animate-fade-in-up"
-                 style="border-top:3px solid {mod['color']};margin-bottom:14px;">
+            <div class="modulo-card {_delay} animate-fade-in-up"
+                 style="border-top:3px solid {_color};margin-bottom:14px;">
               <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:12px;">
                 <div style="width:44px;height:44px;border-radius:12px;flex-shrink:0;
-                            background:{mod['bg']};border:1px solid {mod['border']};
+                            background:{_bg};border:1px solid {_border};
                             display:flex;align-items:center;justify-content:center;
                             font-size:1.4rem;">
-                  {mod['icon']}
+                  {_icon}
                 </div>
                 <div style="flex:1;min-width:0;">
-                  <div style="font-size:0.60rem;font-weight:700;color:{mod['color']};
+                  <div style="font-size:0.60rem;font-weight:700;color:{_color};
                               letter-spacing:2px;text-transform:uppercase;margin-bottom:2px;">
-                    {mod['sub']}
+                    {_sub}
                   </div>
-                  <div class="modulo-title" style="margin-bottom:0!important;">{mod['title']}</div>
+                  <div class="modulo-title" style="margin-bottom:0!important;">{_title}</div>
                 </div>
               </div>
-              <div class="modulo-desc">{mod['desc']}</div>
+              <div class="modulo-desc">{_desc}</div>
               <div style="display:flex;flex-wrap:wrap;gap:5px;">{badges_html}</div>
             </div>
             """,
