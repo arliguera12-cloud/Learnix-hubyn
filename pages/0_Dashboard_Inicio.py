@@ -121,7 +121,7 @@ else:
                             letter-spacing:2px;text-transform:uppercase;margin-bottom:2px;">
                   Espacio de Trabajo Activo
                 </div>
-                <div style="font-size:1.0rem;font-weight:800;color:var(--navy);">{nombre_c}</div>
+                <div style="font-size:1.0rem;font-weight:800;color:#FFFFFF;">{nombre_c}</div>
                 <div style="font-size:0.75rem;color:var(--text-secondary);
                             font-family:'Courier New',monospace;margin-top:2px;">
                   NIT: {nit_c}
@@ -188,64 +188,77 @@ if cliente_activo:
 # ─────────────────────────────────────────────
 section_label("Módulos Disponibles", "🗂️")
 
+_MODULOS = [
+    {
+        "icon": "📈", "color": "#1DB8AA", "bg": "rgba(29,184,170,0.12)", "border": "rgba(29,184,170,0.25)",
+        "title": "Extractor de Ventas",
+        "sub": "Anexo F-07",
+        "desc": "Procesa CCF, Facturas, Notas de Crédito y Débito en PDF nativo. Genera el F-07 separando ventas a contribuyentes (Anexo 1) y consumidores finales (Anexo 2).",
+        "badges": ["DTE-01", "DTE-03", "DTE-05", "DTE-06"],
+        "delay": "animate-delay-1",
+    },
+    {
+        "icon": "🛒", "color": "#60A5FA", "bg": "rgba(96,165,250,0.12)", "border": "rgba(96,165,250,0.25)",
+        "title": "Extractor de Compras",
+        "sub": "Anexo F-07",
+        "desc": "Digitaliza compras con motor de extracción inteligente y visión IA. Bandeja de revisión manual, detección de duplicados y directorio de proveedores persistente.",
+        "badges": ["DTE-03", "DTE-05", "DTE-06", "F-07"],
+        "delay": "animate-delay-2",
+    },
+    {
+        "icon": "✂️", "color": "#A78BFA", "bg": "rgba(167,139,250,0.12)", "border": "rgba(167,139,250,0.25)",
+        "title": "Retenciones 1%",
+        "sub": "Anexo F-14",
+        "desc": "Estructura el Libro de Retenciones desde DTE-07, calculando bases gravables y montos retenidos por proveedor para el formulario F-14.",
+        "badges": ["DTE-07", "F-14"],
+        "delay": "animate-delay-3",
+    },
+    {
+        "icon": "⚖️", "color": "#FBBF24", "bg": "rgba(251,191,36,0.12)", "border": "rgba(251,191,36,0.25)",
+        "title": "Sujetos Excluidos",
+        "sub": "Casilla 66 · F-14",
+        "desc": "Extrae DTE-14 y calcula automáticamente las retenciones del 10% para el formulario F-14, Casilla 66 de Compras.",
+        "badges": ["DTE-14", "Casilla 66", "10%"],
+        "delay": "animate-delay-4",
+    },
+]
+
 c1, c2 = st.columns(2, gap="large")
+cols = [c1, c2, c1, c2]
 
-with c1:
-    st.markdown("""
-    <div class="modulo-card animate-fade-in-up animate-delay-1">
-        <span class="modulo-icon">📈</span>
-        <div class="modulo-title">Extractor de Ventas — Anexo F-07</div>
-        <div class="modulo-desc">
-            Procesa CCF, Facturas, Notas de Crédito y Débito en PDF nativo.
-            Genera el Anexo F-07 separando automáticamente ventas a contribuyentes
-            (Anexo 1) y consumidores finales (Anexo 2).
-        </div>
-        <span class="modulo-badge">DTE-01 · DTE-03 · DTE-05 · DTE-06</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-
-    st.markdown("""
-    <div class="modulo-card animate-fade-in-up animate-delay-3">
-        <span class="modulo-icon">✂️</span>
-        <div class="modulo-title">Retenciones 1% — Anexo F-14</div>
-        <div class="modulo-desc">
-            Lee Comprobantes de Retención DTE-07 y estructura el Libro de Retenciones
-            para el Anexo F-14, calculando automáticamente bases gravables y montos
-            retenidos por proveedor.
-        </div>
-        <span class="modulo-badge">DTE-07 · Casilla F-14</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-with c2:
-    st.markdown("""
-    <div class="modulo-card animate-fade-in-up animate-delay-2">
-        <span class="modulo-icon">🛒</span>
-        <div class="modulo-title">Extractor de Compras — Anexo F-07</div>
-        <div class="modulo-desc">
-            Digitaliza compras con motor de extracción inteligente y OCR de respaldo.
-            Incluye bandeja de revisión manual, detección de duplicados y directorio
-            de proveedores persistente.
-        </div>
-        <span class="modulo-badge">DTE-03 · DTE-05 · DTE-06 · Anexo F-07</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-
-    st.markdown("""
-    <div class="modulo-card animate-fade-in-up animate-delay-4">
-        <span class="modulo-icon">⚖️</span>
-        <div class="modulo-title">Sujetos Excluidos — Casilla 66 F-14</div>
-        <div class="modulo-desc">
-            Extrae datos de DTE-14 (Sujetos Excluidos) para la Casilla 66 de Compras
-            y calcula automáticamente las retenciones del 10% para el formulario F-14.
-        </div>
-        <span class="modulo-badge">DTE-14 · Casilla 66 · Retención 10%</span>
-    </div>
-    """, unsafe_allow_html=True)
+for mod, col in zip(_MODULOS, cols):
+    badges_html = "".join(
+        f"<span style='background:{mod[\"bg\"]};border:1px solid {mod[\"border\"]};"
+        f"color:{mod[\"color\"]};font-size:0.62rem;font-weight:700;padding:2px 9px;"
+        f"border-radius:99px;letter-spacing:0.5px;white-space:nowrap;'>{b}</span>"
+        for b in mod["badges"]
+    )
+    with col:
+        st.markdown(
+            f"""
+            <div class="modulo-card {mod['delay']} animate-fade-in-up"
+                 style="border-top:3px solid {mod['color']};margin-bottom:14px;">
+              <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:12px;">
+                <div style="width:44px;height:44px;border-radius:12px;flex-shrink:0;
+                            background:{mod['bg']};border:1px solid {mod['border']};
+                            display:flex;align-items:center;justify-content:center;
+                            font-size:1.4rem;">
+                  {mod['icon']}
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:0.60rem;font-weight:700;color:{mod['color']};
+                              letter-spacing:2px;text-transform:uppercase;margin-bottom:2px;">
+                    {mod['sub']}
+                  </div>
+                  <div class="modulo-title" style="margin-bottom:0!important;">{mod['title']}</div>
+                </div>
+              </div>
+              <div class="modulo-desc">{mod['desc']}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:5px;">{badges_html}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 # ─────────────────────────────────────────────
 # 10. ESTADO VACÍO (sin cliente seleccionado)
