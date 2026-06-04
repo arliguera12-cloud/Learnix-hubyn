@@ -136,17 +136,36 @@ def render_drive_import(prefix: str) -> list:
         key=f"{prefix}_drive_dl",
     ):
         elegidos = [resultados[i] for i in seleccion]
-        with st.spinner(f"Descargando {len(elegidos)} archivo(s) de Drive..."):
-            try:
-                st.session_state[f"{prefix}_drive_files"] = descargar_como_drivefiles(
-                    api_key, elegidos
-                )
+        bar = st.progress(0.0, text=f"Descargando 0/{len(elegidos)}...")
+
+        def _prog(hechos: int, total: int):
+            bar.progress(hechos / total, text=f"Descargando {hechos}/{total}...")
+
+        try:
+            archivos_ok, errores = descargar_como_drivefiles(
+                api_key, elegidos, progreso=_prog
+            )
+            bar.empty()
+            st.session_state[f"{prefix}_drive_files"] = archivos_ok
+            if archivos_ok:
                 st.success(
-                    f"✅ {len(elegidos)} archivo(s) listos. Usa el botón 'Procesar' de arriba."
+                    f"✅ {len(archivos_ok)} archivo(s) listos. "
+                    "Usa el botón 'Procesar' de arriba."
                 )
-            except DriveError as e:
-                st.error(str(e))
-            except Exception as e:  # noqa: BLE001
-                st.error(f"Error al descargar de Drive: {e}")
+            if errores:
+                st.warning(
+                    f"⚠️ {len(errores)} archivo(s) no se pudieron descargar."
+                )
+                with st.expander("Ver archivos con error"):
+                    for nombre, msg in errores[:50]:
+                        st.caption(f"• {nombre} — {msg}")
+            if not archivos_ok and not errores:
+                st.info("No se descargó ningún archivo.")
+        except DriveError as e:
+            bar.empty()
+            st.error(str(e))
+        except Exception as e:  # noqa: BLE001
+            bar.empty()
+            st.error(f"Error al descargar de Drive: {e}")
 
     return st.session_state.get(f"{prefix}_drive_files", [])
