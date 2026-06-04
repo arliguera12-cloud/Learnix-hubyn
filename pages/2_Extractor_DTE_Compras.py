@@ -1268,14 +1268,39 @@ def ventana_descarga_compras(df_filtrado: pd.DataFrame, nombre_base: str) -> Non
 # HELPERS UI
 # ─────────────────────────────────────────────
 def alerta_con_lista(tipo_alerta: str, icono: str, titulo: str, archivos: list) -> None:
-    fn = getattr(st, tipo_alerta)
+    n = len(archivos)
+    color_map = {
+        "error":   ("var(--error)",   "var(--error-bg)",   "var(--error-border)"),
+        "warning": ("var(--warning)", "var(--warning-bg)", "var(--warning-border)"),
+        "success": ("var(--success)", "var(--success-bg)", "var(--success-border)"),
+        "info":    ("var(--info)",    "var(--info-bg)",    "var(--info-border)"),
+    }
+    color, bg, border = color_map.get(tipo_alerta, color_map["info"])
+    count_txt = f"{n}" if n else "0"
+    st.markdown(
+        f"""
+        <div style="background:{bg};border:1px solid {border};border-radius:var(--radius);
+                    padding:14px 16px;min-height:80px;display:flex;flex-direction:column;
+                    justify-content:center;gap:6px;height:100%;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:1.3rem;line-height:1;">{icono}</span>
+            <span style="font-size:1.35rem;font-weight:800;color:{color};
+                         line-height:1;font-variant-numeric:tabular-nums;">{count_txt}</span>
+          </div>
+          <div style="font-size:0.78rem;font-weight:600;color:{color};opacity:0.9;
+                      line-height:1.3;">{titulo}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     if archivos:
-        fn(f"{icono} **{len(archivos)} {titulo}**")
-        with st.expander(f"Ver {len(archivos)} archivo(s)"):
-            items_html = "".join(f"<div>📄 {safe_str(a)}</div>" for a in archivos)
+        with st.expander(f"Ver {n} archivo(s)"):
+            items_html = "".join(
+                f"<div style='padding:4px 0;font-size:0.80rem;color:var(--text-secondary);'>"
+                f"📄 {safe_str(a)}</div>"
+                for a in archivos
+            )
             st.markdown(f'<div class="scroll-list">{items_html}</div>', unsafe_allow_html=True)
-    else:
-        st.success(f"✅ 0 {titulo}")
 
 
 def datos_revision_vacio(causa: str = "") -> dict:
@@ -2041,15 +2066,26 @@ if not st.session_state.db_compras.empty:
 
     fc1, fc2 = st.columns([3, 1])
     with fc1:
+        st.markdown(
+            "<div style='font-size:0.72rem;font-weight:700;color:var(--text-muted);"
+            "letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;'>Búsqueda</div>",
+            unsafe_allow_html=True,
+        )
         busqueda = st.text_input(
             "busqueda_c", label_visibility="collapsed",
             placeholder="Buscar por nombre, NIT, DUI, Núm. Control o UUID…"
         )
     with fc2:
+        st.markdown(
+            "<div style='font-size:0.72rem;font-weight:700;color:var(--text-muted);"
+            "letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;'>Tipo DTE</div>",
+            unsafe_allow_html=True,
+        )
         tipos_disponibles = sorted(df['tipo'].unique().tolist()) if 'tipo' in df.columns else []
         filtro_tipo = st.multiselect(
             "Tipo DTE", options=tipos_disponibles,
-            default=tipos_disponibles, placeholder="Todos los tipos"
+            default=tipos_disponibles, placeholder="Todos los tipos",
+            label_visibility="collapsed",
         )
 
     fd1, fd2, fd3, fd4 = st.columns(4)
