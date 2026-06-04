@@ -1042,7 +1042,7 @@ def _normalizar_campos_vision(resultado: dict, tipo_dte: str, nit_ctx: str) -> t
 
     # Fecha (común a todos)
     f = str(resultado.get("fecha") or "").strip()
-    if _PAT_DDMMYYYY.match(f):
+    if f and _PAT_DDMMYYYY.match(f):
         campos["fecha"] = f
 
     # Número de control y sello (comunes)

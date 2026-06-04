@@ -1712,6 +1712,9 @@ if st.session_state.cola_revision:
         else:
             try:
                 with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
+                    if not pdf.pages:
+                        st.error("El PDF no contiene páginas.")
+                        st.stop()
                     img = pdf.pages[0].to_image(resolution=200).original
                     st.image(img, caption=item_actual['archivo'], use_container_width=True)
                     texto_crudo = ""
