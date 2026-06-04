@@ -221,15 +221,38 @@ i.icon,
 
 /* Separadores de sección del sidebar */
 [data-testid="stSidebarNavSeparator"] {
-  color: rgba(255,255,255,0.28) !important;
-  font-size: 0.58rem !important;
+  color: rgba(255,255,255,0.25) !important;
+  font-size: 0.56rem !important;
   font-weight: 700 !important;
-  letter-spacing: 3px !important;
+  letter-spacing: 3.5px !important;
   text-transform: uppercase !important;
-  margin: 20px 0 4px 16px !important;
+  margin: 22px 6px 6px !important;
   opacity: 1 !important;
-  padding-bottom: 4px !important;
-  border-bottom: 1px solid rgba(255,255,255,0.05) !important;
+  padding: 0 8px 6px !important;
+  border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+}
+
+/* Emoji/icon en nav link — pill de fondo para destacarlo */
+[data-testid="stSidebarNavLink"] p,
+[data-testid="stSidebarNavLink"] span:first-child {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 26px !important; height: 26px !important;
+  background: rgba(255,255,255,0.06) !important;
+  border-radius: 7px !important;
+  margin-right: 4px !important;
+  flex-shrink: 0 !important;
+  font-size: 0.95rem !important;
+  transition: background 0.15s !important;
+}
+[data-testid="stSidebarNavLink"]:hover p,
+[data-testid="stSidebarNavLink"]:hover span:first-child {
+  background: rgba(29,184,170,0.18) !important;
+}
+[data-testid="stSidebarNavLink"][aria-current="page"] p,
+[data-testid="stSidebarNavLink"][aria-current="page"] span:first-child {
+  background: rgba(29,184,170,0.22) !important;
 }
 
 /* Texto general en sidebar */
@@ -1036,7 +1059,7 @@ hr {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 22px 24px;
+  padding: 20px 22px;
   box-shadow: var(--shadow-sm);
   transition: var(--transition);
   height: 100%;
@@ -1045,17 +1068,20 @@ hr {
 }
 .modulo-card:hover {
   box-shadow: var(--shadow-lg);
-  border-color: var(--border-accent);
-  transform: translateY(-3px);
+  transform: translateY(-4px);
   background: var(--bg-card-hover);
 }
-.modulo-card::before {
+.modulo-card::after {
   content: '';
   position: absolute;
-  top: 0; left: 0;
-  width: 4px; height: 100%;
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-dark) 100%);
-  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(circle at 0% 0%, rgba(29,184,170,0.08) 0%, transparent 70%);
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.modulo-card:hover::after {
+  opacity: 1;
 }
 .modulo-icon {
   font-size: 1.8rem;
@@ -1094,18 +1120,18 @@ hr {
    SELECTOR DE EMPRESA (DASHBOARD)
 ═══════════════════════════════════════════════════════ */
 .selector-empresa-wrap {
-  background: var(--bg-card);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 20px 24px;
+  padding: 18px 22px;
   box-shadow: var(--shadow-sm);
   margin-bottom: 6px;
 }
 .selector-label {
-  font-size: 0.72rem !important;
+  font-size: 0.65rem !important;
   font-weight: 700 !important;
-  color: var(--text-secondary) !important;
-  letter-spacing: 2.5px !important;
+  color: var(--text-muted) !important;
+  letter-spacing: 3px !important;
   text-transform: uppercase !important;
   margin-bottom: 10px !important;
   display: flex;
@@ -1115,10 +1141,10 @@ hr {
 .selector-label::before {
   content: '';
   display: inline-block;
-  width: 8px; height: 8px;
+  width: 6px; height: 6px;
   background: var(--accent);
   border-radius: 50%;
-  box-shadow: 0 0 12px var(--accent);
+  box-shadow: 0 0 8px var(--accent);
 }
 
 /* ═══════════════════════════════════════════════════════
