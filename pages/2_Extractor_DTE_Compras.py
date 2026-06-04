@@ -68,6 +68,7 @@ st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 # ─────────────────────────────────────────────
 from utils.auth_guard import check_auth
 from components.gmail_import import render_gmail_import
+from components.drive_import import render_drive_import
 check_auth()
 
 if not st.session_state.get("cliente_activo"):
@@ -1383,7 +1384,9 @@ with st.sidebar:
     )
     st.divider()
 
-    tab_arch, tab_gmail = st.tabs(["📁 Archivos", "📧 Desde Gmail"])
+    tab_arch, tab_gmail, tab_drive = st.tabs(
+        ["📁 Archivos", "📧 Desde Gmail", "🗂️ Desde Drive"]
+    )
     with tab_arch:
         archivos = st.file_uploader(
             "Arrastra facturas de proveedores (PDF o JSON)",
@@ -1393,9 +1396,11 @@ with st.sidebar:
         )
     with tab_gmail:
         gmail_files = render_gmail_import("comp")
+    with tab_drive:
+        drive_files = render_drive_import("comp")
 
-    # Une los archivos subidos a mano con los traídos de Gmail.
-    archivos = (archivos or []) + gmail_files
+    # Une los archivos subidos a mano con los traídos de Gmail y de Drive.
+    archivos = (archivos or []) + gmail_files + drive_files
 
     procesar = st.button(
         "🚀 Procesar Compras",
