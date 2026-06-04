@@ -60,6 +60,7 @@ st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 # 3. SEGURIDAD — Multi-tenant SaaS
 # ─────────────────────────────────────────────
 from utils.auth_guard import check_auth
+from components.gmail_import import render_gmail_import
 check_auth()
 
 if not st.session_state.get("cliente_activo"):
@@ -1216,12 +1217,19 @@ with st.sidebar:
     )
     st.divider()
 
-    archivos = st.file_uploader(
-        "Arrastra PDFs o JSONs de ventas",
-        type=["pdf", "json"],
-        accept_multiple_files=True,
-        key=str(st.session_state.ventas_uploader)
-    )
+    tab_arch, tab_gmail = st.tabs(["📁 Archivos", "📧 Desde Gmail"])
+    with tab_arch:
+        archivos = st.file_uploader(
+            "Arrastra PDFs o JSONs de ventas",
+            type=["pdf", "json"],
+            accept_multiple_files=True,
+            key=str(st.session_state.ventas_uploader)
+        )
+    with tab_gmail:
+        gmail_files = render_gmail_import("ventas")
+
+    # Une los archivos subidos a mano con los traídos de Gmail.
+    archivos = (archivos or []) + gmail_files
 
     procesar = st.button(
         "🚀 Procesar Ventas",
