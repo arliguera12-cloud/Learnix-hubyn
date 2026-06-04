@@ -1390,6 +1390,22 @@ hr {
   border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important;
 }
 
+/* ── COLUMNAS DE ALERTAS — ALTURA UNIFORME ───────────── */
+/* Fuerza que las columnas hermanas de un grupo de alertas
+   estiren su contenido a la misma altura */
+[data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] > [data-testid="stVerticalBlock"] > [data-testid="stMarkdownContainer"] > div[style*="min-height:80px"]) {
+  align-items: stretch !important;
+}
+[data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] > [data-testid="stVerticalBlock"] > [data-testid="stMarkdownContainer"] > div[style*="min-height:80px"])
+  > [data-testid="stColumn"] {
+  display: flex !important;
+  flex-direction: column !important;
+}
+[data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] > [data-testid="stVerticalBlock"] > [data-testid="stMarkdownContainer"] > div[style*="min-height:80px"])
+  > [data-testid="stColumn"] > [data-testid="stVerticalBlock"] {
+  flex: 1 !important;
+}
+
 /* ── PUNTO PULSANTE DE ESTADO ─────────────────────────── */
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; transform: scale(1); }
