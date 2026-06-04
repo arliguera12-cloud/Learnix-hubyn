@@ -645,27 +645,38 @@ _CODIGOS_INGRESO_F14 = {
     "1001 — Otros Ingresos": "1001",
 }
 
+# Catálogos exactos según Manual F-07 DGII El Salvador
 _TIPO_OP_F14 = {
     "1 — Gravada": "1",
     "2 — No Gravada": "2",
-    "3 — Excluido / No Renta": "3",
+    "3 — Excluido o No Constituye Renta": "3",
     "4 — Mixta": "4",
+    "8 — Operación en más de un anexo": "8",
+    "9 — No aplica": "9",
 }
-_CLASIF_F14 = {"1 — Costo": "1", "2 — Gasto": "2"}
+_CLASIF_F14 = {
+    "1 — Costo": "1",
+    "2 — Gasto": "2",
+    "8 — Operación en más de un anexo": "8",
+    "9 — No aplica": "9",
+}
 _SECTOR_F14 = {
     "1 — Industria": "1",
     "2 — Comercio": "2",
-    "3 — Agropecuaria": "3",
-    "4 — Servicios / Prof. / Artes y Oficios": "4",
+    "3 — Agropecuario": "3",
+    "4 — Servicios, Profesiones, Artes y Oficios": "4",
+    "9 — No aplica": "9",
 }
 _TIPO_CG_F14 = {
-    "1 — Gastos de Venta sin Donación": "1",
-    "2 — Gastos de Admón. sin Donación": "2",
-    "3 — Gastos Financieros sin Donación": "3",
-    "4 — Costo Art. Prod./Comprados Import./Internac.": "4",
-    "5 — Costo Art. Prod./Comprados Interno": "5",
+    "1 — Gastos de Venta": "1",
+    "2 — Gastos de Administración": "2",
+    "3 — Gastos Financieros": "3",
+    "4 — Costo Artículos Prod./Comprados Importaciones/Internaciones": "4",
+    "5 — Costo Artículos Prod./Comprados Interno": "5",
     "6 — Costos Indirectos de Fabricación": "6",
     "7 — Mano de Obra": "7",
+    "8 — Operación en más de un anexo": "8",
+    "9 — No aplica": "9",
 }
 
 _CORTE_DUI_F14 = pd.Timestamp(2022, 1, 1)

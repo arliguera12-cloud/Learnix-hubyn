@@ -1149,36 +1149,51 @@ def to_excel_hacienda_compras(df: pd.DataFrame) -> bytes:
 
 
 def to_csv_hacienda_compras(df_f07: pd.DataFrame) -> bytes:
-    """Exports Anexo 3 (Compras) as Hacienda CSV — no headers, 2 decimal places."""
+    """Exports Anexo 3 (Compras) as Hacienda CSV — no headers, 2 decimal places, UTF-8."""
+    _COLS_NUM = [
+        "G. Compras Exentas/NS", "H. Internac. Exentas/NS", "I. Import. Exentas/NS",
+        "J. Compras Gravadas", "K. Internac. Grav. Bienes", "L. Import. Grav. Bienes",
+        "M. Import. Grav. Servicios", "N. Crédito Fiscal (IVA)", "O. Total Compras",
+    ]
     df_exp = df_f07[[c for c in _COLS_DGII_F07 if c in df_f07.columns]].copy()
-    cols_num = [c for c in df_exp.columns if df_exp[c].dtype == float]
-    for col in cols_num:
-        df_exp[col] = df_exp[col].apply(lambda v: f"{float(v):.2f}")
+    for col in _COLS_NUM:
+        if col in df_exp.columns:
+            df_exp[col] = df_exp[col].apply(lambda v: f"{float(v or 0):.2f}")
     return df_exp.to_csv(index=False, header=False).encode("utf-8")
 
 
+# Catálogos exactos según Manual F-07 DGII El Salvador
 _TIPO_OP_OPTS_C = {
     "1 — Gravada": "1",
-    "2 — No Gravada o Exenta": "2",
-    "3 — Excluido / No Renta": "3",
+    "2 — No Gravada": "2",
+    "3 — Excluido o No Constituye Renta": "3",
     "4 — Mixta": "4",
+    "8 — Operación en más de un anexo": "8",
+    "9 — No aplica": "9",
 }
 _CLASIF_OPTS_C = {
-    "1 — Bienes": "1",
-    "2 — Servicios": "2",
-    "3 — Bienes y Servicios": "3",
-}
-_SECTOR_OPTS_C = {
-    "1 — Agropecuario": "1",
-    "2 — Industria": "2",
-    "3 — Comercio": "3",
-    "4 — Servicios": "4",
-    "5 — Otro": "5",
-}
-_TIPO_CG_OPTS_C = {
     "1 — Costo": "1",
     "2 — Gasto": "2",
-    "3 — Costo y Gasto": "3",
+    "8 — Operación en más de un anexo": "8",
+    "9 — No aplica": "9",
+}
+_SECTOR_OPTS_C = {
+    "1 — Industria": "1",
+    "2 — Comercio": "2",
+    "3 — Agropecuario": "3",
+    "4 — Servicios, Profesiones, Artes y Oficios": "4",
+    "9 — No aplica": "9",
+}
+_TIPO_CG_OPTS_C = {
+    "1 — Gastos de Venta": "1",
+    "2 — Gastos de Administración": "2",
+    "3 — Gastos Financieros": "3",
+    "4 — Costo Artículos Prod./Comprados Importaciones/Internaciones": "4",
+    "5 — Costo Artículos Prod./Comprados Interno": "5",
+    "6 — Costos Indirectos de Fabricación": "6",
+    "7 — Mano de Obra": "7",
+    "8 — Operación en más de un anexo": "8",
+    "9 — No aplica": "9",
 }
 
 
@@ -1206,9 +1221,9 @@ def ventana_descarga_compras(df_filtrado: pd.DataFrame, nombre_base: str) -> Non
         with col_r:
             clasif_lbl = st.selectbox("R — Clasificación", list(_CLASIF_OPTS_C.keys()), index=1)
         with col_s:
-            sector_lbl = st.selectbox("S — Sector", list(_SECTOR_OPTS_C.keys()), index=3)
+            sector_lbl = st.selectbox("S — Sector", list(_SECTOR_OPTS_C.keys()), index=3)  # default: Servicios
         with col_t:
-            tipo_cg_lbl = st.selectbox("T — Tipo Costo/Gasto", list(_TIPO_CG_OPTS_C.keys()), index=1)
+            tipo_cg_lbl = st.selectbox("T — Tipo Costo/Gasto", list(_TIPO_CG_OPTS_C.keys()), index=1)  # default: Gastos de Admin.
         tipo_op = _TIPO_OP_OPTS_C[tipo_op_lbl]
         clasif  = _CLASIF_OPTS_C[clasif_lbl]
         sector  = _SECTOR_OPTS_C[sector_lbl]
