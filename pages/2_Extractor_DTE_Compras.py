@@ -1011,6 +1011,8 @@ def construir_df_f07_compras(
         df_out["S. Sector"]           = "0"
         df_out["T. Tipo Costo/Gasto"] = "0"
     df_out["U. Num Anexo"] = "3"
+    df_out["V. Núm. Control"]      = df_in["num_control_raw"].astype(str) if "num_control_raw" in df_in.columns else ""
+    df_out["W. Sello de Recepción"] = df_in["sello"].astype(str) if "sello" in df_in.columns else ""
     return df_out
 
 
@@ -1117,10 +1119,22 @@ def to_csv_anexo8(df_a8: pd.DataFrame) -> bytes:
 # ─────────────────────────────────────────────
 # 12. EXPORTAR EXCEL HACIENDA
 # ─────────────────────────────────────────────
+_COLS_DGII_F07 = [
+    "A. Fecha Emisión", "B. Clase Documento", "C. Tipo Documento",
+    "D. Num Documento (UUID)", "E. NIT/NRC Proveedor", "F. Nombre Proveedor",
+    "G. Compras Exentas/NS", "H. Internac. Exentas/NS", "I. Import. Exentas/NS",
+    "J. Compras Gravadas", "K. Internac. Grav. Bienes", "L. Import. Grav. Bienes",
+    "M. Import. Grav. Servicios", "N. Crédito Fiscal (IVA)", "O. Total Compras",
+    "P. DUI Proveedor", "Q. Tipo Operación", "R. Clasificación",
+    "S. Sector", "T. Tipo Costo/Gasto", "U. Num Anexo",
+]
+
 def to_excel_hacienda_compras(df: pd.DataFrame) -> bytes:
+    # Exportar solo columnas oficiales DGII (A–U), sin V y W que son referencia interna
+    df_dgii = df[[c for c in _COLS_DGII_F07 if c in df.columns]]
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, header=False, sheet_name='Compras_F07')
+        df_dgii.to_excel(writer, index=False, header=False, sheet_name='Compras_F07')
         ws     = writer.sheets['Compras_F07']
         anchos = [12,2,3,38,16,45,12,12,12,12,12,12,12,12,14,10,2,2,2,2,3]
         for idx_col, ancho in enumerate(anchos, start=1):
@@ -1134,7 +1148,7 @@ def to_excel_hacienda_compras(df: pd.DataFrame) -> bytes:
 
 def to_csv_hacienda_compras(df_f07: pd.DataFrame) -> bytes:
     """Exports Anexo 3 (Compras) as Hacienda CSV — no headers, 2 decimal places."""
-    df_exp = df_f07.copy()
+    df_exp = df_f07[[c for c in _COLS_DGII_F07 if c in df_f07.columns]].copy()
     cols_num = [c for c in df_exp.columns if df_exp[c].dtype == float]
     for col in cols_num:
         df_exp[col] = df_exp[col].apply(lambda v: f"{float(v):.2f}")

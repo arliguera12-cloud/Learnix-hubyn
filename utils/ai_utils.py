@@ -1,11 +1,20 @@
 """
-Learnix Hub — AI Utils v2.0 (Groq Cloud / llama-3.3-70b-versatile).
+Learnix Hub — AI Utils v3.0 (Groq Cloud).
 
-Mejoras sobre v1.0:
-  - Circuit breaker: pausa envíos si error_rate supera el umbral (evita thundering herd)
-  - Misma interfaz pública que gemini_utils.py (compatibilidad total)
+Modelos:
+  - Texto  : llama-3.3-70b-versatile  (verificación/corrección de campos)
+  - Visión : meta-llama/llama-4-scout-17b-16e-instruct  (lee el PDF como imagen)
+
+Mejoras sobre v2.0:
+  - Capa de VISIÓN: renderiza el DTE como imagen y extrae TODOS los campos
+    (fechas, NIT, nombres, montos, sello, número de control) directamente de
+    lo que se ve, sin depender del orden del texto extraído ni de regex.
+    Resuelve PDFs con columnas mezcladas, layouts raros y PDFs escaneados.
+  - Circuit breaker compartido entre texto y visión.
+  - Misma interfaz pública que gemini_utils.py (compatibilidad total).
 """
 from __future__ import annotations
+import base64
 import json
 import logging
 import os
@@ -18,9 +27,13 @@ from groq import Groq
 
 log = logging.getLogger(__name__)
 
-_GROQ_MODEL     = "llama-3.3-70b-versatile"
-_MAX_RETRIES    = 3
-_BACKOFF_DELAYS = [2, 4, 8]
+_GROQ_MODEL        = "llama-3.3-70b-versatile"
+_GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+_MAX_RETRIES       = 3
+_BACKOFF_DELAYS    = [2, 4, 8]
+
+# Umbral de confianza por debajo del cual se levanta una alerta de revisión.
+_VISION_CONF_MIN   = 70
 
 # ─── Estado del módulo ────────────────────────────────────────────────────────
 _ultimo_error: str = ""
@@ -746,12 +759,402 @@ def procesar_dte_con_gemini(
     return campos_corr, correcciones
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  CAPA DE VISIÓN — Groq Llama-4 Scout lee el PDF como imagen
+# ═══════════════════════════════════════════════════════════════════════════
+# A diferencia de la extracción por texto (que hereda el desorden de columnas
+# del PDF y los errores de regex), la visión "ve" el documento como un humano:
+# distingue las dos columnas EMISOR | RECEPTOR, ubica los montos en su fila y
+# lee el sello/UUID aunque estén en cualquier posición. Funciona también con
+# PDFs escaneados (imagen pura, sin capa de texto).
+
+_ultimo_error_vision: str = ""
+
+# Caché del chequeo de dependencias (fitz/PIL) para no reimportar en cada PDF.
+_vision_deps_ok: bool | None = None
+
+
+def _vision_deps_disponibles() -> bool:
+    global _vision_deps_ok
+    if _vision_deps_ok is None:
+        try:
+            import fitz  # noqa: F401  (PyMuPDF)
+            _vision_deps_ok = True
+        except Exception:
+            _vision_deps_ok = False
+            log.info("Visión deshabilitada: PyMuPDF (fitz) no disponible")
+    return _vision_deps_ok
+
+
+def vision_disponible() -> bool:
+    """True si hay API key, PyMuPDF instalado y el circuito está cerrado."""
+    return bool(_get_api_key()) and _vision_deps_disponibles() and not _cb_is_open()
+
+
+def vision_ultimo_error() -> str:
+    return _ultimo_error_vision
+
+
+def _pdf_a_imagen_b64(pdf_bytes: bytes, max_lado: int = 1600) -> str | None:
+    """
+    Renderiza la PRIMERA página del PDF a PNG y la devuelve en base64.
+
+    El DTE salvadoreño cabe en una sola página: sello, UUID, número de control,
+    datos de emisor/receptor y resumen de montos están todos en la página 1.
+    Se limita el lado mayor a ~1600px para mantener el base64 holgadamente bajo
+    el límite de 4MB de Groq sin perder legibilidad de los dígitos.
+    """
+    try:
+        import fitz
+    except Exception:
+        return None
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if doc.page_count == 0:
+            doc.close()
+            return None
+        page = doc[0]
+        # Zoom 2x por defecto; reducir si la página renderizada excede max_lado.
+        zoom  = 2.0
+        rect  = page.rect
+        lado  = max(rect.width, rect.height) * zoom
+        if lado > max_lado:
+            zoom = max_lado / max(rect.width, rect.height)
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), colorspace=fitz.csRGB)
+        png = pix.tobytes("png")
+        doc.close()
+        return base64.b64encode(png).decode("ascii")
+    except Exception as exc:
+        log.warning("Visión: PDF→imagen falló: %s", exc)
+        return None
+
+
+# ── Especificación de campos por tipo de DTE (claves que esperan los extractores)
+# Cada entrada: (descripción para el prompt, esquema JSON de salida).
+_VISION_SPEC = {
+    "compras": {
+        "rol": ("El RECEPTOR es el cliente activo (comprador). Verifica los datos "
+                "del EMISOR (proveedor), que está en la columna IZQUIERDA."),
+        "campos": [
+            "fecha           : fecha de EMISIÓN en formato DD/MM/YYYY",
+            "nit_prov        : NIT del EMISOR (14 dígitos, sin guiones); NUNCA el del receptor",
+            "nom_prov        : razón social del EMISOR (columna izquierda)",
+            "num_control     : número de control completo (formato DTE-NN-XXXX-NÚMERO)",
+            "sello_recepcion : sello de recepción (~40 caracteres alfanuméricos, sin guiones)",
+            "gravadas        : total de ventas/compras gravadas (número)",
+            "iva             : impuesto IVA 13% / crédito fiscal (número)",
+            "exentas         : ventas exentas o no sujetas (número, 0 si no hay)",
+            "total           : total a pagar / monto total de la operación (número)",
+        ],
+        "json": ('{"fecha": "...", "nit_prov": "...", "nom_prov": "...", '
+                 '"num_control": "...", "sello_recepcion": "...", '
+                 '"gravadas": 0, "iva": 0, "exentas": 0, "total": 0, '
+                 '"confianza": 0}'),
+    },
+    "ventas": {
+        "rol": ("El EMISOR es el cliente activo (vendedor). Verifica los datos del "
+                "RECEPTOR (comprador), que está en la columna DERECHA."),
+        "campos": [
+            "fecha           : fecha de EMISIÓN en formato DD/MM/YYYY",
+            "nit_cli         : NIT del RECEPTOR (14 dígitos, sin guiones); null si usa DUI",
+            "dui_cli         : DUI del RECEPTOR (9 dígitos, sin guiones); null si usa NIT",
+            "nom_cli         : nombre o razón social del RECEPTOR (columna derecha)",
+            "num_control     : número de control completo (formato DTE-NN-XXXX-NÚMERO)",
+            "sello_recepcion : sello de recepción (~40 caracteres alfanuméricos, sin guiones)",
+            "gravadas        : total de ventas gravadas (número)",
+            "iva             : débito fiscal / IVA 13% (número)",
+            "exentas         : ventas exentas (número, 0 si no hay)",
+            "no_sujetas      : ventas no sujetas (número, 0 si no hay)",
+            "total           : total a pagar / monto total de la operación (número)",
+        ],
+        "json": ('{"fecha": "...", "nit_cli": "...", "dui_cli": "...", "nom_cli": "...", '
+                 '"num_control": "...", "sello_recepcion": "...", '
+                 '"gravadas": 0, "iva": 0, "exentas": 0, "no_sujetas": 0, "total": 0, '
+                 '"confianza": 0}'),
+    },
+    "retenciones": {
+        "rol": ("DTE-07. El AGENTE RETENEDOR es el cliente activo. Verifica los datos "
+                "del SUJETO RETENIDO (proveedor)."),
+        "campos": [
+            "fecha           : fecha de EMISIÓN en formato DD/MM/YYYY",
+            "nit_prov        : NIT del SUJETO RETENIDO (14 dígitos, sin guiones); NUNCA el del retenedor",
+            "base            : monto sujeto a retención (número)",
+            "ret             : IVA retenido 1% (número)",
+            "num_control     : número de control completo (formato DTE-07-XXXX-NÚMERO)",
+            "sello_recepcion : sello de recepción (~40 caracteres alfanuméricos, sin guiones)",
+        ],
+        "json": ('{"fecha": "...", "nit_prov": "...", "base": 0, "ret": 0, '
+                 '"num_control": "...", "sello_recepcion": "...", "confianza": 0}'),
+    },
+    "sujetos_excluidos": {
+        "rol": ("DTE-14. El COMPRADOR es el cliente activo. Verifica los datos del "
+                "SUJETO EXCLUIDO (no inscrito en IVA)."),
+        "campos": [
+            "fecha           : fecha de EMISIÓN en formato DD/MM/YYYY",
+            "nom_sujeto      : nombre del SUJETO EXCLUIDO",
+            "id_sujeto       : NIT (14 dígitos) o DUI (9 dígitos) del sujeto, sin guiones",
+            "base            : monto de la compra / base (número)",
+            "ret             : retención de renta 10% (número, 0 si no hay)",
+            "num_control     : número de control completo (formato DTE-14-XXXX-NÚMERO)",
+            "sello_recepcion : sello de recepción (~40 caracteres alfanuméricos, sin guiones)",
+        ],
+        "json": ('{"fecha": "...", "nom_sujeto": "...", "id_sujeto": "...", '
+                 '"base": 0, "ret": 0, "num_control": "...", '
+                 '"sello_recepcion": "...", "confianza": 0}'),
+    },
+}
+
+
+def _prompt_vision(tipo_dte: str, nit_ctx: str, nom_ctx: str) -> str:
+    spec = _VISION_SPEC[tipo_dte]
+    campos_txt = "\n".join(f"  • {c}" for c in spec["campos"])
+    return f"""Eres un AUDITOR FISCAL SENIOR de El Salvador. Analiza la IMAGEN de este
+Documento Tributario Electrónico (DTE) y extrae sus datos con máxima precisión.
+{_CONTEXTO_FISCAL}
+{spec['rol']}
+
+CLIENTE ACTIVO (NO confundir con la contraparte):
+  NIT   : {nit_ctx}
+  Nombre: {nom_ctx}
+
+INSTRUCCIONES:
+  1. El DTE tiene DOS columnas: EMISOR (izquierda) y RECEPTOR (derecha).
+     Identifica cada dato en su columna correcta; no los mezcles.
+  2. Lee los montos del bloque "RESUMEN DEL DOCUMENTO" en su fila exacta.
+  3. El sello de recepción y el código de generación pueden estar arriba;
+     léelos carácter por carácter sin inventar dígitos.
+  4. Si un dato no es legible o no aparece, usa null (no lo adivines).
+  5. confianza = entero 0-100 según qué tan seguro estás de la lectura global.
+
+CAMPOS A EXTRAER:
+{campos_txt}
+
+Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional ni Markdown:
+{spec['json']}"""
+
+
+def _llamar_groq_vision(prompt: str, img_b64: str) -> dict | None:
+    """Llama al modelo de visión de Groq con la imagen del DTE en base64."""
+    global _ultimo_error_vision
+    api_key = _get_api_key()
+    if not api_key:
+        _ultimo_error_vision = "GROQ_API_KEY no configurada."
+        return None
+    if _cb_is_open():
+        _ultimo_error_vision = "Visión suspendida (circuit breaker abierto)."
+        return None
+
+    client  = Groq(api_key=api_key)
+    mensajes = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url",
+             "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+        ],
+    }]
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            # Llama-4 en Groq soporta JSON mode; si el endpoint lo rechaza,
+            # reintentamos sin response_format y parseamos manualmente.
+            kwargs = dict(
+                model=_GROQ_VISION_MODEL,
+                messages=mensajes,
+                temperature=0.1,
+                max_tokens=1024,
+            )
+            try:
+                response = client.chat.completions.create(
+                    response_format={"type": "json_object"}, **kwargs
+                )
+            except Exception as exc_fmt:
+                if "response_format" in str(exc_fmt).lower() or "json" in str(exc_fmt).lower():
+                    response = client.chat.completions.create(**kwargs)
+                else:
+                    raise
+
+            raw = (response.choices[0].message.content or "").strip()
+            raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
+            raw = re.sub(r'\s*```\s*$', '', raw)
+            # Aislar el primer objeto JSON por si el modelo añade prosa.
+            m = re.search(r'\{.*\}', raw, re.S)
+            if m:
+                raw = m.group(0)
+            resultado = json.loads(raw)
+            _cb_on_success()
+            _ultimo_error_vision = ""
+            return resultado
+
+        except json.JSONDecodeError as e:
+            _ultimo_error_vision = f"Visión devolvió JSON inválido: {e}"
+            log.warning("Visión JSON error (intento %d/%d): %s", attempt + 1, _MAX_RETRIES, e)
+            _cb_on_failure()
+            if attempt < _MAX_RETRIES - 1:
+                time.sleep(_BACKOFF_DELAYS[attempt])
+                continue
+            return None
+
+        except Exception as exc:
+            msg = str(exc)
+            if "rate_limit" in msg.lower() or "429" in msg:
+                _ultimo_error_vision = "Límite de tasa de Groq (visión)."
+                _cb_on_failure()
+                if attempt < _MAX_RETRIES - 1:
+                    time.sleep(_BACKOFF_DELAYS[attempt])
+                    continue
+            elif "authentication" in msg.lower() or "401" in msg:
+                _ultimo_error_vision = "API key de Groq inválida (401)."
+                _cb_on_failure()
+                return None
+            elif "model" in msg.lower() and ("decommission" in msg.lower() or "not found" in msg.lower()):
+                _ultimo_error_vision = f"Modelo de visión no disponible: {msg[:80]}"
+                _cb_on_failure()
+                return None
+            else:
+                _ultimo_error_vision = f"Error de visión: {msg[:120]}"
+                _cb_on_failure()
+                log.error("Visión error inesperado: %s", msg)
+                return None
+    return None
+
+
+def _normalizar_campos_vision(resultado: dict, tipo_dte: str, nit_ctx: str) -> tuple[dict, int, list[str]]:
+    """
+    Convierte la respuesta cruda de visión al dict que consumen los extractores,
+    saneando identificadores, nombres y montos. Devuelve (campos, confianza, alertas).
+    """
+    campos: dict   = {}
+    alertas: list  = []
+    excluir = {nit_ctx} if nit_ctx else set()
+
+    def _id(v, *, longitudes):
+        d = re.sub(r'[^0-9]', '', str(v or ""))
+        return d if d and d not in excluir and len(d) in longitudes else ""
+
+    def _nom(v):
+        s = str(v or "").strip().upper()
+        return s if (3 <= len(s) <= 120 and not es_nombre_sospechoso(s)) else ""
+
+    def _monto(v):
+        m = normalizar_monto_ia(v)
+        return round(m, 2) if (m is not None and m > 0) else None
+
+    # Fecha (común a todos)
+    f = str(resultado.get("fecha") or "").strip()
+    if _PAT_DDMMYYYY.match(f):
+        campos["fecha"] = f
+
+    # Número de control y sello (comunes)
+    nc = str(resultado.get("num_control") or "").strip().upper()
+    if re.match(r'DTE-\d{2}-[A-Z0-9]{1,20}-\d{6,18}', nc):
+        campos["num_control"] = nc
+    sello = re.sub(r'[^A-Z0-9]', '', str(resultado.get("sello_recepcion") or "").upper())
+    if 30 <= len(sello) <= 45:
+        campos["sello_recepcion"] = sello
+
+    # Campos específicos por tipo
+    if tipo_dte == "compras":
+        if (n := _nom(resultado.get("nom_prov"))):       campos["nom_prov"] = n
+        if (i := _id(resultado.get("nit_prov"), longitudes=(14,))): campos["nit_prov"] = i
+        for k_out, k_in in [("gravadas","gravadas"),("iva","iva"),("exentas","exentas"),("total","total")]:
+            if (mm := _monto(resultado.get(k_in))) is not None: campos[k_out] = mm
+
+    elif tipo_dte == "ventas":
+        if (n := _nom(resultado.get("nom_cli"))):        campos["nom_cli"] = n
+        if (i := _id(resultado.get("nit_cli"), longitudes=(14,))): campos["nit_cli"] = i
+        if (d := _id(resultado.get("dui_cli"), longitudes=(9,))):  campos["dui_cli"] = d
+        for k in ("gravadas","iva","exentas","no_sujetas","total"):
+            if (mm := _monto(resultado.get(k))) is not None: campos[k] = mm
+
+    elif tipo_dte == "retenciones":
+        if (i := _id(resultado.get("nit_prov"), longitudes=(14,))): campos["nit_prov"] = i
+        for k in ("base","ret"):
+            if (mm := _monto(resultado.get(k))) is not None: campos[k] = mm
+
+    elif tipo_dte == "sujetos_excluidos":
+        if (n := _nom(resultado.get("nom_sujeto"))):     campos["nom_sujeto"] = n
+        if (i := _id(resultado.get("id_sujeto"), longitudes=(9, 14))): campos["id_sujeto"] = i
+        for k in ("base","ret"):
+            if (mm := _monto(resultado.get(k))) is not None: campos[k] = mm
+
+    # Confianza → alerta de revisión manual
+    try:
+        conf = int(resultado.get("confianza", 0))
+    except (ValueError, TypeError):
+        conf = 0
+    if conf and conf < _VISION_CONF_MIN:
+        alertas.append(f"Confianza de visión baja ({conf}%) — revisar manualmente")
+
+    return campos, conf, alertas
+
+
+def extraer_dte_con_vision(
+    pdf_bytes: bytes,
+    tipo_dte: str = "compras",
+    contexto_receptor: dict | None = None,
+) -> tuple[dict, list[str], dict]:
+    """
+    Extrae los campos del DTE leyéndolo como IMAGEN con Groq Llama-4 Scout.
+
+    Returns:
+      (campos, alertas, audit)
+        campos  : dict con las claves que esperan los extractores (ver _VISION_SPEC)
+        alertas : list[str] de avisos (p.ej. confianza baja)
+        audit   : dict de trazabilidad para la UI
+    """
+    global _ultimo_audit
+    if tipo_dte not in _VISION_SPEC:
+        return {}, [], {}
+    if not vision_disponible():
+        return {}, [], {}
+
+    contexto_receptor = contexto_receptor or {}
+    nit_ctx = re.sub(r'[^0-9]', '', str(contexto_receptor.get("nit", "")))
+    nom_ctx = str(contexto_receptor.get("nombre", "")).strip().upper()
+
+    img_b64 = _pdf_a_imagen_b64(pdf_bytes)
+    if not img_b64:
+        return {}, [], {}
+
+    prompt    = _prompt_vision(tipo_dte, nit_ctx, nom_ctx)
+    resultado = _llamar_groq_vision(prompt, img_b64)
+    if resultado is None:
+        return {}, [], {}
+
+    campos, conf, alertas = _normalizar_campos_vision(resultado, tipo_dte, nit_ctx)
+
+    audit = {
+        "modelo_utilizado"    : _GROQ_VISION_MODEL,
+        "confianza_extraccion": conf,
+        "notas_de_razonamiento": f"Extracción por visión ({len(campos)} campos legibles)",
+        "tipo_dte"            : tipo_dte,
+        "metodo"              : "vision",
+    }
+    with _audit_lock:
+        _ultimo_audit = audit
+        try:
+            if "ai_audit_log" not in st.session_state:
+                st.session_state.ai_audit_log = []
+            st.session_state.ai_audit_log.append(audit)
+            if len(st.session_state.ai_audit_log) > 50:
+                st.session_state.ai_audit_log = st.session_state.ai_audit_log[-50:]
+        except Exception:
+            pass
+
+    return campos, alertas, audit
+
+
 # ─── Compatibilidad con versión anterior ─────────────────────────────────────
 
 def necesita_verificacion(campos: dict, nit_receptor: str) -> tuple[bool, list[str]]:
     """
-    Siempre retorna True cuando Groq está disponible para máxima precisión.
-    Acumula las razones específicas para logging/UI.
+    Decide si vale la pena gastar una llamada de Groq (texto) para verificar.
+
+    Retorna True solo cuando hay algo dudoso/faltante. Así, cuando la capa de
+    VISIÓN ya completó fecha, NIT y nombre con datos limpios, esta verificación
+    de texto se OMITE (evita una segunda llamada redundante por documento).
+    Si la visión falló o dejó huecos, se levanta la verificación como respaldo.
     """
     razones = []
     _nit_p = re.sub(r'[^0-9]', '', str(campos.get("nit_prov") or ""))
@@ -766,8 +1169,8 @@ def necesita_verificacion(campos: dict, nit_receptor: str) -> tuple[bool, list[s
         razones.append("Fecha de emisión no encontrada")
     if not campos.get("nit_prov", "").strip():
         razones.append("NIT del emisor no encontrado")
-    # Siempre verificar con Groq cuando está disponible — máxima precisión
-    return True, razones
+    # Solo llamar a Groq-texto si quedó algún campo dudoso o vacío.
+    return bool(razones), razones
 
 
 def verificar_compra_con_gemini(
