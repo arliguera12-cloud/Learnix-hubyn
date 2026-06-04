@@ -5,6 +5,15 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from styles import DARK_PRO_CSS
+from utils.constants import SK
+
+
+def _sum_col(df: pd.DataFrame, *cols: str) -> float:
+    """Suma la primera columna disponible del DataFrame, retorna 0.0 si ninguna existe."""
+    for col in cols:
+        if not df.empty and col in df.columns:
+            return float(df[col].sum())
+    return 0.0
 
 # ─────────────────────────────────────────────
 # 1. PAGE CONFIG
@@ -144,28 +153,20 @@ st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 # ─────────────────────────────────────────────
 # 8. KPIs DE SESIÓN
 # ─────────────────────────────────────────────
-cliente_activo = st.session_state.get("cliente_activo")
+cliente_activo = st.session_state.get(SK.CLIENTE_ACTIVO)
 
 if cliente_activo:
-    df_ventas  = st.session_state.get("db_ventas",  pd.DataFrame())
-    df_compras = st.session_state.get("db_compras", pd.DataFrame())
-    df_ret     = st.session_state.get("db_ret",     pd.DataFrame())
+    df_ventas  = st.session_state.get(SK.DB_VENTAS,  pd.DataFrame())
+    df_compras = st.session_state.get(SK.DB_COMPRAS, pd.DataFrame())
+    df_ret     = st.session_state.get(SK.DB_RET,     pd.DataFrame())
 
     n_ventas  = len(df_ventas)
     n_compras = len(df_compras)
     n_ret     = len(df_ret)
 
-    sum_ventas = (
-        float(df_ventas["total"].sum())  if not df_ventas.empty  and "total" in df_ventas.columns
-        else float(df_ventas["tot"].sum()) if not df_ventas.empty  and "tot"   in df_ventas.columns
-        else 0.0
-    )
-    sum_compras = (
-        float(df_compras["tot"].sum()) if not df_compras.empty and "tot" in df_compras.columns else 0.0
-    )
-    sum_ret = (
-        float(df_ret["base"].sum()) if not df_ret.empty and "base" in df_ret.columns else 0.0
-    )
+    sum_ventas  = _sum_col(df_ventas,  "total", "tot")
+    sum_compras = _sum_col(df_compras, "tot")
+    sum_ret     = _sum_col(df_ret,     "base")
 
     section_label("Resumen de Sesión Actual", "📊")
 
