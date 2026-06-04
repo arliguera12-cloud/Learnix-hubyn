@@ -18,10 +18,12 @@ from utils.pdf_utils import (
     safe_extract_text as _safe_extract_text,
     normalizar_unicode,
     limpiar_monto as _limpiar_monto,
+    limpiar_numero as _limpiar_numero,
     extraer_y_formatear_fecha as _extraer_fecha,
     extraer_texto_pdf,
     extraer_nombre_receptor_columna,
 )
+from utils.constants import SK, TIPOS_CONTRIBUYENTES, TIPOS_CONSUMIDOR, TODOS_TIPOS_VALIDOS, MAX_VALORES_LOOP_VENTAS
 from utils.ai_utils import (
     gemini_disponible,
     gemini_ultimo_error,
@@ -72,14 +74,7 @@ cliente = st.session_state.cliente_activo
 # ─────────────────────────────────────────────
 # 4. CONSTANTES
 # ─────────────────────────────────────────────
-MAX_VALORES_LOOP = 30
-
-# Tipos válidos y su clasificación según F-07
-# Anexo 1 (Ventas a Contribuyentes): 03, 05, 06
-# Anexo 2 (Ventas a Consumidor Final): 01, 02, 10, 11
-TIPOS_CONTRIBUYENTES = {"03", "05", "06"}
-TIPOS_CONSUMIDOR     = {"01", "02", "10", "11"}
-TODOS_TIPOS_VALIDOS  = TIPOS_CONTRIBUYENTES | TIPOS_CONSUMIDOR
+MAX_VALORES_LOOP = MAX_VALORES_LOOP_VENTAS
 
 PALABRAS_BASURA_NOMBRE = [
     "DOCUMENTO", "TRIBUTARIO", "ELECTRONICO", "ELECTRÓNICO",

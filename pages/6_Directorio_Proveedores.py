@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import re
 import sys
 import os
 
@@ -28,10 +27,7 @@ st.markdown(DARK_PRO_CSS, unsafe_allow_html=True)
 # ─────────────────────────────────────────────
 from components.ui_components import page_header, section_label, empty_state
 from utils.local_db import cargar_proveedores_db, guardar_proveedor_db, eliminar_proveedor_db
-
-
-def limpiar_numero(num: str) -> str:
-    return re.sub(r"[^0-9]", "", str(num))
+from utils.pdf_utils import limpiar_numero
 
 
 # ─────────────────────────────────────────────

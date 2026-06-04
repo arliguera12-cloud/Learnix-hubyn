@@ -21,9 +21,11 @@ from utils.pdf_utils import (
     safe_extract_text as _safe_extract_text,
     normalizar_unicode,
     limpiar_monto as _limpiar_monto,
+    limpiar_numero as _limpiar_numero,
     extraer_y_formatear_fecha as _extraer_fecha,
     extraer_texto_pdf,
 )
+from utils.constants import SK, TIPOS_VALIDOS_COMPRAS, MAX_VALORES_LOOP_COMPRAS
 from utils.ai_utils import (
     es_nombre_sospechoso,
     verificar_compra_con_gemini,
@@ -80,9 +82,7 @@ cliente = st.session_state.cliente_activo
 # ─────────────────────────────────────────────
 # 4. CONSTANTES
 # ─────────────────────────────────────────────
-MAX_VALORES_LOOP = 40
-
-TIPOS_VALIDOS_COMPRAS = {"03", "05", "06", "11"}
+MAX_VALORES_LOOP = MAX_VALORES_LOOP_COMPRAS
 
 SKIP_LINEAS = re.compile(
     r'^(?:DOCUMENTO|TRIBUTARIO|ELECTR[OÓ]NICO|ELECTRONICO|COMPROBANTE|'

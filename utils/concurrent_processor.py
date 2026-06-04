@@ -30,9 +30,13 @@ from typing import Callable
 
 import streamlit as st
 
+from utils.constants import CACHE_MAX_SIZE, CACHE_EVICT_SIZE
+
 log = logging.getLogger(__name__)
 
-MAX_WORKERS: int = 10
+# Configurable: usa hasta la mitad de CPUs, máximo 10
+import os as _os
+MAX_WORKERS: int = min(_os.cpu_count() or 4, 10)
 
 
 # ─── Deduplicación y caché por sesión ────────────────────────────────────────
@@ -131,10 +135,11 @@ def con_cache_extraccion(
         resultado = fn_extraccion(pdf_bytes)
 
         with _cache_lock:
-            cache[cache_key] = resultado
-            if len(cache) > 200:
-                for k in list(cache.keys())[:50]:
+            # LRU: si el cache está lleno, eliminar los más antiguos
+            if len(cache) >= CACHE_MAX_SIZE:
+                for k in list(cache.keys())[:CACHE_EVICT_SIZE]:
                     del cache[k]
+            cache[cache_key] = resultado
 
         # Persistir de vuelta a session_state (solo es efectivo si llamado desde hilo principal;
         # desde workers es no-op silencioso, la persistencia ocurre en la siguiente carga)

@@ -16,6 +16,7 @@ from utils.pdf_utils import (
     safe_str,
     normalizar_unicode,
     limpiar_monto,
+    limpiar_nit,
     extraer_y_formatear_fecha,
     extraer_texto_pdf,
 )
@@ -66,8 +67,7 @@ cliente = st.session_state.cliente_activo
 
 
 
-def limpiar_nit(raw: str) -> str:
-    return re.sub(r'[^0-9]', '', raw)
+
 
 
 def extraer_nombre_receptor(texto: str) -> str:

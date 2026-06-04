@@ -1,7 +1,8 @@
 """
 Learnix DTE Hub — Utilidades compartidas de extracción PDF.
 Centraliza: safe_str, safe_extract_text, normalizar_unicode,
-limpiar_monto, extraer_y_formatear_fecha, extraer_texto_pdf.
+limpiar_monto, extraer_y_formatear_fecha, extraer_texto_pdf,
+limpiar_numero, limpiar_nit.
 """
 
 import re
@@ -19,6 +20,15 @@ log = logging.getLogger(__name__)
 
 def safe_str(val) -> str:
     return "" if val is None else str(val)
+
+
+def limpiar_numero(num: str) -> str:
+    """Elimina todo excepto dígitos. Uso: NIT, DUI, NRC."""
+    return re.sub(r"[^0-9]", "", str(num))
+
+
+# Alias semántico
+limpiar_nit = limpiar_numero
 
 
 def normalizar_unicode(texto: str) -> str:
