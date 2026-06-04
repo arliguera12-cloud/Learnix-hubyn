@@ -1462,6 +1462,8 @@ if st.session_state.cola_revision_v:
         with col_m2:
             st.caption(f"Total en cola: {total_cola} documentos")
 
+    if not st.session_state.cola_revision_v:
+        st.stop()
     item_actual = st.session_state.cola_revision_v[0]
     datos_act   = item_actual["datos"]
     tipo_actual = safe_str(datos_act.get("tipo", "03"))
@@ -1497,6 +1499,9 @@ if st.session_state.cola_revision_v:
         else:
             try:
                 with pdfplumber.open(BytesIO(item_actual["bytes"])) as pdf:
+                    if not pdf.pages:
+                        st.error("El PDF no contiene páginas.")
+                        st.stop()
                     img = pdf.pages[0].to_image(resolution=200).original
                     st.image(img, caption=item_actual['archivo'], use_container_width=True)
                     texto_crudo = ""
