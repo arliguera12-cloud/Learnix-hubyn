@@ -290,17 +290,58 @@ def descargar_archivo(api_key: str, file_id: str, resource_key: str | None = Non
     )
 
 
-def descargar_como_drivefiles(api_key: str, items: list[dict]) -> list[DriveFile]:
-    """Descarga una lista de items (de `listar_archivos`) y los envuelve."""
-    archivos: list[DriveFile] = []
-    for it in items:
+def descargar_como_drivefiles(
+    api_key: str,
+    items: list[dict],
+    *,
+    max_workers: int = 8,
+    progreso=None,
+) -> tuple[list[DriveFile], list[tuple[str, str]]]:
+    """
+    Descarga una lista de items (de `listar_archivos`) en paralelo y los envuelve.
+
+    Es tolerante a fallos: si un archivo no se puede descargar, los demás siguen.
+
+    Args:
+        max_workers: nº de descargas simultáneas.
+        progreso: callback opcional progreso(hechos:int, total:int) que se llama
+                  en el hilo principal tras cada archivo terminado.
+
+    Devuelve (archivos_ok, errores) donde errores es [(nombre, mensaje), ...].
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    total = len(items)
+    if total == 0:
+        return [], []
+
+    def _descargar_uno(it: dict) -> DriveFile:
         data = descargar_archivo(api_key, it["id"], it.get("resourceKey"))
-        archivos.append(
-            DriveFile(
-                it.get("name", it["id"]),
-                data,
-                carpeta=it.get("carpeta", ""),
-                file_id=it["id"],
-            )
+        return DriveFile(
+            it.get("name", it["id"]),
+            data,
+            carpeta=it.get("carpeta", ""),
+            file_id=it["id"],
         )
-    return archivos
+
+    archivos: list[DriveFile] = []
+    errores: list[tuple[str, str]] = []
+    workers = max(1, min(int(max_workers), 16))
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futuros = {ex.submit(_descargar_uno, it): it for it in items}
+        hechos = 0
+        for fut in as_completed(futuros):
+            it = futuros[fut]
+            hechos += 1
+            try:
+                archivos.append(fut.result())
+            except Exception as e:  # noqa: BLE001
+                errores.append((it.get("name", it.get("id", "?")), str(e)))
+            if progreso:
+                try:
+                    progreso(hechos, total)
+                except Exception:  # noqa: BLE001
+                    pass
+
+    return archivos, errores
