@@ -206,9 +206,65 @@ def listar_archivos(
     return encontrados
 
 
+def _es_contenido_binario(resp: "requests.Response") -> bool:
+    """True si la respuesta parece un archivo y no una página HTML de Drive."""
+    ctype = (resp.headers.get("Content-Type") or "").lower()
+    if "text/html" in ctype:
+        return False
+    # Una página de aviso de Drive suele ser pequeña y HTML; un PDF empieza con %PDF.
+    return bool(resp.content)
+
+
+def _descargar_publico(file_id: str) -> bytes | None:
+    """
+    Descarga vía el endpoint público de Drive (el que usa el navegador para
+    enlaces 'Cualquiera con el enlace'). No requiere API Key. Maneja el token de
+    confirmación para archivos grandes. Devuelve None si no se pudo.
+    """
+    session = requests.Session()
+    base = "https://drive.usercontent.google.com/download"
+    try:
+        resp = session.get(
+            base,
+            params={"id": file_id, "export": "download", "confirm": "t"},
+            timeout=TIMEOUT,
+        )
+    except requests.RequestException:
+        return None
+
+    if resp.status_code == 200 and _es_contenido_binario(resp):
+        return resp.content
+
+    # Si devolvió HTML, puede traer un formulario con token de confirmación.
+    if "text/html" in (resp.headers.get("Content-Type") or "").lower():
+        html = resp.text
+        token = None
+        m = re.search(r'name="confirm"\s+value="([^"]+)"', html)
+        if m:
+            token = m.group(1)
+        m_uuid = re.search(r'name="uuid"\s+value="([^"]+)"', html)
+        params = {"id": file_id, "export": "download", "confirm": token or "t"}
+        if m_uuid:
+            params["uuid"] = m_uuid.group(1)
+        try:
+            resp2 = session.get(base, params=params, timeout=TIMEOUT)
+        except requests.RequestException:
+            return None
+        if resp2.status_code == 200 and _es_contenido_binario(resp2):
+            return resp2.content
+    return None
+
+
 def descargar_archivo(api_key: str, file_id: str, resource_key: str | None = None) -> bytes:
-    """Descarga el contenido binario de un archivo de Drive."""
+    """
+    Descarga el contenido binario de un archivo de Drive.
+
+    Intenta primero la API REST (alt=media + API Key). Si Google la rechaza
+    (403 u otro), recurre al endpoint público de descarga, que funciona para
+    archivos compartidos con enlace 'Cualquiera con el enlace'.
+    """
     params = {"alt": "media", "key": api_key, "supportsAllDrives": "true"}
+    api_status = None
     try:
         resp = requests.get(
             f"{API_BASE}/files/{file_id}",
@@ -216,11 +272,22 @@ def descargar_archivo(api_key: str, file_id: str, resource_key: str | None = Non
             headers=_headers(resource_key, file_id),
             timeout=TIMEOUT,
         )
-    except requests.RequestException as e:
-        raise DriveError(f"Error de red al descargar {file_id}: {e}") from e
-    if resp.status_code != 200:
-        raise DriveError(f"No se pudo descargar el archivo {file_id} ({resp.status_code}).")
-    return resp.content
+        api_status = resp.status_code
+        if resp.status_code == 200:
+            return resp.content
+    except requests.RequestException:
+        pass  # se intenta el fallback público
+
+    # Fallback: descarga pública (sin API Key).
+    contenido = _descargar_publico(file_id)
+    if contenido is not None:
+        return contenido
+
+    raise DriveError(
+        f"No se pudo descargar el archivo {file_id} "
+        f"(API: {api_status}). Verifica que la carpeta y sus archivos estén "
+        f"compartidos como 'Cualquiera con el enlace'."
+    )
 
 
 def descargar_como_drivefiles(api_key: str, items: list[dict]) -> list[DriveFile]:
