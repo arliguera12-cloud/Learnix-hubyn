@@ -18,6 +18,7 @@ import streamlit as st
 from utils.drive_utils import (
     DriveError,
     descargar_como_drivefiles,
+    diagnosticar,
     listar_archivos,
 )
 
@@ -129,6 +130,18 @@ def render_drive_import(prefix: str) -> list:
 
     if not seleccion:
         return []
+
+    if st.button(
+        "🩺 Diagnosticar 1 archivo",
+        use_container_width=True,
+        key=f"{prefix}_drive_diag",
+        help="Prueba la descarga del primer archivo seleccionado y muestra qué responde Google.",
+    ):
+        primero = resultados[seleccion[0]]
+        with st.spinner("Probando descarga..."):
+            info = diagnosticar(api_key, primero["id"], primero.get("resourceKey"))
+        st.caption(f"Archivo: {primero.get('name', '')}")
+        st.json(info)
 
     if st.button(
         f"⬇️ Descargar {len(seleccion)} archivo(s)",

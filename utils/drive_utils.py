@@ -215,20 +215,19 @@ def _es_contenido_binario(resp: "requests.Response") -> bool:
     return bool(resp.content)
 
 
-def _descargar_publico(file_id: str) -> bytes | None:
+def _descargar_publico(file_id: str, resource_key: str | None = None) -> bytes | None:
     """
     Descarga vía el endpoint público de Drive (el que usa el navegador para
     enlaces 'Cualquiera con el enlace'). No requiere API Key. Maneja el token de
-    confirmación para archivos grandes. Devuelve None si no se pudo.
+    confirmación para archivos grandes y el resourceKey. Devuelve None si falla.
     """
     session = requests.Session()
     base = "https://drive.usercontent.google.com/download"
+    params = {"id": file_id, "export": "download", "confirm": "t"}
+    if resource_key:
+        params["resourcekey"] = resource_key
     try:
-        resp = session.get(
-            base,
-            params={"id": file_id, "export": "download", "confirm": "t"},
-            timeout=TIMEOUT,
-        )
+        resp = session.get(base, params=params, timeout=TIMEOUT)
     except requests.RequestException:
         return None
 
@@ -243,16 +242,64 @@ def _descargar_publico(file_id: str) -> bytes | None:
         if m:
             token = m.group(1)
         m_uuid = re.search(r'name="uuid"\s+value="([^"]+)"', html)
-        params = {"id": file_id, "export": "download", "confirm": token or "t"}
+        params2 = {"id": file_id, "export": "download", "confirm": token or "t"}
+        if resource_key:
+            params2["resourcekey"] = resource_key
         if m_uuid:
-            params["uuid"] = m_uuid.group(1)
+            params2["uuid"] = m_uuid.group(1)
         try:
-            resp2 = session.get(base, params=params, timeout=TIMEOUT)
+            resp2 = session.get(base, params=params2, timeout=TIMEOUT)
         except requests.RequestException:
             return None
         if resp2.status_code == 200 and _es_contenido_binario(resp2):
             return resp2.content
     return None
+
+
+def diagnosticar(api_key: str, file_id: str, resource_key: str | None = None) -> dict:
+    """
+    Prueba la descarga de un archivo y reporta qué responde cada método, para
+    depurar errores de permisos. No lanza excepciones.
+    """
+    info: dict = {"file_id": file_id, "resource_key": resource_key or "(ninguno)"}
+
+    # --- Método 1: API REST ---
+    try:
+        r = requests.get(
+            f"{API_BASE}/files/{file_id}",
+            params={"alt": "media", "key": api_key, "supportsAllDrives": "true"},
+            headers=_headers(resource_key, file_id),
+            timeout=TIMEOUT,
+        )
+        info["api_status"] = r.status_code
+        info["api_content_type"] = r.headers.get("Content-Type", "")
+        info["api_bytes"] = len(r.content)
+        if r.status_code != 200:
+            info["api_respuesta"] = r.text[:300]
+    except requests.RequestException as e:
+        info["api_error"] = str(e)
+
+    # --- Método 2: descarga pública ---
+    try:
+        session = requests.Session()
+        params = {"id": file_id, "export": "download", "confirm": "t"}
+        if resource_key:
+            params["resourcekey"] = resource_key
+        r2 = session.get(
+            "https://drive.usercontent.google.com/download",
+            params=params,
+            timeout=TIMEOUT,
+        )
+        info["publico_status"] = r2.status_code
+        info["publico_content_type"] = r2.headers.get("Content-Type", "")
+        info["publico_bytes"] = len(r2.content)
+        info["publico_es_archivo"] = _es_contenido_binario(r2)
+        if "text/html" in (r2.headers.get("Content-Type") or "").lower():
+            info["publico_respuesta"] = r2.text[:300]
+    except requests.RequestException as e:
+        info["publico_error"] = str(e)
+
+    return info
 
 
 def descargar_archivo(api_key: str, file_id: str, resource_key: str | None = None) -> bytes:
@@ -279,7 +326,7 @@ def descargar_archivo(api_key: str, file_id: str, resource_key: str | None = Non
         pass  # se intenta el fallback público
 
     # Fallback: descarga pública (sin API Key).
-    contenido = _descargar_publico(file_id)
+    contenido = _descargar_publico(file_id, resource_key)
     if contenido is not None:
         return contenido
 
