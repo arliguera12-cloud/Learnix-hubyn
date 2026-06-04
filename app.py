@@ -157,12 +157,15 @@ with st.sidebar:
 
     st.markdown(
         "<div style='margin:8px 10px;padding:10px 14px;"
-        "background:rgba(255,255,255,0.05);border-radius:10px;"
-        "border:1px solid rgba(255,255,255,0.08);'>"
+        "background:rgba(29,184,170,0.07);border-radius:10px;"
+        "border:1px solid rgba(29,184,170,0.20);'>"
+        "<div style='display:flex;align-items:center;gap:8px;'>"
+        "<span class='pulse-dot green'></span>"
+        "<div>"
         "<div style='color:#fff;font-weight:600;font-size:0.83rem;'>Learnix DTE Hub</div>"
-        "<div style='color:#3B82F6;font-size:0.62rem;font-weight:700;"
+        "<div style='color:#1DB8AA;font-size:0.60rem;font-weight:700;"
         "text-transform:uppercase;letter-spacing:1.5px;'>Sistema Activo</div>"
-        "</div>",
+        "</div></div></div>",
         unsafe_allow_html=True,
     )
 
@@ -176,19 +179,35 @@ with st.sidebar:
     with st.expander("⚡ IA · Groq", expanded=False):
         if _groq_ok:
             st.markdown(
-                "<div style='padding:6px 10px;background:#1A2C18;border-radius:6px;"
-                "border:1px solid #6AB040;font-size:0.78rem;color:#A8E870'>"
-                "⚡ <strong>Groq activo</strong> — llama3-8b-8192</div>",
+                "<div style='padding:8px 12px;background:rgba(29,184,170,0.10);border-radius:8px;"
+                "border:1px solid rgba(29,184,170,0.30);font-size:0.78rem;'>"
+                "<span class='pulse-dot teal' style='margin-right:6px;'></span>"
+                "<strong style='color:#1DB8AA;'>Groq activo</strong>"
+                "<div style='margin-top:6px;display:flex;flex-direction:column;gap:4px;'>"
+                "<span style='color:rgba(255,255,255,0.55);font-size:0.70rem;'>"
+                "📝 Texto — llama-3.3-70b-versatile</span>"
+                "<span style='color:rgba(255,255,255,0.55);font-size:0.70rem;'>"
+                "👁️ Visión — llama-4-scout-17b</span>"
+                "</div></div>",
                 unsafe_allow_html=True,
             )
         elif _cb["open"]:
             secs = max(0, int(_cb["open_until"] - __import__("time").time()))
-            st.warning(f"⚠️ Circuit breaker abierto (~{secs}s). Demasiados errores consecutivos.")
+            st.markdown(
+                f"<div style='padding:8px 12px;background:rgba(251,191,36,0.10);border-radius:8px;"
+                f"border:1px solid rgba(251,191,36,0.30);font-size:0.78rem;color:#FBBF24;'>"
+                f"<span class='pulse-dot amber' style='margin-right:6px;'></span>"
+                f"<strong>Circuit breaker abierto</strong><br>"
+                f"<span style='font-size:0.70rem;opacity:0.8;'>Reintentando en ~{secs}s</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
         else:
             st.markdown(
-                "<div style='padding:6px 10px;background:#1A1212;border-radius:6px;"
-                "border:1px solid #555;font-size:0.78rem;color:#aaa'>"
-                "🔌 IA sin configurar — solo extracción por regex</div>",
+                "<div style='padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:8px;"
+                "border:1px solid rgba(255,255,255,0.10);font-size:0.78rem;color:rgba(255,255,255,0.50);'>"
+                "<span class='pulse-dot red' style='margin-right:6px;'></span>"
+                "Sin configurar — solo regex</div>",
                 unsafe_allow_html=True,
             )
             _err = gemini_ultimo_error()

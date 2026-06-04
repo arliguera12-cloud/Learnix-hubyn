@@ -63,11 +63,13 @@ def kpi_card(
     accent_class = accent_map.get(accent, "")
     delay_class  = f"animate-delay-{animate_delay}" if animate_delay else ""
     icon_html    = (
-        f'<div class="kpi-icon">{icon}</div>' if icon else ""
+        f'<div class="kpi-icon" style="position:absolute;top:16px;right:16px;">{icon}</div>'
+        if icon else ""
     )
     st.markdown(
         f"""
-        <div class="kpi-pro {accent_class} animate-fade-in-up {delay_class}">
+        <div class="kpi-pro {accent_class} animate-fade-in-up {delay_class}"
+             style="position:relative;">
           {icon_html}
           <div class="value">{value}</div>
           <div class="label">{label}</div>
@@ -242,7 +244,7 @@ def filterable_table(df, height: int = 420, key: str = "tbl") -> None:
   border-bottom:1px solid var(--border-muted);
   max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }}
-.lx-amount {{ font-variant-numeric:tabular-nums; font-weight:600; color:var(--navy) !important; }}
+.lx-amount {{ font-variant-numeric:tabular-nums; font-weight:600; color:var(--accent-hover) !important; }}
 </style>
 
 <script>
@@ -305,7 +307,7 @@ def cliente_activo_banner(cliente: dict) -> None:
                         letter-spacing:2px;text-transform:uppercase;margin-bottom:2px;">
               Cliente Activo
             </div>
-            <div style="font-size:0.95rem;font-weight:700;color:var(--navy);
+            <div style="font-size:0.95rem;font-weight:700;color:var(--text-primary);
                         white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
               {nombre}
             </div>
@@ -328,39 +330,51 @@ def processing_summary(total: int, ok: int, warn: int, error: int) -> None:
     pct_ok   = int(ok   / total * 100) if total else 0
     pct_warn = int(warn / total * 100) if total else 0
     pct_err  = int(error/ total * 100) if total else 0
+    ok_flex   = max(ok,   1) if total else 1
+    warn_flex = max(warn, 0)
+    err_flex  = max(error,0)
     st.markdown(
         f"""
         <div style="background:var(--bg-surface);border:1px solid var(--border);
                     border-radius:var(--radius-lg);padding:16px 20px;
                     box-shadow:var(--shadow-sm);margin-bottom:16px;">
-          <div style="font-size:0.68rem;font-weight:700;color:var(--text-muted);
-                      letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;">
+          <div style="font-size:0.65rem;font-weight:700;color:var(--text-muted);
+                      letter-spacing:2.5px;text-transform:uppercase;margin-bottom:14px;">
             Resumen del Procesamiento
           </div>
-          <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;">
-            <div style="text-align:center;">
-              <div style="font-size:1.5rem;font-weight:800;color:var(--navy);">{total}</div>
-              <div style="font-size:0.70rem;color:var(--text-muted);font-weight:600;">Total</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">
+            <div style="background:var(--bg-elevated);border-radius:var(--radius);
+                        padding:10px 14px;text-align:center;border:1px solid var(--border-muted);">
+              <div style="font-size:1.45rem;font-weight:800;color:var(--text-primary);">{total}</div>
+              <div style="font-size:0.65rem;color:var(--text-muted);font-weight:700;
+                          text-transform:uppercase;letter-spacing:1px;">Total</div>
             </div>
-            <div style="text-align:center;">
-              <div style="font-size:1.5rem;font-weight:800;color:var(--success);">{ok}</div>
-              <div style="font-size:0.70rem;color:var(--text-muted);font-weight:600;">OK ({pct_ok}%)</div>
+            <div style="background:var(--success-bg);border-radius:var(--radius);
+                        padding:10px 14px;text-align:center;border:1px solid var(--success-border);">
+              <div style="font-size:1.45rem;font-weight:800;color:var(--success);">{ok}</div>
+              <div style="font-size:0.65rem;color:var(--success);opacity:0.8;font-weight:700;
+                          text-transform:uppercase;letter-spacing:1px;">OK · {pct_ok}%</div>
             </div>
-            <div style="text-align:center;">
-              <div style="font-size:1.5rem;font-weight:800;color:var(--warning);">{warn}</div>
-              <div style="font-size:0.70rem;color:var(--text-muted);font-weight:600;">Revisar ({pct_warn}%)</div>
+            <div style="background:var(--warning-bg);border-radius:var(--radius);
+                        padding:10px 14px;text-align:center;border:1px solid var(--warning-border);">
+              <div style="font-size:1.45rem;font-weight:800;color:var(--warning);">{warn}</div>
+              <div style="font-size:0.65rem;color:var(--warning);opacity:0.8;font-weight:700;
+                          text-transform:uppercase;letter-spacing:1px;">Revisar · {pct_warn}%</div>
             </div>
-            <div style="text-align:center;">
-              <div style="font-size:1.5rem;font-weight:800;color:var(--error);">{error}</div>
-              <div style="font-size:0.70rem;color:var(--text-muted);font-weight:600;">Error ({pct_err}%)</div>
+            <div style="background:var(--error-bg);border-radius:var(--radius);
+                        padding:10px 14px;text-align:center;border:1px solid var(--error-border);">
+              <div style="font-size:1.45rem;font-weight:800;color:var(--error);">{error}</div>
+              <div style="font-size:0.65rem;color:var(--error);opacity:0.8;font-weight:700;
+                          text-transform:uppercase;letter-spacing:1px;">Error · {pct_err}%</div>
             </div>
           </div>
-          <div style="display:flex;height:6px;border-radius:99px;overflow:hidden;gap:2px;">
-            <div style="flex:{ok};background:var(--success);border-radius:99px 0 0 99px;
-                        transition:flex 0.5s ease;"></div>
-            <div style="flex:{warn};background:var(--warning);transition:flex 0.5s ease;"></div>
-            <div style="flex:{error};background:var(--error);border-radius:0 99px 99px 0;
-                        transition:flex 0.5s ease;"></div>
+          <div style="display:flex;height:5px;border-radius:99px;overflow:hidden;gap:1px;
+                      background:var(--border-muted);">
+            <div style="flex:{ok_flex};background:var(--success);transition:flex 0.6s ease;
+                        border-radius:99px 0 0 99px;"></div>
+            <div style="flex:{warn_flex};background:var(--warning);transition:flex 0.6s ease;"></div>
+            <div style="flex:{err_flex};background:var(--error);transition:flex 0.6s ease;
+                        border-radius:0 99px 99px 0;"></div>
           </div>
         </div>
         """,
@@ -375,8 +389,15 @@ def sidebar_logo() -> None:
     st.markdown(
         """
         <div class="sidebar-logo-wrap">
-          <div class="sidebar-logo-mark">YN</div>
-          <span class="sidebar-logo-name">Learnix · DTE Hub</span>
+          <div style="display:inline-flex;align-items:center;gap:10px;justify-content:center;">
+            <div class="sidebar-logo-mark">YN</div>
+            <div style="text-align:left;">
+              <div style="color:#FFFFFF;font-weight:700;font-size:0.88rem;
+                          letter-spacing:-0.01em;line-height:1.1;">Learnix</div>
+              <div style="color:var(--accent);font-size:0.60rem;font-weight:700;
+                          letter-spacing:2px;text-transform:uppercase;">DTE Hub</div>
+            </div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -389,12 +410,24 @@ def sidebar_logo() -> None:
 def sidebar_cliente_card(cliente: dict) -> None:
     nombre = cliente.get("nombre", "—")
     nit    = cliente.get("nit", "—")
+    nrc    = cliente.get("nrc", "")
+    inicial = (nombre[0].upper() if nombre and nombre != "—" else "?")
     st.markdown(
         f"""
         <div class="card-cliente-activo">
-          <span class="label">Cliente Activo</span>
-          <span class="nombre">{nombre}</span>
-          <span class="nit">NIT: {nit}</span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:32px;height:32px;border-radius:8px;flex-shrink:0;
+                        background:rgba(29,184,170,0.20);border:1px solid rgba(29,184,170,0.40);
+                        display:flex;align-items:center;justify-content:center;
+                        font-size:0.85rem;font-weight:800;color:var(--accent);">
+              {inicial}
+            </div>
+            <div style="flex:1;min-width:0;">
+              <span class="label">Cliente Activo</span>
+              <span class="nombre">{nombre}</span>
+              <span class="nit">NIT: {nit}{f" &nbsp;·&nbsp; NRC: {nrc}" if nrc else ""}</span>
+            </div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
