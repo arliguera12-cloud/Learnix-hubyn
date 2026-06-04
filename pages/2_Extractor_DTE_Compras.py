@@ -1363,10 +1363,21 @@ if 'reporte_compras'   not in st.session_state: st.session_state.reporte_compras
 # 14. SIDEBAR
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 📂 Carga de Compras")
     st.markdown(
-        "<small style='color:#6AB040'>Acepta: CCF (03), NC (05), ND (06), "
-        "Fac. (01/11), Suj. Excluido (14)</small>",
+        "<div style='padding:14px 14px 8px;'>"
+        "<div style='font-size:0.60rem;font-weight:700;color:var(--accent);letter-spacing:2.5px;"
+        "text-transform:uppercase;margin-bottom:4px;'>Módulo</div>"
+        "<div style='font-size:1rem;font-weight:700;color:#FFFFFF;'>📂 Carga de Compras</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div style='margin:0 10px 10px;padding:8px 12px;"
+        "background:rgba(106,176,64,0.10);border-radius:8px;"
+        "border:1px solid rgba(106,176,64,0.25);font-size:0.72rem;"
+        "color:rgba(106,176,64,0.90);line-height:1.5;'>"
+        "Acepta: CCF (03), NC (05), ND (06), Fac. (01/11), Suj. Excluido (14)"
+        "</div>",
         unsafe_allow_html=True,
     )
     st.divider()
@@ -1569,7 +1580,7 @@ with st.sidebar:
                         [st.session_state.db_compras, new_df], ignore_index=True
                     )
 
-    st.divider()
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     if st.button("🧹 Limpiar Memoria Compras", type="secondary", use_container_width=True):
         for key in ('db_compras','archivos_comp','reporte_compras','cola_revision'):
             if key in st.session_state:
@@ -1578,16 +1589,55 @@ with st.sidebar:
         st.rerun()
 
     if not st.session_state.db_compras.empty:
-        df_sb  = st.session_state.db_compras
-        n_ccf  = len(df_sb[df_sb['tipo'] == '03']) if 'tipo' in df_sb.columns else 0
+        df_sb   = st.session_state.db_compras
+        n_ccf   = len(df_sb[df_sb['tipo'] == '03']) if 'tipo' in df_sb.columns else 0
         n_otros = len(df_sb) - n_ccf
-        st.divider()
-        st.markdown(f"**📄 Total docs:** `{len(df_sb)}`")
-        st.markdown(f"**🟢 CCF (03):** `{n_ccf}` | **Otros:** `{n_otros}`")
-        if 'tot' in df_sb.columns:
-            st.markdown(f"**💰 Total Compras:** `${df_sb['tot'].sum():,.2f}`")
-        if 'iva' in df_sb.columns:
-            st.markdown(f"**🏦 Crédito Fiscal:** `${df_sb['iva'].sum():,.2f}`")
+        tot_sum = df_sb['tot'].sum() if 'tot' in df_sb.columns else 0.0
+        iva_sum = df_sb['iva'].sum() if 'iva' in df_sb.columns else 0.0
+        st.markdown(
+            f"""
+            <div style="margin:12px 4px 0;padding:12px 14px;
+                        background:rgba(255,255,255,0.04);border-radius:10px;
+                        border:1px solid rgba(255,255,255,0.08);">
+              <div style="font-size:0.58rem;font-weight:700;color:var(--accent);
+                          letter-spacing:2.5px;text-transform:uppercase;margin-bottom:10px;">
+                Resumen del Libro
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+                <div style="background:rgba(255,255,255,0.06);border-radius:7px;
+                            padding:8px 10px;border:1px solid rgba(255,255,255,0.06);">
+                  <div style="font-size:1.1rem;font-weight:800;color:#FFFFFF;">{len(df_sb)}</div>
+                  <div style="font-size:0.62rem;color:var(--text-muted);font-weight:600;
+                              text-transform:uppercase;letter-spacing:0.8px;">Total docs</div>
+                </div>
+                <div style="background:rgba(52,211,153,0.08);border-radius:7px;
+                            padding:8px 10px;border:1px solid rgba(52,211,153,0.15);">
+                  <div style="font-size:1.1rem;font-weight:800;color:var(--success);">{n_ccf}</div>
+                  <div style="font-size:0.62rem;color:var(--success);opacity:0.8;font-weight:600;
+                              text-transform:uppercase;letter-spacing:0.8px;">CCF · {n_otros} otros</div>
+                </div>
+                <div style="background:rgba(29,184,170,0.08);border-radius:7px;
+                            padding:8px 10px;border:1px solid rgba(29,184,170,0.15);
+                            grid-column:span 2;">
+                  <div style="font-size:1rem;font-weight:800;color:var(--accent);">
+                    ${tot_sum:,.2f}</div>
+                  <div style="font-size:0.62rem;color:var(--accent);opacity:0.8;font-weight:600;
+                              text-transform:uppercase;letter-spacing:0.8px;">Total Compras</div>
+                </div>
+                <div style="background:rgba(96,165,250,0.08);border-radius:7px;
+                            padding:8px 10px;border:1px solid rgba(96,165,250,0.15);
+                            grid-column:span 2;">
+                  <div style="font-size:1rem;font-weight:800;color:var(--info);">
+                    ${iva_sum:,.2f}</div>
+                  <div style="font-size:0.62rem;color:var(--info);opacity:0.8;font-weight:600;
+                              text-transform:uppercase;letter-spacing:0.8px;">Crédito Fiscal IVA</div>
+                </div>
+              </div>
+            </div>
+            <div style="height:16px;"></div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 # ─────────────────────────────────────────────

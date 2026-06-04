@@ -193,38 +193,43 @@ i.icon,
 
 /* Links de navegación en sidebar */
 [data-testid="stSidebarNavLink"] {
-  color: var(--sidebar-text) !important;
+  color: rgba(255,255,255,0.62) !important;
   border-radius: var(--radius-sm) !important;
-  font-size: 0.855rem !important;
+  font-size: 0.845rem !important;
   font-weight: 500 !important;
   transition: var(--transition-fast) !important;
-  padding: 9px 14px !important;
-  margin: 1px 8px !important;
+  padding: 8px 14px 8px 16px !important;
+  margin: 1px 6px !important;
   border-left: 3px solid transparent !important;
   letter-spacing: 0.01em !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
 }
 [data-testid="stSidebarNavLink"]:hover {
-  background: rgba(29,184,170,0.12) !important;
+  background: rgba(29,184,170,0.10) !important;
   color: #FFFFFF !important;
-  border-left-color: var(--accent) !important;
-  transform: translateX(2px) !important;
+  border-left-color: rgba(29,184,170,0.50) !important;
 }
 [data-testid="stSidebarNavLink"][aria-current="page"] {
-  background: rgba(29,184,170,0.18) !important;
+  background: linear-gradient(90deg,rgba(29,184,170,0.18) 0%,rgba(29,184,170,0.06) 100%) !important;
   border-left: 3px solid var(--accent) !important;
   color: #FFFFFF !important;
   font-weight: 600 !important;
+  box-shadow: inset 0 0 0 1px rgba(29,184,170,0.12) !important;
 }
 
 /* Separadores de sección del sidebar */
 [data-testid="stSidebarNavSeparator"] {
-  color: rgba(255,255,255,0.40) !important;
-  font-size: 0.62rem !important;
+  color: rgba(255,255,255,0.28) !important;
+  font-size: 0.58rem !important;
   font-weight: 700 !important;
-  letter-spacing: 2.5px !important;
+  letter-spacing: 3px !important;
   text-transform: uppercase !important;
-  margin: 18px 0 6px 14px !important;
+  margin: 20px 0 4px 16px !important;
   opacity: 1 !important;
+  padding-bottom: 4px !important;
+  border-bottom: 1px solid rgba(255,255,255,0.05) !important;
 }
 
 /* Texto general en sidebar */
