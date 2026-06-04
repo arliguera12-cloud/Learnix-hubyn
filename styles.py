@@ -193,30 +193,26 @@ i.icon,
 
 /* Links de navegación en sidebar */
 [data-testid="stSidebarNavLink"] {
-  color: rgba(255,255,255,0.62) !important;
-  border-radius: var(--radius-sm) !important;
-  font-size: 0.845rem !important;
+  color: rgba(255,255,255,0.65) !important;
+  border-radius: 8px !important;
+  font-size: 0.855rem !important;
   font-weight: 500 !important;
-  transition: var(--transition-fast) !important;
-  padding: 8px 14px 8px 16px !important;
-  margin: 1px 6px !important;
+  transition: all 0.15s ease !important;
+  padding: 9px 12px 9px 14px !important;
+  margin: 1px 8px !important;
   border-left: 3px solid transparent !important;
   letter-spacing: 0.01em !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
 }
 [data-testid="stSidebarNavLink"]:hover {
-  background: rgba(29,184,170,0.10) !important;
+  background: rgba(255,255,255,0.07) !important;
   color: #FFFFFF !important;
-  border-left-color: rgba(29,184,170,0.50) !important;
+  border-left-color: rgba(29,184,170,0.60) !important;
 }
 [data-testid="stSidebarNavLink"][aria-current="page"] {
-  background: linear-gradient(90deg,rgba(29,184,170,0.18) 0%,rgba(29,184,170,0.06) 100%) !important;
+  background: linear-gradient(90deg,rgba(29,184,170,0.20) 0%,rgba(29,184,170,0.05) 100%) !important;
   border-left: 3px solid var(--accent) !important;
   color: #FFFFFF !important;
-  font-weight: 600 !important;
-  box-shadow: inset 0 0 0 1px rgba(29,184,170,0.12) !important;
+  font-weight: 700 !important;
 }
 
 /* Separadores de sección del sidebar */
@@ -232,28 +228,6 @@ i.icon,
   border-bottom: 1px solid rgba(255,255,255,0.06) !important;
 }
 
-/* Emoji/icon en nav link — pill de fondo para destacarlo */
-[data-testid="stSidebarNavLink"] p,
-[data-testid="stSidebarNavLink"] span:first-child {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 26px !important; height: 26px !important;
-  background: rgba(255,255,255,0.06) !important;
-  border-radius: 7px !important;
-  margin-right: 4px !important;
-  flex-shrink: 0 !important;
-  font-size: 0.95rem !important;
-  transition: background 0.15s !important;
-}
-[data-testid="stSidebarNavLink"]:hover p,
-[data-testid="stSidebarNavLink"]:hover span:first-child {
-  background: rgba(29,184,170,0.18) !important;
-}
-[data-testid="stSidebarNavLink"][aria-current="page"] p,
-[data-testid="stSidebarNavLink"][aria-current="page"] span:first-child {
-  background: rgba(29,184,170,0.22) !important;
-}
 
 /* Texto general en sidebar */
 [data-testid="stSidebar"] p,
