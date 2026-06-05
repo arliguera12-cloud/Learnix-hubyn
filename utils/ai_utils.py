@@ -34,7 +34,7 @@ _VERTEX_PROJECT  = "nomadic-sprite-440003-r7"
 _VERTEX_LOCATION = "us-central1"
 # Modelo configurable vía secrets (VERTEX_MODEL) para poder probar versiones sin
 # redeploy. Default a la versión GA explícita, más estable en Vertex Express.
-_VERTEX_MODEL_DEFAULT = "gemini-2.0-flash-001"
+_VERTEX_MODEL_DEFAULT = "gemini-2.0-flash"   # modelo GA en Vertex AI real
 
 # Umbral de confianza por debajo del cual se levanta una alerta de revisión.
 _VISION_CONF_MIN   = 70
@@ -501,10 +501,37 @@ _VERTEX_SYSTEM_PROMPT = (
 )
 
 
+def _get_sa_credentials():
+    """
+    Lee las credenciales de service account desde st.secrets[google_credentials].
+    Devuelve un objeto google.oauth2.service_account.Credentials o None.
+    """
+    try:
+        import json as _json
+        from google.oauth2 import service_account
+        sa = st.secrets.get("google_credentials", {})
+        if not sa:
+            return None
+        sa_dict = dict(sa)
+        creds = service_account.Credentials.from_service_account_info(
+            sa_dict,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        return creds
+    except Exception as exc:
+        log.warning("No se pudieron cargar las credenciales de SA: %s", exc)
+        return None
+
+
 def _get_vertex_client():
     """
-    Construye (una sola vez) el cliente google-genai en modo Vertex AI Express.
-    Devuelve el cliente o False si no se pudo (SDK ausente, sin API key, etc.).
+    Construye (una sola vez) el cliente google-genai para Vertex AI.
+
+    Prioridad de autenticación:
+      1. [google_credentials] en secrets → service account → Vertex AI real
+         (usa los créditos de Google Cloud, project=nomadic-sprite-440003-r7)
+      2. VERTEX_API_KEY / GEMINI_API_KEY en secrets → Gemini Developer API
+      3. Sin credenciales → False (recae en Groq)
     """
     global _vertex_client, _ultimo_error_vertex
     if _vertex_client is not None:
@@ -513,20 +540,39 @@ def _get_vertex_client():
     with _vertex_lock:
         if _vertex_client is not None:
             return _vertex_client
-        api_key = _vertex_api_key()
-        if not api_key:
-            _vertex_client = False
-            _ultimo_error_vertex = ("API key de Vertex AI Express ausente "
-                                    "(VERTEX_API_KEY / GEMINI_API_KEY en secrets).")
-            log.info("Vertex Express: API key ausente")
-            return _vertex_client
+
+        for _ev in ("GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
+                    "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_APPLICATION_CREDENTIALS"):
+            os.environ.pop(_ev, None)
+
         try:
             from google import genai
-            for _ev in ("GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
-                        "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_APPLICATION_CREDENTIALS"):
-                os.environ.pop(_ev, None)
-            _vertex_client = genai.Client(api_key=api_key)
-            log.info("Google AI inicializado (modelo=%s)", _vertex_model())
+
+            # 1) Service account → Vertex AI real con project/location
+            creds = _get_sa_credentials()
+            if creds:
+                _vertex_client = genai.Client(
+                    vertexai=True,
+                    project=_VERTEX_PROJECT,
+                    location=_VERTEX_LOCATION,
+                    credentials=creds,
+                )
+                log.info("Vertex AI inicializado con SA (proyecto=%s, modelo=%s)",
+                         _VERTEX_PROJECT, _vertex_model())
+                return _vertex_client
+
+            # 2) API key → Gemini Developer API
+            api_key = _vertex_api_key()
+            if api_key:
+                _vertex_client = genai.Client(api_key=api_key)
+                log.info("Gemini Developer API inicializada (modelo=%s)", _vertex_model())
+                return _vertex_client
+
+            # 3) Sin credenciales
+            _vertex_client = False
+            _ultimo_error_vertex = "Sin credenciales de Google AI (SA ni API key)."
+            log.info("Google AI no disponible: sin credenciales")
+
         except ImportError:
             _vertex_client = False
             _ultimo_error_vertex = "SDK google-genai no instalado — usando Groq."
