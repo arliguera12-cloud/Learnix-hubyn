@@ -723,7 +723,7 @@ def _llamar_groq(prompt: str) -> dict | None:
             msg = str(exc)
             if "rate_limit" in msg.lower() or "429" in msg:
                 _ultimo_error = "Límite de tasa de Groq alcanzado."
-                _cb_on_failure()
+                # Rate limits are transient — don't penalize the circuit breaker
                 if attempt < _MAX_RETRIES - 1:
                     wait = _BACKOFF_DELAYS[attempt]
                     log.warning("Groq rate limit (attempt %d/%d), waiting %ds", attempt + 1, _MAX_RETRIES, wait)
@@ -1299,7 +1299,7 @@ def _llamar_groq_vision(prompt: str, img_b64: str) -> dict | None:
             msg = str(exc)
             if "rate_limit" in msg.lower() or "429" in msg:
                 _ultimo_error_vision = "Límite de tasa de Groq (visión)."
-                _cb_on_failure()
+                # Rate limits are transient — don't penalize the circuit breaker
                 if attempt < _MAX_RETRIES - 1:
                     time.sleep(_BACKOFF_DELAYS[attempt])
                     continue
