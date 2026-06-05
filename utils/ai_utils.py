@@ -498,8 +498,29 @@ def _vertex_disponible() -> bool:
             return _vertex_ready
         try:
             import vertexai
+            from google.oauth2 import service_account
             from vertexai.generative_models import GenerativeModel  # noqa: F401
-            vertexai.init(project=_VERTEX_PROJECT, location=_VERTEX_LOCATION)
+
+            # Leer credenciales desde st.secrets["google_credentials"] (TOML).
+            # Si no están en secrets, Vertex intentará usar ADC del entorno.
+            credentials = None
+            try:
+                raw = dict(st.secrets.get("google_credentials", {}))
+                if raw.get("private_key"):
+                    credentials = service_account.Credentials.from_service_account_info(
+                        raw,
+                        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                    )
+                    log.info("Vertex AI: credenciales cargadas desde st.secrets")
+            except Exception as cred_exc:
+                log.warning("Vertex AI: no se pudieron leer credenciales de secrets (%s), "
+                            "usando ADC", cred_exc)
+
+            vertexai.init(
+                project=_VERTEX_PROJECT,
+                location=_VERTEX_LOCATION,
+                credentials=credentials,
+            )
             _vertex_ready = True
             log.info("Vertex AI inicializado (project=%s, location=%s)",
                      _VERTEX_PROJECT, _VERTEX_LOCATION)
