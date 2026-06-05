@@ -163,7 +163,7 @@ def render_drive_import(prefix: str) -> list:
             if archivos_ok:
                 st.success(
                     f"✅ {len(archivos_ok)} archivo(s) listos. "
-                    "Usa el botón 'Procesar' de arriba."
+                    "Usa el botón 'Procesar' de abajo."
                 )
             if errores:
                 st.warning(
@@ -181,4 +181,11 @@ def render_drive_import(prefix: str) -> list:
             bar.empty()
             st.error(f"Error al descargar de Drive: {e}")
 
-    return st.session_state.get(f"{prefix}_drive_files", [])
+    archivos_guardados = st.session_state.get(f"{prefix}_drive_files", [])
+    # Reset buffer positions so files can be read again even if previously exhausted.
+    for df in archivos_guardados:
+        try:
+            df.reset()
+        except Exception:  # noqa: BLE001
+            pass
+    return archivos_guardados

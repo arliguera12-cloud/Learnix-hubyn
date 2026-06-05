@@ -56,6 +56,12 @@ class DriveFile:
     def read(self, *args) -> bytes:
         return self._buffer.read(*args)
 
+    def readline(self) -> bytes:
+        return self._buffer.readline()
+
+    def readlines(self) -> list[bytes]:
+        return self._buffer.readlines()
+
     def getvalue(self) -> bytes:
         return self._data
 
@@ -64,6 +70,13 @@ class DriveFile:
 
     def seek(self, *args) -> int:
         return self._buffer.seek(*args)
+
+    def tell(self) -> int:
+        return self._buffer.tell()
+
+    def reset(self) -> None:
+        """Seek buffer back to position 0 so the file can be read again."""
+        self._buffer.seek(0)
 
     def __repr__(self) -> str:
         return f"<DriveFile {self.name!r} ({self.size} bytes)>"
