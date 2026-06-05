@@ -13,6 +13,9 @@ Uso:
 """
 from __future__ import annotations
 
+import io
+import zipfile
+
 import streamlit as st
 
 from utils.drive_utils import (
@@ -131,6 +134,48 @@ def render_drive_import(prefix: str) -> list:
 
     if not seleccion:
         return []
+
+    # ── Botón para guardar los PDFs en el equipo como ZIP ────────────────────
+    k_zip = f"{prefix}_drive_zip"
+    if st.button(
+        f"💾 Guardar {len(seleccion)} PDF(s) en mi PC (ZIP)",
+        use_container_width=True,
+        key=f"{prefix}_drive_save_btn",
+        help="Descarga los archivos seleccionados como un ZIP a tu computadora.",
+    ):
+        elegidos = [resultados[i] for i in seleccion]
+        bar_zip = st.progress(0.0, text=f"Preparando ZIP 0/{len(elegidos)}...")
+
+        def _prog_zip(hechos: int, total: int):
+            bar_zip.progress(hechos / total, text=f"Preparando ZIP {hechos}/{total}...")
+
+        try:
+            archivos_zip, errores_zip = descargar_como_drivefiles(
+                api_key, elegidos, progreso=_prog_zip
+            )
+            bar_zip.empty()
+            if archivos_zip:
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for af in archivos_zip:
+                        zf.writestr(af.name, af.getvalue())
+                st.session_state[k_zip] = buf.getvalue()
+            if errores_zip:
+                st.warning(f"⚠️ {len(errores_zip)} archivo(s) no se pudieron incluir en el ZIP.")
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Error al preparar el ZIP: {e}")
+
+    if k_zip in st.session_state:
+        st.download_button(
+            label=f"📥 Descargar ZIP ({len(seleccion)} archivos)",
+            data=st.session_state[k_zip],
+            file_name="facturas_drive.zip",
+            mime="application/zip",
+            use_container_width=True,
+            key=f"{prefix}_drive_zip_dl",
+        )
+
+    st.divider()
 
     if st.button(
         "🩺 Diagnosticar 1 archivo",
