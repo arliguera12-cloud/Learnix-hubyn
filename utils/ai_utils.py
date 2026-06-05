@@ -459,12 +459,26 @@ Estructura requerida:
 
 _ultimo_error_vertex: str = ""
 
-# Estado de inicialización de Vertex (lazy, una sola vez por proceso).
-#   None  → aún no se intentó
-#   True  → vertexai.init() exitoso
-#   False → SDK ausente o init fallido
-_vertex_ready: bool | None = None
+# Cliente google-genai en modo Vertex AI Express (lazy, una sola vez).
+#   None  → aún no se intentó construir
+#   False → SDK ausente, sin API key o init fallido
+#   <obj> → cliente listo
+_vertex_client = None
 _vertex_lock = threading.Lock()
+
+
+def _vertex_api_key() -> str:
+    """API key de Vertex AI Express. Busca en secrets y variables de entorno."""
+    for nombre in ("VERTEX_API_KEY", "VERTEX_EXPRESS_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        try:
+            v = st.secrets.get(nombre, "")
+        except Exception:
+            v = ""
+        if not v:
+            v = os.environ.get(nombre, "")
+        if v:
+            return v
+    return ""
 
 # System prompt común a TODOS los extractores. Refuerza el mapeo milimétrico de
 # campos y deja la estructura JSON exacta en manos del prompt por tipo de DTE.
@@ -487,56 +501,48 @@ _VERTEX_SYSTEM_PROMPT = (
 )
 
 
-def _vertex_disponible() -> bool:
-    """Inicializa Vertex AI una sola vez y reporta si quedó operativo."""
-    global _vertex_ready, _ultimo_error_vertex
-    if _vertex_ready is not None:
-        return _vertex_ready
+def _get_vertex_client():
+    """
+    Construye (una sola vez) el cliente google-genai en modo Vertex AI Express.
+    Devuelve el cliente o False si no se pudo (SDK ausente, sin API key, etc.).
+    """
+    global _vertex_client, _ultimo_error_vertex
+    if _vertex_client is not None:
+        return _vertex_client
 
     with _vertex_lock:
-        if _vertex_ready is not None:
-            return _vertex_ready
+        if _vertex_client is not None:
+            return _vertex_client
+        api_key = _vertex_api_key()
+        if not api_key:
+            _vertex_client = False
+            _ultimo_error_vertex = ("API key de Vertex AI Express ausente "
+                                    "(VERTEX_API_KEY / GEMINI_API_KEY en secrets).")
+            log.info("Vertex Express: API key ausente")
+            return _vertex_client
         try:
-            import vertexai
-            from google.oauth2 import service_account
-            from vertexai.generative_models import GenerativeModel  # noqa: F401
-
-            # Leer credenciales desde st.secrets["google_credentials"] (TOML).
-            # Si no están en secrets, Vertex intentará usar ADC del entorno.
-            credentials = None
-            try:
-                raw = dict(st.secrets.get("google_credentials", {}))
-                if raw.get("private_key"):
-                    credentials = service_account.Credentials.from_service_account_info(
-                        raw,
-                        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-                    )
-                    log.info("Vertex AI: credenciales cargadas desde st.secrets")
-            except Exception as cred_exc:
-                log.warning("Vertex AI: no se pudieron leer credenciales de secrets (%s), "
-                            "usando ADC", cred_exc)
-
-            vertexai.init(
-                project=_VERTEX_PROJECT,
-                location=_VERTEX_LOCATION,
-                credentials=credentials,
-            )
-            _vertex_ready = True
-            log.info("Vertex AI inicializado (project=%s, location=%s)",
-                     _VERTEX_PROJECT, _VERTEX_LOCATION)
+            from google import genai
+            # Modo Vertex AI Express: autenticación por API key.
+            _vertex_client = genai.Client(vertexai=True, api_key=api_key)
+            log.info("Vertex AI Express inicializado (google-genai, modelo=%s)", _VERTEX_MODEL)
         except ImportError:
-            _vertex_ready = False
-            _ultimo_error_vertex = "SDK de Vertex AI no instalado (google-cloud-aiplatform)."
-            log.info("Vertex AI no disponible: SDK ausente")
+            _vertex_client = False
+            _ultimo_error_vertex = "SDK google-genai no instalado."
+            log.info("Vertex Express no disponible: SDK ausente")
         except Exception as exc:
-            _vertex_ready = False
-            _ultimo_error_vertex = f"No se pudo inicializar Vertex AI: {str(exc)[:120]}"
-            log.warning("Vertex AI init falló: %s", exc)
-    return _vertex_ready
+            _vertex_client = False
+            _ultimo_error_vertex = f"No se pudo inicializar Vertex Express: {str(exc)[:120]}"
+            log.warning("Vertex Express init falló: %s", exc)
+    return _vertex_client
+
+
+def _vertex_disponible() -> bool:
+    """True si el cliente Vertex AI Express está operativo."""
+    return bool(_get_vertex_client())
 
 
 def vertex_disponible() -> bool:
-    """True si el SDK de Vertex AI está instalado y la inicialización fue exitosa."""
+    """True si Vertex AI Express está configurado y operativo."""
     return _vertex_disponible()
 
 
@@ -544,54 +550,65 @@ def vertex_ultimo_error() -> str:
     return _ultimo_error_vertex
 
 
+def _vertex_genconfig():
+    """GenerateContentConfig con system prompt, temperature=0 y salida JSON."""
+    from google.genai import types
+    return types.GenerateContentConfig(
+        system_instruction=_VERTEX_SYSTEM_PROMPT,
+        temperature=0.0,                       # máxima precisión matemática
+        response_mime_type="application/json",
+    )
+
+
+def _vertex_parse(response) -> dict | None:
+    """Extrae y parsea el JSON de una respuesta de google-genai."""
+    raw = (getattr(response, "text", None) or "").strip()
+    raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
+    raw = re.sub(r'\s*```\s*$', '', raw)
+    m = re.search(r'\{.*\}', raw, re.S)
+    if m:
+        raw = m.group(0)
+    return json.loads(raw)
+
+
+def _vertex_set_error(exc) -> None:
+    global _ultimo_error_vertex
+    msg = str(exc)
+    if "quota" in msg.lower() or "429" in msg or "resource_exhausted" in msg.lower():
+        _ultimo_error_vertex = "Cuota de Vertex AI agotada — usando respaldo Groq."
+    elif "permission" in msg.lower() or "403" in msg:
+        _ultimo_error_vertex = "Sin permisos en Vertex AI Express (403)."
+    elif "404" in msg or "not found" in msg.lower():
+        _ultimo_error_vertex = f"Modelo {_VERTEX_MODEL} no disponible en Vertex Express (404)."
+    else:
+        _ultimo_error_vertex = f"Error de Vertex AI: {msg[:120]}"
+    log.warning("Vertex AI error: %s", msg)
+
+
 def _llamar_vertex(prompt: str) -> dict | None:
     """
-    Llama a Vertex AI (gemini-2.0-flash) forzando JSON estructurado y
-    temperature=0.0. Devuelve el dict parseado o None si falla (para que el
-    llamador recaiga en Groq).
+    Llama a Vertex AI Express (gemini-2.0-flash) forzando JSON y temperature=0.0.
+    Devuelve el dict parseado o None si falla (para recaer en Groq).
     """
     global _ultimo_error_vertex
-    if not _vertex_disponible():
+    client = _get_vertex_client()
+    if not client:
         return None
-
     try:
-        from vertexai.generative_models import GenerativeModel
-
-        generation_config = {
-            "temperature": 0.0,              # Forzar máxima precisión matemática
-            "response_mime_type": "application/json",
-        }
-
-        model = GenerativeModel(
-            _VERTEX_MODEL,
-            system_instruction=_VERTEX_SYSTEM_PROMPT,
+        response = client.models.generate_content(
+            model=_VERTEX_MODEL,
+            contents=prompt,
+            config=_vertex_genconfig(),
         )
-        response = model.generate_content(
-            prompt,
-            generation_config=generation_config,
-        )
-
-        raw = (response.text or "").strip()
-        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
-        raw = re.sub(r'\s*```\s*$', '', raw)
-
-        resultado = json.loads(raw)
+        resultado = _vertex_parse(response)
         _ultimo_error_vertex = ""
         return resultado
-
     except json.JSONDecodeError as e:
         _ultimo_error_vertex = f"Vertex AI devolvió JSON inválido: {e}"
         log.warning("Vertex AI JSON error: %s", e)
         return None
     except Exception as exc:
-        msg = str(exc)
-        if "quota" in msg.lower() or "429" in msg or "resource_exhausted" in msg.lower():
-            _ultimo_error_vertex = "Cuota de Vertex AI agotada — usando respaldo Groq."
-        elif "permission" in msg.lower() or "403" in msg:
-            _ultimo_error_vertex = "Sin permisos en el proyecto Vertex AI (403)."
-        else:
-            _ultimo_error_vertex = f"Error de Vertex AI: {msg[:120]}"
-        log.warning("Vertex AI error: %s", msg)
+        _vertex_set_error(exc)
         return None
 
 
@@ -990,34 +1007,22 @@ def _llamar_vertex_vision(prompt: str, img_b64: str) -> dict | None:
     None si falla para que el llamador recaiga en la visión de Groq.
     """
     global _ultimo_error_vision
-    if not _vertex_disponible():
+    client = _get_vertex_client()
+    if not client:
         return None
     try:
-        from vertexai.generative_models import GenerativeModel, Part
+        from google.genai import types
 
-        generation_config = {
-            "temperature": 0.0,
-            "response_mime_type": "application/json",
-        }
-        model = GenerativeModel(
-            _VERTEX_MODEL,
-            system_instruction=_VERTEX_SYSTEM_PROMPT,
-        )
-        imagen = Part.from_data(
+        imagen = types.Part.from_bytes(
             data=base64.b64decode(img_b64),
             mime_type="image/png",
         )
-        response = model.generate_content(
-            [prompt, imagen],
-            generation_config=generation_config,
+        response = client.models.generate_content(
+            model=_VERTEX_MODEL,
+            contents=[prompt, imagen],
+            config=_vertex_genconfig(),
         )
-        raw = (response.text or "").strip()
-        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
-        raw = re.sub(r'\s*```\s*$', '', raw)
-        m = re.search(r'\{.*\}', raw, re.S)
-        if m:
-            raw = m.group(0)
-        resultado = json.loads(raw)
+        resultado = _vertex_parse(response)
         _ultimo_error_vision = ""
         return resultado
     except json.JSONDecodeError as e:
@@ -1028,6 +1033,8 @@ def _llamar_vertex_vision(prompt: str, img_b64: str) -> dict | None:
         msg = str(exc)
         if "quota" in msg.lower() or "429" in msg or "resource_exhausted" in msg.lower():
             _ultimo_error_vision = "Cuota de Vertex AI agotada (visión) — usando respaldo Groq."
+        elif "404" in msg or "not found" in msg.lower():
+            _ultimo_error_vision = f"Modelo {_VERTEX_MODEL} no disponible en Vertex Express (404)."
         else:
             _ultimo_error_vision = f"Error de Vertex AI (visión): {msg[:120]}"
         log.warning("Vertex visión error: %s", msg)
