@@ -42,7 +42,7 @@ _BACKOFF_DELAYS    = [2, 4, 8]
 # ─── Configuración Vertex AI (motor prioritario) ─────────────────────────────
 _VERTEX_PROJECT  = "nomadic-sprite-440003-r7"
 _VERTEX_LOCATION = "us-central1"
-_VERTEX_MODEL    = "publishers/google/models/gemini-2.0-flash"
+_VERTEX_MODEL    = "gemini-2.0-flash"
 
 # Umbral de confianza por debajo del cual se levanta una alerta de revisión.
 _VISION_CONF_MIN   = 70
@@ -522,14 +522,23 @@ def _get_vertex_client():
             return _vertex_client
         try:
             from google import genai
+            # En Streamlit Cloud el entorno suele traer GOOGLE_CLOUD_PROJECT /
+            # GOOGLE_CLOUD_LOCATION (y a veces GOOGLE_APPLICATION_CREDENTIALS) de
+            # algún despliegue previo de GCP. El SDK los toma como implícitos y, si
+            # project o location quedan seteados, arma la ruta
+            # projects/<id>/locations/us-central1/... e intenta resolver un token
+            # vía ADC, ignorando la API key (→ 404 NOT_FOUND o "Could not resolve
+            # project using application default credentials").
+            # Vertex AI Express sirve los modelos en 'global' y se autentica SOLO
+            # con la API key, así que retiramos esas variables de entorno antes de
+            # construir el cliente para que NO se deriven.
+            for _ev in ("GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
+                        "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_APPLICATION_CREDENTIALS"):
+                os.environ.pop(_ev, None)
             # Modo Vertex AI Express: autenticación por API key.
             _vertex_client = genai.Client(vertexai=True, api_key=api_key)
-            # En Streamlit Cloud el entorno puede traer GOOGLE_CLOUD_PROJECT /
-            # GOOGLE_CLOUD_LOCATION (o credenciales de service account) que el SDK
-            # toma como implícitos. Si project o location quedan seteados, el SDK
-            # intenta resolver un token vía ADC en cada request
-            # ("Could not resolve project using application default credentials.")
-            # ignorando la API key. Los anulamos para forzar la ruta x-goog-api-key.
+            # Cinturón y tirantes: forzamos project/location a None en el cliente
+            # interno por si alguna variable se reintroduce en tiempo de ejecución.
             try:
                 _vertex_client._api_client.project = None
                 _vertex_client._api_client.location = None
