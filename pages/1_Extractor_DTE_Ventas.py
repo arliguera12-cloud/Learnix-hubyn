@@ -979,6 +979,54 @@ def to_excel_hacienda_consumidor(df: pd.DataFrame) -> bytes:
     return output.getvalue()
 
 
+_COLS_DGII_CONTRIB = [
+    "A. Fecha Emisión", "B. Clase Documento", "C. Tipo Documento",
+    "D. Num Resolución", "E. Serie (Sello)", "F. Num Documento (UUID)",
+    "G. Control Interno", "H. NIT/NRC Cliente", "I. Nombre Cliente",
+    "J. Ventas Exentas", "K. Ventas No Sujetas", "L. Ventas Gravadas",
+    "M. Débito Fiscal", "N. Vtas Cuenta Terceros", "O. Déb. Fiscal Terceros",
+    "P. Total Ventas", "Q. DUI Cliente", "R. Tipo Operación (Renta)",
+    "S. Tipo Ingreso (Renta)", "T. Num Anexo",
+]
+_COLS_DGII_CONSUMIDOR = [
+    "A. Fecha Emisión", "B. Clase Documento", "C. Tipo Documento",
+    "D. Num Resolución", "E. Serie Documento", "F. N° Control Interno DEL",
+    "G. N° Control Interno AL", "H. N° Documento DEL (UUID)", "I. N° Documento AL (UUID)",
+    "J. N° Máquina Registradora", "K. Ventas Exentas", "L. Exentas No Prop.",
+    "M. Ventas No Sujetas", "N. Ventas Gravadas (c/IVA)", "O. Export. dentro CA",
+    "P. Export. fuera CA", "Q. Export. Servicios", "R. Vtas Zonas Francas DPA",
+    "S. Vtas Cuenta Terceros", "T. Total Ventas", "U. Tipo Operación (Renta)",
+    "V. Tipo Ingreso (Renta)", "W. Num Anexo",
+]
+_COLS_NUM_CONTRIB    = list("JKLMNOP")   # índices de columnas numéricas Anexo 1
+_COLS_NUM_CONSUMIDOR = list("KLMNOPQRST") # índices de columnas numéricas Anexo 2
+
+
+def _fmt_decimal_df(df: pd.DataFrame, cols_letra: list[str]) -> pd.DataFrame:
+    """Formatea columnas numéricas a '0.00' para CSV Hacienda."""
+    df = df.copy()
+    for letra in cols_letra:
+        for col in df.columns:
+            if col.startswith(f"{letra}."):
+                df[col] = df[col].apply(lambda v: f"{float(v or 0):.2f}")
+                break
+    return df
+
+
+def to_csv_hacienda_contribuyentes(df: pd.DataFrame) -> bytes:
+    """CSV Anexo 1 — sin encabezados, decimales con punto, UTF-8, listo para Hacienda."""
+    df_exp = df[[c for c in _COLS_DGII_CONTRIB if c in df.columns]].copy()
+    df_exp = _fmt_decimal_df(df_exp, _COLS_NUM_CONTRIB)
+    return df_exp.to_csv(index=False, header=False).encode("utf-8")
+
+
+def to_csv_hacienda_consumidor(df: pd.DataFrame) -> bytes:
+    """CSV Anexo 2 — sin encabezados, decimales con punto, UTF-8, listo para Hacienda."""
+    df_exp = df[[c for c in _COLS_DGII_CONSUMIDOR if c in df.columns]].copy()
+    df_exp = _fmt_decimal_df(df_exp, _COLS_NUM_CONSUMIDOR)
+    return df_exp.to_csv(index=False, header=False).encode("utf-8")
+
+
 def to_excel_auditoria(df: pd.DataFrame) -> bytes:
     """Genera Excel de auditoría combinado."""
     output = BytesIO()
@@ -1050,8 +1098,8 @@ def ventana_descarga_ventas(df_contribuyentes: pd.DataFrame,
     with rc2:
         sel_tipo_op_r = st.selectbox(
             "Tipo de Operación (R/U)",
-            ["1 — Gravada", "2 — No Gravada o Exento", "3 — Excluido/No Renta",
-             "4 — Mixta", "12 — Retención F14/F910", "13 — Sujeto excluido art.6 LISR"],
+            ["1 — Gravada", "2 — No Gravada", "3 — Excluido o No Constituye Renta",
+             "4 — Mixta", "8 — Operación en más de un anexo", "9 — No aplica"],
             key="vta_tipo_op_renta",
         )
     with rc3:
@@ -1085,13 +1133,23 @@ def ventana_descarga_ventas(df_contribuyentes: pd.DataFrame,
             st.caption(f"📄 {len(f07_contrib)} documentos")
             total_c = df_contribuyentes['total'].sum()
             st.caption(f"Total: ${total_c:,.2f}")
-            st.download_button(
-                "📥 Descargar Anexo 1 (Contribuyentes)",
-                data=to_excel_hacienda_contribuyentes(f07_contrib),
-                file_name=f"F07_Anexo1_Contribuyentes_{nombre_base}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary", use_container_width=True
-            )
+            dl_c1, dl_c2 = st.columns(2)
+            with dl_c1:
+                st.download_button(
+                    "📤 CSV Hacienda — Anexo 1",
+                    data=to_csv_hacienda_contribuyentes(f07_contrib),
+                    file_name=f"Anexo1_Contribuyentes_{nombre_base}.csv",
+                    mime="text/csv",
+                    type="primary", use_container_width=True,
+                )
+            with dl_c2:
+                st.download_button(
+                    "📊 Excel Auditoría",
+                    data=to_excel_hacienda_contribuyentes(f07_contrib),
+                    file_name=f"F07_Anexo1_Contribuyentes_{nombre_base}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="secondary", use_container_width=True,
+                )
         else:
             st.info("Sin documentos de contribuyentes.")
 
@@ -1107,13 +1165,23 @@ def ventana_descarga_ventas(df_contribuyentes: pd.DataFrame,
             st.caption(f"📄 {len(f07_cons)} documentos")
             total_cons = df_consumidor['total'].sum()
             st.caption(f"💰 Total: ${total_cons:,.2f}")
-            st.download_button(
-                "📥 Descargar Anexo 2 (Consumidor Final)",
-                data=to_excel_hacienda_consumidor(f07_cons),
-                file_name=f"F07_Anexo2_Consumidor_{nombre_base}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary", use_container_width=True
-            )
+            dl_co1, dl_co2 = st.columns(2)
+            with dl_co1:
+                st.download_button(
+                    "📤 CSV Hacienda — Anexo 2",
+                    data=to_csv_hacienda_consumidor(f07_cons),
+                    file_name=f"Anexo2_Consumidor_{nombre_base}.csv",
+                    mime="text/csv",
+                    type="primary", use_container_width=True,
+                )
+            with dl_co2:
+                st.download_button(
+                    "📊 Excel Auditoría",
+                    data=to_excel_hacienda_consumidor(f07_cons),
+                    file_name=f"F07_Anexo2_Consumidor_{nombre_base}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="secondary", use_container_width=True,
+                )
         else:
             st.info("Sin facturas de consumidor final.")
 
