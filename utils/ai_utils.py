@@ -911,9 +911,12 @@ def procesar_dte_con_gemini(
 
     # 1) Intento prioritario con Vertex AI.
     resultado = None
+    motor_usado = ""
     if _vertex_disponible():
         resultado = _llamar_vertex(prompt)
-        if resultado is None:
+        if resultado is not None:
+            motor_usado = f"vertex-ai/{_VERTEX_MODEL}"
+        else:
             log.info("Vertex AI no devolvió resultado, recayendo en Groq: %s",
                      _ultimo_error_vertex)
 
@@ -923,9 +926,17 @@ def procesar_dte_con_gemini(
         if not gemini_disponible():
             return {}, []
         resultado = _llamar_groq(prompt)
+        if resultado is not None:
+            motor_usado = f"groq/{_GROQ_MODEL}"
 
     if resultado is None:
         return {}, []
+
+    # Forzar en la auditoría el motor REALMENTE usado (los prompts traen el
+    # nombre del modelo hardcodeado, lo que ocultaría si corrió Vertex o Groq).
+    if motor_usado:
+        resultado.setdefault("auditoria_ia", {})
+        resultado["auditoria_ia"]["modelo_utilizado"] = motor_usado
 
     correcciones = [str(c) for c in resultado.get("correcciones", []) if c]
     campos_corr  = _extraer_campos_corregidos(resultado, campos_actuales, tipo_dte, nit_ctx)
