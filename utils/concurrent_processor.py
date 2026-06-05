@@ -30,13 +30,14 @@ from typing import Callable
 
 import streamlit as st
 
-from utils.constants import CACHE_MAX_SIZE, CACHE_EVICT_SIZE
-
 log = logging.getLogger(__name__)
 
 # Configurable: usa hasta la mitad de CPUs, máximo 10
 import os as _os
 MAX_WORKERS: int = min(_os.cpu_count() or 4, 10)
+
+_CACHE_MAX_SIZE   = 200
+_CACHE_EVICT_SIZE = 50
 
 
 # ─── Deduplicación y caché por sesión ────────────────────────────────────────
@@ -136,8 +137,8 @@ def con_cache_extraccion(
 
         with _cache_lock:
             # LRU: si el cache está lleno, eliminar los más antiguos
-            if len(cache) >= CACHE_MAX_SIZE:
-                for k in list(cache.keys())[:CACHE_EVICT_SIZE]:
+            if len(cache) >= _CACHE_MAX_SIZE:
+                for k in list(cache.keys())[:_CACHE_EVICT_SIZE]:
                     del cache[k]
             cache[cache_key] = resultado
 
