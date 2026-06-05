@@ -36,6 +36,19 @@ _VERTEX_LOCATION = "us-central1"
 # redeploy. Default a la versión GA explícita, más estable en Vertex Express.
 _VERTEX_MODEL_DEFAULT = "gemini-2.5-flash"  # modelo disponible en Agent Platform
 
+# ── Estrategia HÍBRIDA Flash → Pro ───────────────────────────────────────────
+# Flash es el motor por defecto (rápido y económico). Cuando la confianza de la
+# extracción cae por debajo de _CONF_ESCALADO_PRO, se reintenta UNA sola vez con
+# el modelo Pro (más preciso). Configurable vía secrets VERTEX_MODEL_PRO.
+_VERTEX_MODEL_PRO_DEFAULT = "gemini-2.5-pro"
+_CONF_ESCALADO_PRO        = 75   # confianza < este valor (0-100) → escalar a Pro
+
+# ── Razonamiento extendido (thinking) ────────────────────────────────────────
+# Presupuesto de tokens de "thinking" para Gemini 2.5 en la capa de validación
+# de texto (montos/IVA). -1 = dinámico (el modelo decide). Se aplica con
+# try/except por si el SDK instalado no soporta thinking_config.
+_THINKING_BUDGET = 2048
+
 # Umbral de confianza por debajo del cual se levanta una alerta de revisión.
 _VISION_CONF_MIN   = 70
 
@@ -471,7 +484,7 @@ def _vertex_api_key() -> str:
 
 
 def _vertex_model() -> str:
-    """Modelo de Vertex AI a usar. Configurable vía secrets/env VERTEX_MODEL."""
+    """Modelo de Vertex AI por defecto (Flash). Configurable vía VERTEX_MODEL."""
     try:
         v = st.secrets.get("VERTEX_MODEL", "")
     except Exception:
@@ -479,6 +492,27 @@ def _vertex_model() -> str:
     if not v:
         v = os.environ.get("VERTEX_MODEL", "")
     return v or _VERTEX_MODEL_DEFAULT
+
+
+def _vertex_model_pro() -> str:
+    """Modelo Pro para escalar casos de baja confianza. Vía VERTEX_MODEL_PRO."""
+    try:
+        v = st.secrets.get("VERTEX_MODEL_PRO", "")
+    except Exception:
+        v = ""
+    if not v:
+        v = os.environ.get("VERTEX_MODEL_PRO", "")
+    return v or _VERTEX_MODEL_PRO_DEFAULT
+
+
+def _confianza(resultado: dict) -> int:
+    """Lee auditoria_ia.confianza_extraccion (0-100). 100 si no viene declarada
+    (no penalizar resultados que el modelo no anotó)."""
+    try:
+        c = (resultado or {}).get("auditoria_ia", {}).get("confianza_extraccion")
+        return int(c) if c is not None and str(c).strip() != "" else 100
+    except Exception:
+        return 100
 
 # System prompt común a TODOS los extractores. Refuerza el mapeo milimétrico de
 # campos y deja la estructura JSON exacta en manos del prompt por tipo de DTE.
@@ -600,14 +634,28 @@ def vertex_ultimo_error() -> str:
     return _ultimo_error_vertex
 
 
-def _vertex_genconfig():
-    """GenerateContentConfig con system prompt, temperature=0 y salida JSON."""
+def _vertex_genconfig(thinking: bool = False):
+    """GenerateContentConfig con system prompt, temperature=0 y salida JSON.
+
+    Si thinking=True intenta activar el razonamiento extendido de Gemini 2.5
+    (mejor en validación de montos/IVA). Si el SDK instalado no lo soporta, cae
+    silenciosamente a la configuración estándar sin fallar la llamada.
+    """
     from google.genai import types
-    return types.GenerateContentConfig(
+    base = dict(
         system_instruction=_VERTEX_SYSTEM_PROMPT,
         temperature=0.0,                       # máxima precisión matemática
         response_mime_type="application/json",
     )
+    if thinking:
+        try:
+            return types.GenerateContentConfig(
+                **base,
+                thinking_config=types.ThinkingConfig(thinking_budget=_THINKING_BUDGET),
+            )
+        except Exception:
+            log.info("thinking_config no soportado por el SDK; usando config estándar")
+    return types.GenerateContentConfig(**base)
 
 
 def _vertex_parse(response) -> dict | None:
@@ -636,17 +684,21 @@ def _vertex_set_error(exc) -> None:
         log.warning("Google AI deshabilitado permanentemente (error de auth/config).")
 
 
-def _llamar_vertex(prompt: str) -> dict | None:
-    """Llama a Google AI; devuelve None sin tocar el CB de Groq si falla."""
+def _llamar_vertex(prompt: str, modelo: str | None = None, thinking: bool = False) -> dict | None:
+    """Llama a Google AI; devuelve None sin tocar el CB de Groq si falla.
+
+    modelo   : override del modelo (p. ej. Pro al escalar). Default _vertex_model().
+    thinking : activa razonamiento extendido (capa de validación de texto).
+    """
     global _ultimo_error_vertex
     client = _get_vertex_client()
     if not client:
         return None
     try:
         response = client.models.generate_content(
-            model=_vertex_model(),
+            model=modelo or _vertex_model(),
             contents=prompt,
-            config=_vertex_genconfig(),
+            config=_vertex_genconfig(thinking=thinking),
         )
         resultado = _vertex_parse(response)
         _ultimo_error_vertex = ""
@@ -950,8 +1002,10 @@ def procesar_dte_con_gemini(
     """
     Verificador universal de DTEs.
 
-    Motor PRIORITARIO: Vertex AI (gemini-2.0-flash, temperature=0.0, JSON mode)
-    del proyecto "nomadic-sprite-440003-r7", para máxima precisión.
+    Motor PRIORITARIO: Vertex AI (Gemini, temperature=0.0, JSON mode) del
+    proyecto "nomadic-sprite-440003-r7", para máxima precisión. El modelo
+    concreto se resuelve en _vertex_model() (default gemini-2.5-flash,
+    configurable vía VERTEX_MODEL).
     Motor de RESPALDO: Groq (llama-3.3-70b-versatile) con circuit breaker, que
     se usa solo si Vertex AI no está disponible o falla (p. ej. cuota agotada).
 
@@ -974,13 +1028,20 @@ def procesar_dte_con_gemini(
 
     prompt = build_prompt(texto_pdf, campos_actuales, nit_ctx, nom_ctx)
 
-    # 1) Intento prioritario con Vertex AI.
+    # 1) Intento prioritario con Vertex AI (Flash + thinking en validación texto).
     resultado = None
     motor_usado = ""
     if _vertex_disponible():
-        resultado = _llamar_vertex(prompt)
+        resultado = _llamar_vertex(prompt, thinking=True)
         if resultado is not None:
-            motor_usado = "vertex-ai/gemini-2.0-flash"
+            motor_usado = f"vertex-ai/{_vertex_model()}"
+            # Escalada HÍBRIDA: si la confianza es baja, reintentar UNA vez con Pro.
+            if _confianza(resultado) < _CONF_ESCALADO_PRO and _vertex_model_pro() != _vertex_model():
+                _res_pro = _llamar_vertex(prompt, modelo=_vertex_model_pro(), thinking=True)
+                if _res_pro is not None:
+                    resultado   = _res_pro
+                    motor_usado = f"vertex-ai/{_vertex_model_pro()} (escalado)"
+                    log.info("Escalado a Pro por baja confianza (texto).")
         else:
             log.info("Vertex AI no devolvió resultado, recayendo en Groq: %s",
                      _ultimo_error_vertex)
@@ -1048,11 +1109,11 @@ def vision_disponible() -> bool:
     return bool(_get_api_key()) and not _cb_is_open()
 
 
-def _llamar_vertex_vision(prompt: str, img_b64: str) -> dict | None:
+def _llamar_vertex_vision(prompt: str, img_b64: str, modelo: str | None = None) -> dict | None:
     """
-    Vertex AI (gemini-2.0-flash, multimodal) actúa como AUDITOR: lee el DTE como
-    imagen, lo comprende y devuelve los campos rectificados en JSON. Devuelve
-    None si falla para que el llamador recaiga en la visión de Groq.
+    Vertex AI (Gemini multimodal, ver _vertex_model()) actúa como AUDITOR: lee
+    el DTE como imagen, lo comprende y devuelve los campos rectificados en JSON.
+    Devuelve None si falla para que el llamador recaiga en la visión de Groq.
     """
     global _ultimo_error_vision
     client = _get_vertex_client()
@@ -1066,7 +1127,7 @@ def _llamar_vertex_vision(prompt: str, img_b64: str) -> dict | None:
             mime_type="image/png",
         )
         response = client.models.generate_content(
-            model=_vertex_model(),
+            model=modelo or _vertex_model(),
             contents=[prompt, imagen],
             config=_vertex_genconfig(),
         )
@@ -1425,7 +1486,14 @@ def extraer_dte_con_vision(
     if _vertex_disponible():
         resultado = _llamar_vertex_vision(prompt, img_b64)
         if resultado is not None:
-            motor_vision = "vertex-ai/gemini-2.0-flash"
+            motor_vision = f"vertex-ai/{_vertex_model()}"
+            # Escalada HÍBRIDA: baja confianza de lectura → reintentar con Pro.
+            if _confianza(resultado) < _CONF_ESCALADO_PRO and _vertex_model_pro() != _vertex_model():
+                _res_pro = _llamar_vertex_vision(prompt, img_b64, modelo=_vertex_model_pro())
+                if _res_pro is not None:
+                    resultado    = _res_pro
+                    motor_vision = f"vertex-ai/{_vertex_model_pro()} (escalado)"
+                    log.info("Escalado a Pro por baja confianza (visión).")
         else:
             log.info("Vertex visión sin resultado, recayendo en Groq: %s",
                      _ultimo_error_vision)
