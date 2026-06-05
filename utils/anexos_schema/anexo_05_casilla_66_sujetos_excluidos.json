@@ -1,0 +1,215 @@
+{
+  "informe": "F07",
+  "anexo": 5,
+  "nombre_anexo": "Compras a Sujetos Excluidos",
+  "casilla_formulario": "66",
+  "numero_anexo_valor_fijo": "5",
+  "configuracion_archivo": {
+    "formato": "CSV",
+    "separador": ";",
+    "codificacion": "UTF-8",
+    "incluye_encabezados": false,
+    "formato_celdas": "Texto"
+  },
+  "instrucciones_llenado": {
+    "contexto": "El DECLARANTE es el COMPRADOR que adquirió bienes/servicios de personas no inscritas en IVA (sujetos excluidos). Se emitió documento de compra según Art. 119 Código Tributario.",
+    "orden_procesamiento": "Un documento por fila.",
+    "cuando_monto_no_aplica": "Colocar 0.00",
+    "permitir_negativos": false,
+    "nota_retencion_iva_13pct": "Si se retuvo el 13% IVA, ese crédito fiscal se incorporará en casilla 128 del F-07 posterior al entero.",
+    "fuente_datos": {
+      "tipo_documento_identidad": "1=NIT, 2=DUI, 3=Otro. Determina el formato del campo B",
+      "serie_dte": "Para DTE: sello de recepción del DTE (col E)",
+      "numero_documento_dte": "Para DTE: código de generación sin guiones (col F). Para docs anteriores a nov-2022: número de control sin guiones.",
+      "monto_retencion": "Si aplica retención 13%: col H = col G × 13%. Si no hubo retención: col H = 0.00"
+    },
+    "columnas_renta_I_J_K_L": "Obligatorias desde Febrero 2024. Para periodos anteriores colocar '0' en las 4 columnas.",
+    "codigo_8_multianexo": "Si la operación se informa en más de 1 anexo, usar código '8' en cols I, J, K, L.",
+    "codigo_9_no_deducible": "Instituciones Públicas, Municipalidades y contribuyentes con operaciones no deducibles: colocar '9' en cols I, J, K, L."
+  },
+  "estructura_columnas": [
+    {
+      "columna": "A",
+      "campo": "tipo_documento_identidad",
+      "tipo": "Texto",
+      "longitud_maxima": 1,
+      "obligatorio": true,
+      "valores_permitidos": ["1", "2", "3"],
+      "mapeo_valores": {
+        "1": "NIT",
+        "2": "DUI",
+        "3": "Otro Documento"
+      },
+      "descripcion": "Tipo de documento de identidad del sujeto excluido."
+    },
+    {
+      "columna": "B",
+      "campo": "numero_identificacion",
+      "tipo": "Texto",
+      "longitud_maxima": 14,
+      "obligatorio": true,
+      "descripcion": "Sin guiones. Longitud según col A: NIT=14 chars, DUI=9 chars, Otro=máximo 14 chars.",
+      "reglas_longitud": {
+        "si_col_A_es_1": "14 dígitos (NIT)",
+        "si_col_A_es_2": "9 dígitos (DUI)",
+        "si_col_A_es_3": "máximo 14 caracteres"
+      }
+    },
+    {
+      "columna": "C",
+      "campo": "nombre_sujeto_excluido",
+      "tipo": "Texto",
+      "longitud_maxima": null,
+      "obligatorio": true,
+      "descripcion": "Nombre, Razón Social o Denominación del sujeto excluido (proveedor)."
+    },
+    {
+      "columna": "D",
+      "campo": "fecha_emision",
+      "tipo": "Texto",
+      "formato": "DD/MM/AAAA",
+      "longitud_exacta": 10,
+      "obligatorio": true,
+      "descripcion": "Fecha de emisión del documento. Corresponde al periodo que se está declarando."
+    },
+    {
+      "columna": "E",
+      "campo": "serie_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Para DTE: sello de recepción del DTE.",
+      "descripcion": "Serie del documento emitido al proveedor sujeto excluido."
+    },
+    {
+      "columna": "F",
+      "campo": "numero_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Para DTE: código de generación sin guiones. Para docs anteriores a nov-2022: número de control sin guiones.",
+      "descripcion": "Número del documento emitido al sujeto excluido."
+    },
+    {
+      "columna": "G",
+      "campo": "monto_operacion",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "descripcion": "Monto total de la compra al sujeto excluido."
+    },
+    {
+      "columna": "H",
+      "campo": "monto_retencion_iva_13pct",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00",
+      "descripcion": "Retención IVA 13% cuando aplica según el tipo de operación (col G × 13%). Si no hubo retención colocar 0.00. Tolerancia ±0.02."
+    },
+    {
+      "columna": "I",
+      "campo": "tipo_operacion",
+      "tipo": "Texto",
+      "longitud_maxima": 1,
+      "obligatorio": true,
+      "vigente_desde": "Febrero 2024",
+      "antes_febrero_2024": "Colocar '0'",
+      "valores_permitidos": ["1", "2", "3", "4", "8", "9"],
+      "mapeo_valores": {
+        "1": "Gravada",
+        "2": "No Gravada",
+        "3": "Excluido o no Constituye Renta",
+        "4": "Mixta",
+        "8": "Operación informada en más de 1 anexo",
+        "9": "Instituciones Públicas / Municipalidades / operaciones no deducibles"
+      }
+    },
+    {
+      "columna": "J",
+      "campo": "clasificacion",
+      "tipo": "Texto",
+      "longitud_maxima": 1,
+      "obligatorio": true,
+      "vigente_desde": "Febrero 2024",
+      "antes_febrero_2024": "Colocar '0'",
+      "valores_permitidos": ["1", "2", "8", "9"],
+      "mapeo_valores": {
+        "1": "Costo",
+        "2": "Gasto",
+        "8": "Operación informada en más de 1 anexo",
+        "9": "Instituciones Públicas / Municipalidades / operaciones no deducibles"
+      }
+    },
+    {
+      "columna": "K",
+      "campo": "sector",
+      "tipo": "Texto",
+      "longitud_maxima": 1,
+      "obligatorio": true,
+      "vigente_desde": "Febrero 2024",
+      "antes_febrero_2024": "Colocar '0'",
+      "valores_permitidos": ["1", "2", "3", "4", "8", "9"],
+      "mapeo_valores": {
+        "1": "Industria",
+        "2": "Comercio",
+        "3": "Agropecuaria",
+        "4": "Servicios, Profesiones, Artes y Oficios",
+        "8": "Operación informada en más de 1 anexo",
+        "9": "Instituciones Públicas / Municipalidades / operaciones no deducibles"
+      }
+    },
+    {
+      "columna": "L",
+      "campo": "tipo_costo_gasto",
+      "tipo": "Texto",
+      "longitud_maxima": 1,
+      "obligatorio": true,
+      "vigente_desde": "Febrero 2024",
+      "antes_febrero_2024": "Colocar '0'",
+      "valores_permitidos": ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+      "mapeo_valores": {
+        "1": "Gastos de Venta sin Donación",
+        "2": "Gastos de Administración sin Donación",
+        "3": "Gastos Financieros sin Donación",
+        "4": "Costo Artículos Producidos/Comprados Importaciones/Internaciones",
+        "5": "Costo Artículos Producidos/Comprados Interno",
+        "6": "Costos Indirectos de Fabricación",
+        "7": "Mano de obra",
+        "8": "Operación informada en más de 1 anexo",
+        "9": "Instituciones Públicas / Municipalidades / operaciones no deducibles"
+      }
+    },
+    {
+      "columna": "M",
+      "campo": "numero_anexo",
+      "tipo": "Texto",
+      "longitud_exacta": 1,
+      "obligatorio": true,
+      "valor_fijo": "5",
+      "descripcion": "Siempre '5' para este reporte."
+    }
+  ],
+  "reglas_cruzadas": [
+    {
+      "id": "VAL_01",
+      "regla": "Si col H > 0: columna_H == columna_G * 0.13",
+      "tolerancia": 0.02,
+      "mensaje": "Si hay retención IVA 13%, debe ser el 13% del monto de operación (G)."
+    },
+    {
+      "id": "VAL_02",
+      "regla": "Longitud de col B según col A: NIT=14, DUI=9, Otro<=14",
+      "mensaje": "El número de identificación no cumple la longitud esperada para el tipo de documento."
+    },
+    {
+      "id": "VAL_03",
+      "regla": "Sin comas como separador de miles. Solo punto decimal.",
+      "mensaje": "Formato numérico inválido."
+    }
+  ]
+}
