@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from styles import DARK_PRO_CSS
 from utils.supabase_client import login, logout
-from utils.ai_utils import groq_disponible, gemini_ultimo_error, circuit_breaker_status
+from utils.ai_utils import groq_disponible, gemini_ultimo_error, circuit_breaker_status, vertex_disponible
 from components.ui_components import (
     sidebar_logo,
     sidebar_cliente_card,
@@ -172,22 +172,40 @@ with st.sidebar:
     if st.session_state.get("cliente_activo"):
         sidebar_cliente_card(st.session_state.cliente_activo)
 
-    # ── Estado de IA (Groq) ────────────────────────────────────────────────────
-    _groq_ok = groq_disponible()
-    _cb      = circuit_breaker_status()
+    # ── Estado de IA (Vertex AI prioritario · Groq respaldo) ────────────────────
+    _vertex_ok = vertex_disponible()
+    _groq_ok   = groq_disponible()
+    _cb        = circuit_breaker_status()
 
-    with st.expander("⚡ IA · Groq", expanded=False):
-        if _groq_ok:
+    _ia_titulo = "🤖 IA · Vertex AI" if _vertex_ok else "⚡ IA · Groq"
+    with st.expander(_ia_titulo, expanded=False):
+        if _vertex_ok:
+            st.markdown(
+                "<div style='padding:8px 12px;background:rgba(66,133,244,0.10);border-radius:8px;"
+                "border:1px solid rgba(66,133,244,0.30);font-size:0.78rem;'>"
+                "<span class='pulse-dot teal' style='margin-right:6px;'></span>"
+                "<strong style='color:#4285F4;'>Vertex AI activo (auditor)</strong>"
+                "<div style='margin-top:6px;display:flex;flex-direction:column;gap:4px;'>"
+                "<span style='color:rgba(255,255,255,0.55);font-size:0.70rem;'>"
+                "🔍 Auditoría texto + visión — gemini-1.5-flash</span>"
+                "<span style='color:rgba(255,255,255,0.45);font-size:0.68rem;'>"
+                f"↩️ Respaldo Groq: {'activo' if _groq_ok else 'inactivo'}</span>"
+                "</div></div>",
+                unsafe_allow_html=True,
+            )
+        elif _groq_ok:
             st.markdown(
                 "<div style='padding:8px 12px;background:rgba(29,184,170,0.10);border-radius:8px;"
                 "border:1px solid rgba(29,184,170,0.30);font-size:0.78rem;'>"
                 "<span class='pulse-dot teal' style='margin-right:6px;'></span>"
-                "<strong style='color:#1DB8AA;'>Groq activo</strong>"
+                "<strong style='color:#1DB8AA;'>Groq activo (respaldo)</strong>"
                 "<div style='margin-top:6px;display:flex;flex-direction:column;gap:4px;'>"
                 "<span style='color:rgba(255,255,255,0.55);font-size:0.70rem;'>"
                 "📝 Texto — llama-3.3-70b-versatile</span>"
                 "<span style='color:rgba(255,255,255,0.55);font-size:0.70rem;'>"
                 "👁️ Visión — llama-4-scout-17b</span>"
+                "<span style='color:rgba(251,191,36,0.75);font-size:0.68rem;'>"
+                "⚠️ Vertex AI no disponible — revisa credenciales</span>"
                 "</div></div>",
                 unsafe_allow_html=True,
             )

@@ -971,8 +971,67 @@ def _vision_deps_disponibles() -> bool:
 
 
 def vision_disponible() -> bool:
-    """True si hay API key, PyMuPDF instalado y el circuito está cerrado."""
-    return bool(_get_api_key()) and _vision_deps_disponibles() and not _cb_is_open()
+    """
+    True si se puede leer el PDF como imagen. Requiere PyMuPDF para renderizar
+    y, al menos, UN motor de visión: Vertex AI (prioritario) o Groq (con el
+    circuito cerrado) como respaldo.
+    """
+    if not _vision_deps_disponibles():
+        return False
+    if _vertex_disponible():
+        return True
+    return bool(_get_api_key()) and not _cb_is_open()
+
+
+def _llamar_vertex_vision(prompt: str, img_b64: str) -> dict | None:
+    """
+    Vertex AI (gemini-1.5-flash, multimodal) actúa como AUDITOR: lee el DTE como
+    imagen, lo comprende y devuelve los campos rectificados en JSON. Devuelve
+    None si falla para que el llamador recaiga en la visión de Groq.
+    """
+    global _ultimo_error_vision
+    if not _vertex_disponible():
+        return None
+    try:
+        from vertexai.generative_models import GenerativeModel, Part
+
+        generation_config = {
+            "temperature": 0.0,
+            "response_mime_type": "application/json",
+        }
+        model = GenerativeModel(
+            _VERTEX_MODEL,
+            system_instruction=_VERTEX_SYSTEM_PROMPT,
+        )
+        imagen = Part.from_data(
+            data=base64.b64decode(img_b64),
+            mime_type="image/png",
+        )
+        response = model.generate_content(
+            [prompt, imagen],
+            generation_config=generation_config,
+        )
+        raw = (response.text or "").strip()
+        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
+        raw = re.sub(r'\s*```\s*$', '', raw)
+        m = re.search(r'\{.*\}', raw, re.S)
+        if m:
+            raw = m.group(0)
+        resultado = json.loads(raw)
+        _ultimo_error_vision = ""
+        return resultado
+    except json.JSONDecodeError as e:
+        _ultimo_error_vision = f"Vertex visión devolvió JSON inválido: {e}"
+        log.warning("Vertex visión JSON error: %s", e)
+        return None
+    except Exception as exc:
+        msg = str(exc)
+        if "quota" in msg.lower() or "429" in msg or "resource_exhausted" in msg.lower():
+            _ultimo_error_vision = "Cuota de Vertex AI agotada (visión) — usando respaldo Groq."
+        else:
+            _ultimo_error_vision = f"Error de Vertex AI (visión): {msg[:120]}"
+        log.warning("Vertex visión error: %s", msg)
+        return None
 
 
 def vision_ultimo_error() -> str:
@@ -1301,17 +1360,33 @@ def extraer_dte_con_vision(
     if not img_b64:
         return {}, [], {}
 
-    prompt    = _prompt_vision(tipo_dte, nit_ctx, nom_ctx)
-    resultado = _llamar_groq_vision(prompt, img_b64)
+    prompt = _prompt_vision(tipo_dte, nit_ctx, nom_ctx)
+
+    # AUDITOR de visión: Vertex AI prioritario, Groq como respaldo.
+    resultado   = None
+    motor_vision = ""
+    if _vertex_disponible():
+        resultado = _llamar_vertex_vision(prompt, img_b64)
+        if resultado is not None:
+            motor_vision = f"vertex-ai/{_VERTEX_MODEL}"
+        else:
+            log.info("Vertex visión sin resultado, recayendo en Groq: %s",
+                     _ultimo_error_vision)
+
+    if resultado is None and bool(_get_api_key()) and not _cb_is_open():
+        resultado = _llamar_groq_vision(prompt, img_b64)
+        if resultado is not None:
+            motor_vision = _GROQ_VISION_MODEL
+
     if resultado is None:
         return {}, [], {}
 
     campos, conf, alertas = _normalizar_campos_vision(resultado, tipo_dte, nit_ctx)
 
     audit = {
-        "modelo_utilizado"    : _GROQ_VISION_MODEL,
+        "modelo_utilizado"    : motor_vision or _GROQ_VISION_MODEL,
         "confianza_extraccion": conf,
-        "notas_de_razonamiento": f"Extracción por visión ({len(campos)} campos legibles)",
+        "notas_de_razonamiento": f"Auditoría por visión ({len(campos)} campos legibles)",
         "tipo_dte"            : tipo_dte,
         "metodo"              : "vision",
     }
