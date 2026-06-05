@@ -524,7 +524,16 @@ def _get_vertex_client():
             from google import genai
             # Modo Vertex AI Express: autenticación por API key.
             _vertex_client = genai.Client(vertexai=True, api_key=api_key)
-            log.info("Vertex AI Express inicializado (google-genai, modelo=%s)", _VERTEX_MODEL)
+            # Vertex Express publica los modelos en la región 'global', pero el
+            # SDK arma la ruta con us-central1 (→ 404). No se puede pasar
+            # location junto con api_key (el SDK lo prohíbe), así que la
+            # forzamos en el cliente interno tras construirlo.
+            try:
+                _vertex_client._api_client.location = "global"
+            except Exception as loc_exc:
+                log.warning("No se pudo fijar location=global en Vertex: %s", loc_exc)
+            log.info("Vertex AI Express inicializado (google-genai, modelo=%s, location=global)",
+                     _VERTEX_MODEL)
         except ImportError:
             _vertex_client = False
             _ultimo_error_vertex = "SDK google-genai no instalado."
