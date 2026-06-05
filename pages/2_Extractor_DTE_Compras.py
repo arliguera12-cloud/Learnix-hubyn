@@ -723,10 +723,21 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                     nit_prov = _corr_dict["nit_prov"]
 
         # ── FOVIAL y COTRANS ───────────────────────────────────────────────────
+        # CORREGIDO: en facturas de combustible la etiqueta viene seguida de la
+        # TARIFA entre paréntesis y luego el monto real, p. ej.
+        #   "FOVIAL ($0.20 Ctvs. por galón) $ 0.86"
+        # El patrón anterior ($? inmediato a la etiqueta) capturaba la tarifa
+        # ($0.20) o nada. Ahora tomamos el ÚLTIMO monto en $ de la línea.
         fovial  = 0.0
         cotrans = 0.0
-        m_fov = re.search(r'[Ff][Oo][Vv][Ii][Aa][Ll]\s*:?\s*\$?\s*(\d[\d,.]*)', t_clean)
-        m_cot = re.search(r'[Cc][Oo][Tt][Rr][Aa][Nn][Ss]\s*:?\s*\$?\s*(\d[\d,.]*)', t_clean)
+        m_fov = (
+            re.search(r'[Ff][Oo][Vv][Ii][Aa][Ll][^\n]*\$\s*(\d[\d,.]*)', t_clean)
+            or re.search(r'[Ff][Oo][Vv][Ii][Aa][Ll]\s*:?\s*(\d[\d,.]*)', t_clean)
+        )
+        m_cot = (
+            re.search(r'[Cc][Oo][Tt][Rr][Aa][Nn][Ss][^\n]*\$\s*(\d[\d,.]*)', t_clean)
+            or re.search(r'[Cc][Oo][Tt][Rr][Aa][Nn][Ss]\s*:?\s*(\d[\d,.]*)', t_clean)
+        )
         if m_fov:
             fovial = limpiar_monto(m_fov.group(1))
         if m_cot:
@@ -792,8 +803,11 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             r'[Ii]mpuesto\s+al\s+[Vv]alor\s+[Aa]gregado\s*:?\s*\$?\s*(\d[\d,.]+)',
             r'[Ii][Vv][Aa]\s*13\s*%?\s*:?\s*\$?\s*(\d[\d,.]+)',
             r'13\s*%\s*[Ii][Vv][Aa]\s*:?\s*\$?\s*(\d[\d,.]+)',
+            # Tolera texto intermedio entre "Débito Fiscal" y el monto, p. ej.
+            # "Iva Débito Fiscal PST $1.62" (combustible / PowerCloud).
+            r'[Ii][Vv][Aa]\s+[Dd][eé]bito\s+[Ff]iscal[^\d\n]*(\d[\d,.]+)',
             r'[Cc]r[eé]dito\s+[Ff]iscal\s*:?\s*\$?\s*(\d[\d,.]+)',
-            r'[Dd][eé]bito\s+[Ff]iscal\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Dd][eé]bito\s+[Ff]iscal[^\d\n]*(\d[\d,.]+)',
         ]:
             m_iva = re.search(pat, t_clean)
             if m_iva:
@@ -806,6 +820,10 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
         for pat in [
             r'[Vv]ta\.?\s+[Gg]ravada\s+[Nn]eta\s*:?\s*\$?\s*(\d[\d,.]+)',
             r'[Vv]entas?\s+[Gg]ravadas?\s+[Ll]ocales?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            # "Total ventas gravadas: $ 16.55" — base imponible real del CCF
+            # (no confundir con "Monto total gravado", que en combustible suma
+            #  FOVIAL/COTRANS/IVA e infla la base).
+            r'[Tt]otal\s+[Vv]entas?\s+[Gg]ravad[ao]s?\s*:?\s*\$?\s*(\d[\d,.]+)',
             r'[Tt]otal\s+[Gg]ravad[ao]\s*:?\s*\$?\s*(\d[\d,.]+)',
             r'\b[Gg]ravado\s*:?\s*(\d[\d,.]+)',
             r'[Ss]umatoria\s+de\s+[Vv]entas\s*:?\s*\$?\s*(\d[\d,.]+)',
@@ -891,6 +909,25 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 encontrado    = True
             elif tot == 0.0 and gra > 0 and iva > 0:
                 tot = round(gra + iva + exe - ret + perc, 2)
+
+        # ── Guard de consistencia fiscal (combustible / CCF) ──────────────────
+        # En facturas de combustible varios totales ("Sub-Total", "Monto total
+        # gravado", total - iva) incluyen FOVIAL/COTRANS y/o el propio IVA, lo
+        # que infla la base gravada y produce falsos "IVA ≠ gravadas×13%".
+        # El IVA al 13% es el ancla legal más confiable: si la base no cuadra
+        # con él y el exceso se explica por FOVIAL/COTRANS (±IVA), derivamos la
+        # base imponible real desde el IVA y movemos FOVIAL/COTRANS a exentas.
+        if tipo in ("03", "05", "06") and iva > 0 and gra > 0:
+            if abs(iva - round(gra * 0.13, 2)) > 0.05:
+                base_real = round(iva / 0.13, 2)
+                exceso    = round(gra - base_real, 2)
+                if (
+                    fovial_cotrans > 0
+                    or abs(exceso - fovial_cotrans) <= 0.05
+                    or abs(exceso - (fovial_cotrans + iva)) <= 0.05
+                ):
+                    gra = base_real
+                    exe = max(exe, fovial_cotrans)
 
         gra = max(gra, 0.0)
         iva = max(iva, 0.0)
