@@ -544,6 +544,23 @@ def _get_vertex_client():
                 _vertex_client._api_client.location = None
             except Exception as auth_exc:
                 log.warning("No se pudo forzar auth por API key en Vertex: %s", auth_exc)
+            # Diagnóstico: deja constancia de los valores REALMENTE resueltos por el
+            # SDK tras la construcción, para identificar de dónde sale cualquier
+            # project/location residual que arme una ruta regional (us-central1).
+            try:
+                _ac = _vertex_client._api_client
+                log.warning(
+                    "Vertex DIAG → vertexai=%s project=%r location=%r api_key=%s "
+                    "base_url=%r api_version=%r",
+                    getattr(_ac, "vertexai", None),
+                    getattr(_ac, "project", None),
+                    getattr(_ac, "location", None),
+                    bool(getattr(_ac, "api_key", None)),
+                    getattr(getattr(_ac, "_http_options", None), "base_url", None),
+                    getattr(getattr(_ac, "_http_options", None), "api_version", None),
+                )
+            except Exception as diag_exc:
+                log.warning("Vertex DIAG falló: %s", diag_exc)
             log.info("Vertex AI Express inicializado (google-genai, modelo=%s)",
                      _VERTEX_MODEL)
         except ImportError:
