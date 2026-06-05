@@ -42,7 +42,9 @@ _BACKOFF_DELAYS    = [2, 4, 8]
 # ─── Configuración Vertex AI (motor prioritario) ─────────────────────────────
 _VERTEX_PROJECT  = "nomadic-sprite-440003-r7"
 _VERTEX_LOCATION = "us-central1"
-_VERTEX_MODEL    = "gemini-2.0-flash"
+# Modelo configurable vía secrets (VERTEX_MODEL) para poder probar versiones sin
+# redeploy. Default a la versión GA explícita, más estable en Vertex Express.
+_VERTEX_MODEL_DEFAULT = "gemini-2.0-flash-001"
 
 # Umbral de confianza por debajo del cual se levanta una alerta de revisión.
 _VISION_CONF_MIN   = 70
@@ -480,6 +482,17 @@ def _vertex_api_key() -> str:
             return v
     return ""
 
+
+def _vertex_model() -> str:
+    """Modelo de Vertex AI a usar. Configurable vía secrets/env VERTEX_MODEL."""
+    try:
+        v = st.secrets.get("VERTEX_MODEL", "")
+    except Exception:
+        v = ""
+    if not v:
+        v = os.environ.get("VERTEX_MODEL", "")
+    return v or _VERTEX_MODEL_DEFAULT
+
 # System prompt común a TODOS los extractores. Refuerza el mapeo milimétrico de
 # campos y deja la estructura JSON exacta en manos del prompt por tipo de DTE.
 _VERTEX_SYSTEM_PROMPT = (
@@ -562,7 +575,7 @@ def _get_vertex_client():
             except Exception as diag_exc:
                 log.warning("Vertex DIAG falló: %s", diag_exc)
             log.info("Vertex AI Express inicializado (google-genai, modelo=%s)",
-                     _VERTEX_MODEL)
+                     _vertex_model())
         except ImportError:
             _vertex_client = False
             _ultimo_error_vertex = "SDK google-genai no instalado."
@@ -617,7 +630,7 @@ def _vertex_set_error(exc) -> None:
     elif "permission" in msg.lower() or "403" in msg:
         _ultimo_error_vertex = "Sin permisos en Vertex AI Express (403)."
     elif "404" in msg or "not found" in msg.lower():
-        _ultimo_error_vertex = f"Modelo {_VERTEX_MODEL} no disponible en Vertex Express (404)."
+        _ultimo_error_vertex = f"Modelo {_vertex_model()} no disponible en Vertex Express (404)."
     else:
         _ultimo_error_vertex = f"Error de Vertex AI: {msg[:120]}"
     log.warning("Vertex AI error: %s", msg)
@@ -634,7 +647,7 @@ def _llamar_vertex(prompt: str) -> dict | None:
         return None
     try:
         response = client.models.generate_content(
-            model=_VERTEX_MODEL,
+            model=_vertex_model(),
             contents=prompt,
             config=_vertex_genconfig(),
         )
@@ -1056,7 +1069,7 @@ def _llamar_vertex_vision(prompt: str, img_b64: str) -> dict | None:
             mime_type="image/png",
         )
         response = client.models.generate_content(
-            model=_VERTEX_MODEL,
+            model=_vertex_model(),
             contents=[prompt, imagen],
             config=_vertex_genconfig(),
         )
@@ -1072,7 +1085,7 @@ def _llamar_vertex_vision(prompt: str, img_b64: str) -> dict | None:
         if "quota" in msg.lower() or "429" in msg or "resource_exhausted" in msg.lower():
             _ultimo_error_vision = "Cuota de Vertex AI agotada (visión) — usando respaldo Groq."
         elif "404" in msg or "not found" in msg.lower():
-            _ultimo_error_vision = f"Modelo {_VERTEX_MODEL} no disponible en Vertex Express (404)."
+            _ultimo_error_vision = f"Modelo {_vertex_model()} no disponible en Vertex Express (404)."
         else:
             _ultimo_error_vision = f"Error de Vertex AI (visión): {msg[:120]}"
         log.warning("Vertex visión error: %s", msg)
