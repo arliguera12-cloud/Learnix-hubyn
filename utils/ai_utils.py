@@ -564,6 +564,9 @@ def _get_vertex_client():
             # 2) API key → Gemini Developer API
             api_key = _vertex_api_key()
             if api_key:
+                for _ev in ("GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
+                            "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_APPLICATION_CREDENTIALS"):
+                    os.environ.pop(_ev, None)
                 _vertex_client = genai.Client(api_key=api_key)
                 log.info("Gemini Developer API inicializada (modelo=%s)", _vertex_model())
                 return _vertex_client
@@ -572,7 +575,6 @@ def _get_vertex_client():
             _vertex_client = False
             _ultimo_error_vertex = "Sin credenciales de Google AI (SA ni API key)."
             log.info("Google AI no disponible: sin credenciales")
-
         except ImportError:
             _vertex_client = False
             _ultimo_error_vertex = "SDK google-genai no instalado — usando Groq."
