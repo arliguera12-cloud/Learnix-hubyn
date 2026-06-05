@@ -1,24 +1,14 @@
 """
-Learnix Hub — AI Utils v4.0 (Vertex AI + Groq fallback).
+Learnix Hub — AI Utils v5.0 (Groq motor único + Google AI opcional).
 
-Motor PRIORITARIO:
-  - Vertex AI (Agent Platform), proyecto "nomadic-sprite-440003-r7"
-    Modelo: gemini-2.0-flash  (temperature=0.0, response_mime_type=JSON)
-    Garantiza la máxima precisión matemática y JSON estructurado.
+Motor PRINCIPAL: Groq Cloud
+  - Texto  : llama-3.3-70b-versatile
+  - Visión : meta-llama/llama-4-scout-17b-16e-instruct
+  - Circuit breaker INDEPENDIENTE para Groq
 
-Motor de RESPALDO (fallback):
-  - Texto  : llama-3.3-70b-versatile  (verificación/corrección de campos)
-  - Visión : meta-llama/llama-4-scout-17b-16e-instruct  (lee el PDF como imagen)
-
-Mejoras sobre v3.0:
-  - procesar_dte_con_gemini() usa Vertex AI de forma prioritaria; si la cuota
-    de Google falla o el SDK no está disponible, recae automáticamente en Groq.
-  - Capa de VISIÓN: renderiza el DTE como imagen y extrae TODOS los campos
-    (fechas, NIT, nombres, montos, sello, número de control) directamente de
-    lo que se ve, sin depender del orden del texto extraído ni de regex.
-    Resuelve PDFs con columnas mezcladas, layouts raros y PDFs escaneados.
-  - Circuit breaker compartido entre texto y visión (Groq).
-  - Misma interfaz pública que gemini_utils.py (compatibilidad total).
+Motor OPCIONAL (Google AI): se activa si GEMINI_API_KEY / VERTEX_API_KEY está
+configurada Y el SDK google-genai está instalado. Si falla al inicializarse o
+en cualquier llamada, se deshabilita silenciosamente SIN afectar el CB de Groq.
 """
 from __future__ import annotations
 import base64
@@ -54,10 +44,10 @@ _ultimo_error: str = ""
 _ultimo_audit: dict = {}
 _audit_lock = threading.Lock()
 
-# ─── Circuit Breaker ──────────────────────────────────────────────────────────
-# Evita que múltiples hilos sigan golpeando la API cuando está caída.
-_CB_THRESHOLD  = 5     # errores consecutivos antes de abrir el circuito
-_CB_TIMEOUT    = 60    # segundos en estado OPEN antes de intentar de nuevo
+# ─── Circuit Breaker (solo Groq) ─────────────────────────────────────────────
+# Los errores de Google AI NO afectan este CB — tienen su propio contador.
+_CB_THRESHOLD  = 5
+_CB_TIMEOUT    = 60
 
 _cb_lock   = threading.Lock()
 _cb_state  = {
@@ -68,15 +58,13 @@ _cb_state  = {
 
 
 def _cb_is_open() -> bool:
-    """Retorna True si el circuito está abierto (no enviar requests)."""
     with _cb_lock:
         if not _cb_state["open"]:
             return False
         if time.time() >= _cb_state["open_until"]:
-            # Half-open: deja pasar UN intento de prueba
             _cb_state["open"] = False
             _cb_state["errors"] = 0
-            log.info("Circuit breaker → HALF-OPEN, permitiendo prueba")
+            log.info("Circuit breaker Groq → HALF-OPEN, permitiendo prueba")
             return False
         return True
 
@@ -94,13 +82,12 @@ def _cb_on_failure() -> None:
             _cb_state["open"]       = True
             _cb_state["open_until"] = time.time() + _CB_TIMEOUT
             log.warning(
-                "Circuit breaker → OPEN tras %d errores. Pausa de %ds.",
+                "Circuit breaker Groq → OPEN tras %d errores. Pausa de %ds.",
                 _cb_state["errors"], _CB_TIMEOUT,
             )
 
 
 def circuit_breaker_status() -> dict:
-    """Estado actual del circuit breaker (para mostrar en sidebar/UI)."""
     with _cb_lock:
         return {
             "open"      : _cb_state["open"],
@@ -535,38 +522,19 @@ def _get_vertex_client():
             return _vertex_client
         try:
             from google import genai
-            # La API key del proyecto está restringida a la "Gemini API"
-            # (generativelanguage.googleapis.com), NO a "Agent Platform"/Vertex.
-            # Por eso usamos el cliente de la Gemini Developer API (vertexai=False):
-            # autenticación SOLO con API key, sin project/location ni ADC, y el
-            # modelo se resuelve directo (sin rutas projects/.../locations/...).
-            # Evitamos que variables de entorno de GCP fuercen el modo Vertex.
             for _ev in ("GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
                         "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_APPLICATION_CREDENTIALS"):
                 os.environ.pop(_ev, None)
             _vertex_client = genai.Client(api_key=api_key)
-            # Diagnóstico: valores resueltos por el SDK tras construir el cliente.
-            try:
-                _ac = _vertex_client._api_client
-                log.warning(
-                    "Gemini DIAG → vertexai=%s api_key=%s base_url=%r api_version=%r",
-                    getattr(_ac, "vertexai", None),
-                    bool(getattr(_ac, "api_key", None)),
-                    getattr(getattr(_ac, "_http_options", None), "base_url", None),
-                    getattr(getattr(_ac, "_http_options", None), "api_version", None),
-                )
-            except Exception as diag_exc:
-                log.warning("Gemini DIAG falló: %s", diag_exc)
-            log.info("Gemini API inicializada (google-genai, modelo=%s)",
-                     _vertex_model())
+            log.info("Google AI inicializado (modelo=%s)", _vertex_model())
         except ImportError:
             _vertex_client = False
-            _ultimo_error_vertex = "SDK google-genai no instalado."
-            log.info("Vertex Express no disponible: SDK ausente")
+            _ultimo_error_vertex = "SDK google-genai no instalado — usando Groq."
+            log.info("Google AI no disponible: SDK ausente")
         except Exception as exc:
             _vertex_client = False
-            _ultimo_error_vertex = f"No se pudo inicializar Vertex Express: {str(exc)[:120]}"
-            log.warning("Vertex Express init falló: %s", exc)
+            _ultimo_error_vertex = f"Google AI init falló: {str(exc)[:120]}"
+            log.warning("Google AI init falló: %s", exc)
     return _vertex_client
 
 
@@ -606,24 +574,22 @@ def _vertex_parse(response) -> dict | None:
 
 
 def _vertex_set_error(exc) -> None:
-    global _ultimo_error_vertex
+    """Registra el error de Google AI y deshabilita el cliente si es auth/config."""
+    global _ultimo_error_vertex, _vertex_client
     msg = str(exc)
-    if "quota" in msg.lower() or "429" in msg or "resource_exhausted" in msg.lower():
-        _ultimo_error_vertex = "Cuota de Vertex AI agotada — usando respaldo Groq."
-    elif "permission" in msg.lower() or "403" in msg:
-        _ultimo_error_vertex = "Sin permisos en Vertex AI Express (403)."
-    elif "404" in msg or "not found" in msg.lower():
-        _ultimo_error_vertex = f"Modelo {_vertex_model()} no disponible en Vertex Express (404)."
-    else:
-        _ultimo_error_vertex = f"Error de Vertex AI: {msg[:120]}"
-    log.warning("Vertex AI error: %s", msg)
+    _ultimo_error_vertex = f"Google AI no disponible: {msg[:120]}"
+    log.warning("Google AI error (no afecta CB de Groq): %s", msg)
+    # Deshabilita permanentemente si es error de autenticación o configuración
+    # para no reintentar en cada PDF y no ensuciar los logs.
+    if any(k in msg for k in ("401", "403", "404", "UNAUTHENTICATED",
+                               "PERMISSION_DENIED", "NOT_FOUND",
+                               "ACCESS_TOKEN_TYPE_UNSUPPORTED")):
+        _vertex_client = False
+        log.warning("Google AI deshabilitado permanentemente (error de auth/config).")
 
 
 def _llamar_vertex(prompt: str) -> dict | None:
-    """
-    Llama a Vertex AI Express (gemini-2.0-flash) forzando JSON y temperature=0.0.
-    Devuelve el dict parseado o None si falla (para recaer en Groq).
-    """
+    """Llama a Google AI; devuelve None sin tocar el CB de Groq si falla."""
     global _ultimo_error_vertex
     client = _get_vertex_client()
     if not client:
@@ -638,8 +604,8 @@ def _llamar_vertex(prompt: str) -> dict | None:
         _ultimo_error_vertex = ""
         return resultado
     except json.JSONDecodeError as e:
-        _ultimo_error_vertex = f"Vertex AI devolvió JSON inválido: {e}"
-        log.warning("Vertex AI JSON error: %s", e)
+        _ultimo_error_vertex = f"Google AI devolvió JSON inválido: {e}"
+        log.warning("Google AI JSON error: %s", e)
         return None
     except Exception as exc:
         _vertex_set_error(exc)
@@ -1060,18 +1026,20 @@ def _llamar_vertex_vision(prompt: str, img_b64: str) -> dict | None:
         _ultimo_error_vision = ""
         return resultado
     except json.JSONDecodeError as e:
-        _ultimo_error_vision = f"Vertex visión devolvió JSON inválido: {e}"
-        log.warning("Vertex visión JSON error: %s", e)
+        _ultimo_error_vision = f"Google AI visión devolvió JSON inválido: {e}"
+        log.warning("Google AI visión JSON error: %s", e)
         return None
     except Exception as exc:
         msg = str(exc)
-        if "quota" in msg.lower() or "429" in msg or "resource_exhausted" in msg.lower():
-            _ultimo_error_vision = "Cuota de Vertex AI agotada (visión) — usando respaldo Groq."
-        elif "404" in msg or "not found" in msg.lower():
-            _ultimo_error_vision = f"Modelo {_vertex_model()} no disponible en Vertex Express (404)."
-        else:
-            _ultimo_error_vision = f"Error de Vertex AI (visión): {msg[:120]}"
-        log.warning("Vertex visión error: %s", msg)
+        _ultimo_error_vision = f"Google AI visión no disponible: {msg[:120]}"
+        log.warning("Google AI visión error (no afecta CB de Groq): %s", msg)
+        # Deshabilita permanentemente si es error de auth/config
+        if any(k in msg for k in ("401", "403", "404", "UNAUTHENTICATED",
+                                   "PERMISSION_DENIED", "NOT_FOUND",
+                                   "ACCESS_TOKEN_TYPE_UNSUPPORTED")):
+            global _vertex_client
+            _vertex_client = False
+            log.warning("Google AI deshabilitado permanentemente (visión).")
         return None
 
 
