@@ -535,46 +535,29 @@ def _get_vertex_client():
             return _vertex_client
         try:
             from google import genai
-            # En Streamlit Cloud el entorno suele traer GOOGLE_CLOUD_PROJECT /
-            # GOOGLE_CLOUD_LOCATION (y a veces GOOGLE_APPLICATION_CREDENTIALS) de
-            # algún despliegue previo de GCP. El SDK los toma como implícitos y, si
-            # project o location quedan seteados, arma la ruta
-            # projects/<id>/locations/us-central1/... e intenta resolver un token
-            # vía ADC, ignorando la API key (→ 404 NOT_FOUND o "Could not resolve
-            # project using application default credentials").
-            # Vertex AI Express sirve los modelos en 'global' y se autentica SOLO
-            # con la API key, así que retiramos esas variables de entorno antes de
-            # construir el cliente para que NO se deriven.
+            # La API key del proyecto está restringida a la "Gemini API"
+            # (generativelanguage.googleapis.com), NO a "Agent Platform"/Vertex.
+            # Por eso usamos el cliente de la Gemini Developer API (vertexai=False):
+            # autenticación SOLO con API key, sin project/location ni ADC, y el
+            # modelo se resuelve directo (sin rutas projects/.../locations/...).
+            # Evitamos que variables de entorno de GCP fuercen el modo Vertex.
             for _ev in ("GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
                         "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_APPLICATION_CREDENTIALS"):
                 os.environ.pop(_ev, None)
-            # Modo Vertex AI Express: autenticación por API key.
-            _vertex_client = genai.Client(vertexai=True, api_key=api_key)
-            # Cinturón y tirantes: forzamos project/location a None en el cliente
-            # interno por si alguna variable se reintroduce en tiempo de ejecución.
-            try:
-                _vertex_client._api_client.project = None
-                _vertex_client._api_client.location = None
-            except Exception as auth_exc:
-                log.warning("No se pudo forzar auth por API key en Vertex: %s", auth_exc)
-            # Diagnóstico: deja constancia de los valores REALMENTE resueltos por el
-            # SDK tras la construcción, para identificar de dónde sale cualquier
-            # project/location residual que arme una ruta regional (us-central1).
+            _vertex_client = genai.Client(api_key=api_key)
+            # Diagnóstico: valores resueltos por el SDK tras construir el cliente.
             try:
                 _ac = _vertex_client._api_client
                 log.warning(
-                    "Vertex DIAG → vertexai=%s project=%r location=%r api_key=%s "
-                    "base_url=%r api_version=%r",
+                    "Gemini DIAG → vertexai=%s api_key=%s base_url=%r api_version=%r",
                     getattr(_ac, "vertexai", None),
-                    getattr(_ac, "project", None),
-                    getattr(_ac, "location", None),
                     bool(getattr(_ac, "api_key", None)),
                     getattr(getattr(_ac, "_http_options", None), "base_url", None),
                     getattr(getattr(_ac, "_http_options", None), "api_version", None),
                 )
             except Exception as diag_exc:
-                log.warning("Vertex DIAG falló: %s", diag_exc)
-            log.info("Vertex AI Express inicializado (google-genai, modelo=%s)",
+                log.warning("Gemini DIAG falló: %s", diag_exc)
+            log.info("Gemini API inicializada (google-genai, modelo=%s)",
                      _vertex_model())
         except ImportError:
             _vertex_client = False
