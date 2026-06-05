@@ -34,7 +34,7 @@ _VERTEX_PROJECT  = "nomadic-sprite-440003-r7"
 _VERTEX_LOCATION = "us-central1"
 # Modelo configurable vía secrets (VERTEX_MODEL) para poder probar versiones sin
 # redeploy. Default a la versión GA explícita, más estable en Vertex Express.
-_VERTEX_MODEL_DEFAULT = "gemini-2.0-flash-001"  # versión estable en Vertex AI
+_VERTEX_MODEL_DEFAULT = "gemini-2.5-flash"  # modelo disponible en Agent Platform
 
 # Umbral de confianza por debajo del cual se levanta una alerta de revisión.
 _VISION_CONF_MIN   = 70
