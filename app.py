@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from styles import DARK_PRO_CSS
 from utils.supabase_client import login, logout
-from utils.ai_utils import groq_disponible, gemini_ultimo_error, circuit_breaker_status, vertex_disponible
+from utils.ai_utils import groq_disponible, gemini_ultimo_error, circuit_breaker_status, vertex_disponible, vertex_ultimo_error
 from components.ui_components import (
     sidebar_logo,
     sidebar_cliente_card,
@@ -205,7 +205,7 @@ with st.sidebar:
                 "<span style='color:rgba(255,255,255,0.55);font-size:0.70rem;'>"
                 "👁️ Visión — llama-4-scout-17b</span>"
                 "<span style='color:rgba(251,191,36,0.75);font-size:0.68rem;'>"
-                "⚠️ Vertex AI no disponible — revisa credenciales</span>"
+                f"⚠️ Vertex AI no disponible: {vertex_ultimo_error() or 'revisa credenciales'}</span>"
                 "</div></div>",
                 unsafe_allow_html=True,
             )
