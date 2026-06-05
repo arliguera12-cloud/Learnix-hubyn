@@ -98,6 +98,7 @@ def render_drive_import(prefix: str) -> list:
                         st.info("No se encontraron PDF/JSON en esa carpeta.")
                     else:
                         st.success(f"Se encontraron {len(resultados)} archivo(s).")
+                        st.rerun()
                 except DriveError as e:
                     st.session_state[k_res] = []
                     st.error(str(e))
@@ -165,6 +166,7 @@ def render_drive_import(prefix: str) -> list:
                     f"✅ {len(archivos_ok)} archivo(s) listos. "
                     "Usa el botón 'Procesar' de abajo."
                 )
+                st.rerun()
             if errores:
                 st.warning(
                     f"⚠️ {len(errores)} archivo(s) no se pudieron descargar."
