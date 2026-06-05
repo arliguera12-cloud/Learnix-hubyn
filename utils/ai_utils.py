@@ -1,16 +1,23 @@
 """
-Learnix Hub — AI Utils v3.0 (Groq Cloud).
+Learnix Hub — AI Utils v4.0 (Vertex AI + Groq fallback).
 
-Modelos:
+Motor PRIORITARIO:
+  - Vertex AI (Agent Platform), proyecto "nomadic-sprite-440003-r7"
+    Modelo: gemini-1.5-flash  (temperature=0.0, response_mime_type=JSON)
+    Garantiza la máxima precisión matemática y JSON estructurado.
+
+Motor de RESPALDO (fallback):
   - Texto  : llama-3.3-70b-versatile  (verificación/corrección de campos)
   - Visión : meta-llama/llama-4-scout-17b-16e-instruct  (lee el PDF como imagen)
 
-Mejoras sobre v2.0:
+Mejoras sobre v3.0:
+  - procesar_dte_con_gemini() usa Vertex AI de forma prioritaria; si la cuota
+    de Google falla o el SDK no está disponible, recae automáticamente en Groq.
   - Capa de VISIÓN: renderiza el DTE como imagen y extrae TODOS los campos
     (fechas, NIT, nombres, montos, sello, número de control) directamente de
     lo que se ve, sin depender del orden del texto extraído ni de regex.
     Resuelve PDFs con columnas mezcladas, layouts raros y PDFs escaneados.
-  - Circuit breaker compartido entre texto y visión.
+  - Circuit breaker compartido entre texto y visión (Groq).
   - Misma interfaz pública que gemini_utils.py (compatibilidad total).
 """
 from __future__ import annotations
@@ -31,6 +38,11 @@ _GROQ_MODEL        = "llama-3.3-70b-versatile"
 _GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 _MAX_RETRIES       = 3
 _BACKOFF_DELAYS    = [2, 4, 8]
+
+# ─── Configuración Vertex AI (motor prioritario) ─────────────────────────────
+_VERTEX_PROJECT  = "nomadic-sprite-440003-r7"
+_VERTEX_LOCATION = "us-central1"
+_VERTEX_MODEL    = "gemini-1.5-flash"
 
 # Umbral de confianza por debajo del cual se levanta una alerta de revisión.
 _VISION_CONF_MIN   = 70
@@ -439,6 +451,129 @@ Estructura requerida:
 }}"""
 
 
+# ─── Motor PRIORITARIO: Vertex AI (Agent Platform) ───────────────────────────
+# Vertex AI es el primer intento porque fuerza temperature=0.0 y
+# response_mime_type=application/json, lo que maximiza la precisión matemática
+# y garantiza un JSON estructurado válido. Si la cuota de Google falla o el SDK
+# no está instalado, procesar_dte_con_gemini() recae automáticamente en Groq.
+
+_ultimo_error_vertex: str = ""
+
+# Estado de inicialización de Vertex (lazy, una sola vez por proceso).
+#   None  → aún no se intentó
+#   True  → vertexai.init() exitoso
+#   False → SDK ausente o init fallido
+_vertex_ready: bool | None = None
+_vertex_lock = threading.Lock()
+
+# System prompt común a TODOS los extractores. Refuerza el mapeo milimétrico de
+# campos y deja la estructura JSON exacta en manos del prompt por tipo de DTE.
+_VERTEX_SYSTEM_PROMPT = (
+    "Eres un AUDITOR FISCAL SENIOR y extractor de datos de DTEs de El Salvador "
+    "(Documentos Tributarios Electrónicos, Manual de IVA DGII). Tu única salida "
+    "es un objeto JSON válido, sin texto adicional ni bloques Markdown.\n"
+    "REGLAS DE PRECISIÓN MILIMÉTRICA:\n"
+    "  1. Mapea cada campo EXACTAMENTE a la etiqueta correcta del documento; "
+    "nunca confundas EMISOR con RECEPTOR ni proveedor con cliente.\n"
+    "  2. NIT: 14 dígitos sin guiones ni espacios. DUI: 9 dígitos. Si un "
+    "identificador no cumple el largo exacto, devuélvelo como null.\n"
+    "  3. Fechas SIEMPRE en formato DD/MM/YYYY.\n"
+    "  4. Montos: usa punto decimal, sin separador de miles, máxima precisión "
+    "matemática; copia los dígitos literalmente, no redondees ni inventes.\n"
+    "  5. Si un valor no aparece o es ilegible, devuelve null; NUNCA inventes "
+    "datos ni reutilices los del cliente activo para el contraparte.\n"
+    "  6. Respeta al pie de la letra la estructura JSON que se solicita a "
+    "continuación, incluyendo todos los nombres de clave."
+)
+
+
+def _vertex_disponible() -> bool:
+    """Inicializa Vertex AI una sola vez y reporta si quedó operativo."""
+    global _vertex_ready, _ultimo_error_vertex
+    if _vertex_ready is not None:
+        return _vertex_ready
+
+    with _vertex_lock:
+        if _vertex_ready is not None:
+            return _vertex_ready
+        try:
+            import vertexai
+            from vertexai.generative_models import GenerativeModel  # noqa: F401
+            vertexai.init(project=_VERTEX_PROJECT, location=_VERTEX_LOCATION)
+            _vertex_ready = True
+            log.info("Vertex AI inicializado (project=%s, location=%s)",
+                     _VERTEX_PROJECT, _VERTEX_LOCATION)
+        except ImportError:
+            _vertex_ready = False
+            _ultimo_error_vertex = "SDK de Vertex AI no instalado (google-cloud-aiplatform)."
+            log.info("Vertex AI no disponible: SDK ausente")
+        except Exception as exc:
+            _vertex_ready = False
+            _ultimo_error_vertex = f"No se pudo inicializar Vertex AI: {str(exc)[:120]}"
+            log.warning("Vertex AI init falló: %s", exc)
+    return _vertex_ready
+
+
+def vertex_disponible() -> bool:
+    """True si el SDK de Vertex AI está instalado y la inicialización fue exitosa."""
+    return _vertex_disponible()
+
+
+def vertex_ultimo_error() -> str:
+    return _ultimo_error_vertex
+
+
+def _llamar_vertex(prompt: str) -> dict | None:
+    """
+    Llama a Vertex AI (gemini-1.5-flash) forzando JSON estructurado y
+    temperature=0.0. Devuelve el dict parseado o None si falla (para que el
+    llamador recaiga en Groq).
+    """
+    global _ultimo_error_vertex
+    if not _vertex_disponible():
+        return None
+
+    try:
+        from vertexai.generative_models import GenerativeModel
+
+        generation_config = {
+            "temperature": 0.0,              # Forzar máxima precisión matemática
+            "response_mime_type": "application/json",
+        }
+
+        model = GenerativeModel(
+            _VERTEX_MODEL,
+            system_instruction=_VERTEX_SYSTEM_PROMPT,
+        )
+        response = model.generate_content(
+            prompt,
+            generation_config=generation_config,
+        )
+
+        raw = (response.text or "").strip()
+        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
+        raw = re.sub(r'\s*```\s*$', '', raw)
+
+        resultado = json.loads(raw)
+        _ultimo_error_vertex = ""
+        return resultado
+
+    except json.JSONDecodeError as e:
+        _ultimo_error_vertex = f"Vertex AI devolvió JSON inválido: {e}"
+        log.warning("Vertex AI JSON error: %s", e)
+        return None
+    except Exception as exc:
+        msg = str(exc)
+        if "quota" in msg.lower() or "429" in msg or "resource_exhausted" in msg.lower():
+            _ultimo_error_vertex = "Cuota de Vertex AI agotada — usando respaldo Groq."
+        elif "permission" in msg.lower() or "403" in msg:
+            _ultimo_error_vertex = "Sin permisos en el proyecto Vertex AI (403)."
+        else:
+            _ultimo_error_vertex = f"Error de Vertex AI: {msg[:120]}"
+        log.warning("Vertex AI error: %s", msg)
+        return None
+
+
 # ─── Llamada central a Groq (con circuit breaker) ────────────────────────────
 
 def _llamar_groq(prompt: str) -> dict | None:
@@ -727,12 +862,15 @@ def procesar_dte_con_gemini(
     contexto_receptor: dict,
 ) -> tuple[dict, list[str]]:
     """
-    Verificador universal de DTEs con Groq (llama-3.3-70b-versatile).
+    Verificador universal de DTEs.
+
+    Motor PRIORITARIO: Vertex AI (gemini-1.5-flash, temperature=0.0, JSON mode)
+    del proyecto "nomadic-sprite-440003-r7", para máxima precisión.
+    Motor de RESPALDO: Groq (llama-3.3-70b-versatile) con circuit breaker, que
+    se usa solo si Vertex AI no está disponible o falla (p. ej. cuota agotada).
+
     Mantiene la misma firma que la versión original para compatibilidad total.
     """
-    if not gemini_disponible():
-        return {}, []
-
     nit_ctx = re.sub(r'[^0-9]', '', str(contexto_receptor.get("nit", "")))
     nom_ctx = str(contexto_receptor.get("nombre", "")).strip().upper()
 
@@ -748,8 +886,22 @@ def procesar_dte_con_gemini(
         log.warning("procesar_dte_con_gemini: tipo_dte desconocido '%s'", tipo_dte)
         return {}, []
 
-    prompt    = build_prompt(texto_pdf, campos_actuales, nit_ctx, nom_ctx)
-    resultado = _llamar_groq(prompt)
+    prompt = build_prompt(texto_pdf, campos_actuales, nit_ctx, nom_ctx)
+
+    # 1) Intento prioritario con Vertex AI.
+    resultado = None
+    if _vertex_disponible():
+        resultado = _llamar_vertex(prompt)
+        if resultado is None:
+            log.info("Vertex AI no devolvió resultado, recayendo en Groq: %s",
+                     _ultimo_error_vertex)
+
+    # 2) Fallback a Groq (con circuit breaker) si Vertex no estuvo disponible
+    #    o devolvió un resultado vacío/erróneo.
+    if resultado is None:
+        if not gemini_disponible():
+            return {}, []
+        resultado = _llamar_groq(prompt)
 
     if resultado is None:
         return {}, []
