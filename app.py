@@ -187,7 +187,7 @@ with st.sidebar:
                 "<strong style='color:#4285F4;'>Vertex AI activo (auditor)</strong>"
                 "<div style='margin-top:6px;display:flex;flex-direction:column;gap:4px;'>"
                 "<span style='color:rgba(255,255,255,0.55);font-size:0.70rem;'>"
-                "🔍 Auditoría texto + visión — gemini-1.5-flash</span>"
+                "🔍 Auditoría texto + visión — gemini-2.0-flash</span>"
                 "<span style='color:rgba(255,255,255,0.45);font-size:0.68rem;'>"
                 f"↩️ Respaldo Groq: {'activo' if _groq_ok else 'inactivo'}</span>"
                 "</div></div>",

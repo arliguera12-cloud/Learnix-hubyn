@@ -3,7 +3,7 @@ Learnix Hub — AI Utils v4.0 (Vertex AI + Groq fallback).
 
 Motor PRIORITARIO:
   - Vertex AI (Agent Platform), proyecto "nomadic-sprite-440003-r7"
-    Modelo: gemini-1.5-flash  (temperature=0.0, response_mime_type=JSON)
+    Modelo: gemini-2.0-flash  (temperature=0.0, response_mime_type=JSON)
     Garantiza la máxima precisión matemática y JSON estructurado.
 
 Motor de RESPALDO (fallback):
@@ -42,7 +42,7 @@ _BACKOFF_DELAYS    = [2, 4, 8]
 # ─── Configuración Vertex AI (motor prioritario) ─────────────────────────────
 _VERTEX_PROJECT  = "nomadic-sprite-440003-r7"
 _VERTEX_LOCATION = "us-central1"
-_VERTEX_MODEL    = "gemini-1.5-flash"
+_VERTEX_MODEL    = "gemini-2.0-flash"
 
 # Umbral de confianza por debajo del cual se levanta una alerta de revisión.
 _VISION_CONF_MIN   = 70
@@ -546,7 +546,7 @@ def vertex_ultimo_error() -> str:
 
 def _llamar_vertex(prompt: str) -> dict | None:
     """
-    Llama a Vertex AI (gemini-1.5-flash) forzando JSON estructurado y
+    Llama a Vertex AI (gemini-2.0-flash) forzando JSON estructurado y
     temperature=0.0. Devuelve el dict parseado o None si falla (para que el
     llamador recaiga en Groq).
     """
@@ -885,7 +885,7 @@ def procesar_dte_con_gemini(
     """
     Verificador universal de DTEs.
 
-    Motor PRIORITARIO: Vertex AI (gemini-1.5-flash, temperature=0.0, JSON mode)
+    Motor PRIORITARIO: Vertex AI (gemini-2.0-flash, temperature=0.0, JSON mode)
     del proyecto "nomadic-sprite-440003-r7", para máxima precisión.
     Motor de RESPALDO: Groq (llama-3.3-70b-versatile) con circuit breaker, que
     se usa solo si Vertex AI no está disponible o falla (p. ej. cuota agotada).
@@ -985,7 +985,7 @@ def vision_disponible() -> bool:
 
 def _llamar_vertex_vision(prompt: str, img_b64: str) -> dict | None:
     """
-    Vertex AI (gemini-1.5-flash, multimodal) actúa como AUDITOR: lee el DTE como
+    Vertex AI (gemini-2.0-flash, multimodal) actúa como AUDITOR: lee el DTE como
     imagen, lo comprende y devuelve los campos rectificados en JSON. Devuelve
     None si falla para que el llamador recaiga en la visión de Groq.
     """
