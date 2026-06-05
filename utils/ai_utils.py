@@ -42,7 +42,7 @@ _BACKOFF_DELAYS    = [2, 4, 8]
 # ─── Configuración Vertex AI (motor prioritario) ─────────────────────────────
 _VERTEX_PROJECT  = "nomadic-sprite-440003-r7"
 _VERTEX_LOCATION = "us-central1"
-_VERTEX_MODEL    = "gemini-2.0-flash"
+_VERTEX_MODEL    = "publishers/google/models/gemini-2.0-flash"
 
 # Umbral de confianza por debajo del cual se levanta una alerta de revisión.
 _VISION_CONF_MIN   = 70
@@ -524,15 +524,7 @@ def _get_vertex_client():
             from google import genai
             # Modo Vertex AI Express: autenticación por API key.
             _vertex_client = genai.Client(vertexai=True, api_key=api_key)
-            # Vertex Express publica los modelos en la región 'global', pero el
-            # SDK arma la ruta con us-central1 (→ 404). No se puede pasar
-            # location junto con api_key (el SDK lo prohíbe), así que la
-            # forzamos en el cliente interno tras construirlo.
-            try:
-                _vertex_client._api_client.location = "global"
-            except Exception as loc_exc:
-                log.warning("No se pudo fijar location=global en Vertex: %s", loc_exc)
-            log.info("Vertex AI Express inicializado (google-genai, modelo=%s, location=global)",
+            log.info("Vertex AI Express inicializado (google-genai, modelo=%s)",
                      _VERTEX_MODEL)
         except ImportError:
             _vertex_client = False
@@ -941,7 +933,7 @@ def procesar_dte_con_gemini(
     if _vertex_disponible():
         resultado = _llamar_vertex(prompt)
         if resultado is not None:
-            motor_usado = f"vertex-ai/{_VERTEX_MODEL}"
+            motor_usado = "vertex-ai/gemini-2.0-flash"
         else:
             log.info("Vertex AI no devolvió resultado, recayendo en Groq: %s",
                      _ultimo_error_vertex)
@@ -1384,7 +1376,7 @@ def extraer_dte_con_vision(
     if _vertex_disponible():
         resultado = _llamar_vertex_vision(prompt, img_b64)
         if resultado is not None:
-            motor_vision = f"vertex-ai/{_VERTEX_MODEL}"
+            motor_vision = "vertex-ai/gemini-2.0-flash"
         else:
             log.info("Vertex visión sin resultado, recayendo en Groq: %s",
                      _ultimo_error_vision)
