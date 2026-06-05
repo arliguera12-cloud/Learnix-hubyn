@@ -524,6 +524,17 @@ def _get_vertex_client():
             from google import genai
             # Modo Vertex AI Express: autenticación por API key.
             _vertex_client = genai.Client(vertexai=True, api_key=api_key)
+            # En Streamlit Cloud el entorno puede traer GOOGLE_CLOUD_PROJECT /
+            # GOOGLE_CLOUD_LOCATION (o credenciales de service account) que el SDK
+            # toma como implícitos. Si project o location quedan seteados, el SDK
+            # intenta resolver un token vía ADC en cada request
+            # ("Could not resolve project using application default credentials.")
+            # ignorando la API key. Los anulamos para forzar la ruta x-goog-api-key.
+            try:
+                _vertex_client._api_client.project = None
+                _vertex_client._api_client.location = None
+            except Exception as auth_exc:
+                log.warning("No se pudo forzar auth por API key en Vertex: %s", auth_exc)
             log.info("Vertex AI Express inicializado (google-genai, modelo=%s)",
                      _VERTEX_MODEL)
         except ImportError:
