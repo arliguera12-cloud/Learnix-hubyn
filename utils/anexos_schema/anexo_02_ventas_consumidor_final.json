@@ -1,0 +1,310 @@
+{
+  "informe": "F07",
+  "anexo": 2,
+  "nombre_anexo": "Detalle de Ventas a Consumidor Final",
+  "numero_anexo_valor_fijo": "2",
+  "configuracion_archivo": {
+    "formato": "CSV",
+    "separador": ";",
+    "codificacion": "UTF-8",
+    "incluye_encabezados": false,
+    "formato_celdas": "Texto"
+  },
+  "instrucciones_llenado": {
+    "agrupacion_dte": "Los DTEs de consumidor final se agrupan por DÍA. Una fila por día, no por documento individual.",
+    "cuando_monto_no_aplica": "Colocar 0.00",
+    "permitir_negativos": "Solo para documentos anulados/invalidados (Art. 111 Código Tributario)",
+    "ventas_gravadas_incluyen_iva": "Las ventas gravadas locales (col N) se detallan CON IVA incluido",
+    "fuente_datos": {
+      "clase_documento": "Para DTEs siempre '4'",
+      "tipo_documento": "01=Factura CF, 02=Factura Simplificada, 10=Tiquetes, 11=Factura Exportación",
+      "numero_resolucion_dte": "Colocar 'N/A' (los DTE se agrupan por día)",
+      "serie_documento_dte": "Colocar 'N/A' (los DTE se agrupan por día)",
+      "control_interno_del_dte": "Colocar 'N/A' (los DTE se agrupan por día)",
+      "control_interno_al_dte": "Colocar 'N/A' (los DTE se agrupan por día)",
+      "numero_doc_del_dte": "Código de generación del PRIMER DTE emitido en el día",
+      "numero_doc_al_dte": "Código de generación del ÚLTIMO DTE emitido en el día"
+    },
+    "regla_impreso_tiquetes": {
+      "col_F": "Igual al valor de col H",
+      "col_G": "Igual al valor de col I"
+    },
+    "columnas_renta_U_V": "Obligatorias desde Enero 2025. Para periodos anteriores colocar '0' en ambas."
+  },
+  "estructura_columnas": [
+    {
+      "columna": "A",
+      "campo": "fecha_emision",
+      "tipo": "Texto",
+      "formato": "DD/MM/AAAA",
+      "longitud_exacta": 10,
+      "obligatorio": true,
+      "descripcion": "Fecha de emisión. Para DTE: fecha del día agrupado. Puede incluir docs de hasta 3 periodos anteriores (Art. 111 CT)."
+    },
+    {
+      "columna": "B",
+      "campo": "clase_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 1,
+      "obligatorio": true,
+      "valores_permitidos": ["1", "2", "4"],
+      "mapeo_valores": {
+        "1": "Impreso por Imprenta o Tiquetes",
+        "2": "Formulario Único",
+        "4": "Documento Tributario Electrónico DTE"
+      }
+    },
+    {
+      "columna": "C",
+      "campo": "tipo_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 2,
+      "obligatorio": true,
+      "valores_permitidos": ["01", "02", "10", "11"],
+      "mapeo_valores": {
+        "01": "Factura de Consumidor Final",
+        "02": "Factura de Venta Simplificada",
+        "10": "Tiquetes de Máquina Registradora",
+        "11": "Factura de Exportación"
+      }
+    },
+    {
+      "columna": "D",
+      "campo": "numero_resolucion",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Si col B = '4': colocar 'N/A'.",
+      "descripcion": "Número de resolución autorizado por la AT."
+    },
+    {
+      "columna": "E",
+      "campo": "serie_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Si col B = '4': colocar 'N/A'.",
+      "descripcion": "Serie de documento autorizada por la AT."
+    },
+    {
+      "columna": "F",
+      "campo": "numero_control_interno_del",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Si col B = '4': colocar 'N/A'.",
+      "regla_impreso": "Si col B = '1': igual al valor de col H.",
+      "descripcion": "Número correlativo donde inicia el rango (Formulario Único)."
+    },
+    {
+      "columna": "G",
+      "campo": "numero_control_interno_al",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Si col B = '4': colocar 'N/A'.",
+      "regla_impreso": "Si col B = '1': igual al valor de col I.",
+      "descripcion": "Número correlativo donde termina el rango (Formulario Único)."
+    },
+    {
+      "columna": "H",
+      "campo": "numero_documento_del",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Código de generación del PRIMER DTE emitido en la fecha agrupada.",
+      "regla_impreso": "Si col B = '1': igual al valor de col F.",
+      "descripcion": "Número de documento inicial del rango del día."
+    },
+    {
+      "columna": "I",
+      "campo": "numero_documento_al",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Código de generación del ÚLTIMO DTE emitido en la fecha agrupada.",
+      "regla_impreso": "Si col B = '1': igual al valor de col G.",
+      "descripcion": "Número de documento final del rango del día."
+    },
+    {
+      "columna": "J",
+      "campo": "numero_maquina_registradora",
+      "tipo": "Texto",
+      "longitud_maxima": 14,
+      "obligatorio": "Condicional",
+      "descripcion": "Solo cuando se emiten tiquetes. Para DTEs y otros: dejar en BLANCO (no colocar cero).",
+      "valor_dte": ""
+    },
+    {
+      "columna": "K",
+      "campo": "ventas_exentas",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00"
+    },
+    {
+      "columna": "L",
+      "campo": "ventas_internas_exentas_no_proporcionalidad",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00",
+      "descripcion": "Ventas internas exentas no sujetas a proporcionalidad (Decreto 357)."
+    },
+    {
+      "columna": "M",
+      "campo": "ventas_no_sujetas",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00"
+    },
+    {
+      "columna": "N",
+      "campo": "ventas_gravadas_locales",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00",
+      "descripcion": "Ventas gravadas CON IVA incluido."
+    },
+    {
+      "columna": "O",
+      "campo": "exportaciones_dentro_centroamerica",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00",
+      "descripcion": "Exportaciones a Guatemala, Honduras, Nicaragua, Costa Rica."
+    },
+    {
+      "columna": "P",
+      "campo": "exportaciones_fuera_centroamerica",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00"
+    },
+    {
+      "columna": "Q",
+      "campo": "exportaciones_servicios",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00"
+    },
+    {
+      "columna": "R",
+      "campo": "ventas_zonas_francas_dpa",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00",
+      "descripcion": "Ventas a Zonas Francas y DPA (tasa cero)."
+    },
+    {
+      "columna": "S",
+      "campo": "ventas_cuenta_terceros_no_domiciliados",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00"
+    },
+    {
+      "columna": "T",
+      "campo": "total_ventas",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true
+    },
+    {
+      "columna": "U",
+      "campo": "tipo_operacion_renta",
+      "tipo": "Texto",
+      "longitud_maxima": 2,
+      "obligatorio": true,
+      "vigente_desde": "Enero 2025",
+      "antes_enero_2025": "Colocar '0'",
+      "valores_permitidos": ["1", "2", "3", "4", "12", "13"],
+      "mapeo_valores": {
+        "1": "Gravada",
+        "2": "No Gravada o Exento",
+        "3": "Excluido o no Constituye Renta",
+        "4": "Mixta",
+        "12": "Ingresos sujetos de retención en F14 consolidados en F910",
+        "13": "Sujetos pasivos excluidos (art. 6 LISR) o ingresos sin hecho generador ISR"
+      }
+    },
+    {
+      "columna": "V",
+      "campo": "tipo_ingreso_renta",
+      "tipo": "Texto",
+      "longitud_maxima": 2,
+      "obligatorio": true,
+      "vigente_desde": "Enero 2025",
+      "antes_enero_2025": "Colocar '0'",
+      "valores_permitidos": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "13"],
+      "mapeo_valores": {
+        "1": "Profesiones, Artes y Oficios",
+        "2": "Actividades de Servicios",
+        "3": "Actividades Comerciales",
+        "4": "Actividades Industriales",
+        "5": "Actividades Agropecuarias",
+        "6": "Utilidades y Dividendos",
+        "7": "Exportaciones de bienes",
+        "8": "Servicios Realizados en el Exterior y Utilizados en El Salvador",
+        "9": "Exportaciones de servicios",
+        "10": "Otras Rentas Gravables",
+        "12": "Ingresos sujetos de retención en F14 consolidados en F910",
+        "13": "Sujetos pasivos excluidos (art. 6 LISR) o ingresos sin hecho generador ISR"
+      }
+    },
+    {
+      "columna": "W",
+      "campo": "numero_anexo",
+      "tipo": "Texto",
+      "longitud_exacta": 1,
+      "obligatorio": true,
+      "valor_fijo": "2",
+      "descripcion": "Siempre '2' para este reporte."
+    }
+  ],
+  "reglas_cruzadas": [
+    {
+      "id": "VAL_01",
+      "regla": "Para DTE cols D, E, F, G = 'N/A'",
+      "mensaje": "Los campos de resolución, serie y control interno en DTE deben ser 'N/A'."
+    },
+    {
+      "id": "VAL_02",
+      "regla": "Si col B = '1': col F = col H y col G = col I",
+      "mensaje": "Para impresos, los rangos DEL y AL deben coincidir."
+    },
+    {
+      "id": "VAL_03",
+      "regla": "columna_J solo se completa cuando col C = '10' (tiquetes)",
+      "mensaje": "Número de máquina registradora solo aplica para tiquetes."
+    }
+  ]
+}

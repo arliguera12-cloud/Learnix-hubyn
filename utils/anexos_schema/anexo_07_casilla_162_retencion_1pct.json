@@ -1,0 +1,133 @@
+{
+  "informe": "F07",
+  "anexo": 7,
+  "nombre_anexo": "Retención IVA del 1% Efectuada al Declarante",
+  "casilla_formulario": "162",
+  "numero_anexo_valor_fijo": "7",
+  "configuracion_archivo": {
+    "formato": "CSV",
+    "separador": ";",
+    "codificacion": "UTF-8",
+    "incluye_encabezados": false,
+    "formato_celdas": "Texto"
+  },
+  "instrucciones_llenado": {
+    "contexto": "El DECLARANTE es el SUJETO RETENIDO. El AGENTE DE RETENCIÓN (quien le retuvo el 1%) emitió el comprobante de retención DTE-07.",
+    "orden_procesamiento": "Un comprobante de retención por fila.",
+    "cuando_monto_no_aplica": "Colocar 0.00",
+    "permitir_negativos": false,
+    "fuente_datos": {
+      "nit_agente": "NIT del agente de retención que emitió el comprobante (col A)",
+      "serie_dte": "Sello de recepción del DTE-07 (col D)",
+      "numero_documento_dte": "Código de generación del DTE sin guiones (col E). Para docs anteriores a nov-2022: número de control sin guiones.",
+      "monto_retencion": "Debe ser exactamente el 1% del monto sujeto (col G = col F × 1%)"
+    },
+    "regla_periodo_nit_dui": {
+      "desde_enero_2022": "Si agente es persona natural: completar DUI en col H y dejar vacío col A",
+      "antes_enero_2022": "Completar NIT en col A y dejar vacío col H"
+    }
+  },
+  "estructura_columnas": [
+    {
+      "columna": "A",
+      "campo": "nit_agente",
+      "tipo": "Texto",
+      "longitud_exacta": 14,
+      "obligatorio": "Condicional",
+      "descripcion": "NIT del agente de retención que le efectuó la retención del 1% IVA. 14 dígitos sin guiones/pleca. Vacío si se completa col H.",
+      "regla_xor": "No puede coexistir con col H"
+    },
+    {
+      "columna": "B",
+      "campo": "fecha_emision",
+      "tipo": "Texto",
+      "formato": "DD/MM/AAAA",
+      "longitud_exacta": 10,
+      "obligatorio": true,
+      "descripcion": "Fecha del documento emitido por el agente de retención. Debe coincidir con mes y año del periodo declarado."
+    },
+    {
+      "columna": "C",
+      "campo": "tipo_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 2,
+      "obligatorio": true,
+      "valores_permitidos": ["05", "06", "07"],
+      "mapeo_valores": {
+        "05": "Nota de Crédito",
+        "06": "Nota de Débito",
+        "07": "Comprobante de Retención"
+      }
+    },
+    {
+      "columna": "D",
+      "campo": "serie_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Para DTE: sello de recepción del DTE-07.",
+      "descripcion": "Serie autorizada por la AT del documento emitido por el agente de retención."
+    },
+    {
+      "columna": "E",
+      "campo": "numero_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Para DTE: código de generación sin guiones. Para docs anteriores a nov-2022: número de control sin guiones.",
+      "descripcion": "Número del documento emitido por el agente de retención."
+    },
+    {
+      "columna": "F",
+      "campo": "monto_sujeto",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "descripcion": "Monto base sobre el que se aplicó la retención del 1%."
+    },
+    {
+      "columna": "G",
+      "campo": "monto_retencion_1pct",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "descripcion": "Monto de la retención. Debe ser el 1% del monto sujeto (col F × 1%). Tolerancia ±0.02."
+    },
+    {
+      "columna": "H",
+      "campo": "dui_agente",
+      "tipo": "Texto",
+      "longitud_exacta": 9,
+      "obligatorio": "Condicional",
+      "descripcion": "DUI del agente de retención. Solo para personas naturales desde enero 2022. Si se completa, col A debe estar vacía.",
+      "regla_xor": "No puede coexistir con col A",
+      "antes_enero_2022": "Dejar completamente vacío"
+    },
+    {
+      "columna": "I",
+      "campo": "numero_anexo",
+      "tipo": "Texto",
+      "longitud_exacta": 1,
+      "obligatorio": true,
+      "valor_fijo": "7",
+      "descripcion": "Siempre '7' para este reporte."
+    }
+  ],
+  "reglas_cruzadas": [
+    {
+      "id": "VAL_01",
+      "regla": "XOR(columna_A, columna_H)",
+      "mensaje": "NIT agente (col A) y DUI agente (col H) no pueden coexistir."
+    },
+    {
+      "id": "VAL_02",
+      "regla": "columna_G == columna_F * 0.01",
+      "tolerancia": 0.02,
+      "mensaje": "El monto de retención (G) debe ser el 1% del monto sujeto (F)."
+    }
+  ]
+}
