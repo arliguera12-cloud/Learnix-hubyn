@@ -1012,8 +1012,6 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
 # ─────────────────────────────────────────────
 # 10. CONSTRUCCIÓN DEL DATAFRAME F-07 COMPRAS
 # ─────────────────────────────────────────────
-_CLASE_MAP_COMPRAS = {"03": "1", "05": "4", "06": "3", "11": "2"}
-
 def construir_df_f07_compras(
     df_in: pd.DataFrame,
     tipo_op: str = "1",
@@ -1024,7 +1022,7 @@ def construir_df_f07_compras(
 ) -> pd.DataFrame:
     df_out = pd.DataFrame()
     df_out["A. Fecha Emisión"]           = df_in["fecha"]
-    df_out["B. Clase Documento"]         = df_in["tipo"].astype(str).map(_CLASE_MAP_COMPRAS).fillna("1")
+    df_out["B. Clase Documento"]         = "4"
     df_out["C. Tipo Documento"]          = df_in["tipo"]
     df_out["D. Num Documento (UUID)"]    = df_in["gen_sin_guiones"].astype(str)
     df_out["E. NIT/NRC Proveedor"]       = df_in["nit_prov"].astype(str)
