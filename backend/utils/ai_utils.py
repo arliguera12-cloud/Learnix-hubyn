@@ -19,7 +19,10 @@ import re
 import threading
 import time
 
-import streamlit as st
+try:
+    import streamlit as st
+except ImportError:
+    st = None  # type: ignore[assignment]
 from groq import Groq
 
 log = logging.getLogger(__name__)

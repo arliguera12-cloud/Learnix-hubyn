@@ -1,8 +1,13 @@
 """
-supabase_client.py — Auth por contraseña simple; datos en JSON local (local_db).
+supabase_client.py — versión FastAPI.
+Usa variables de entorno en lugar de st.secrets / st.session_state.
+Mantiene la misma interfaz pública que la versión Streamlit para que
+los extractores no tengan que cambiar sus imports.
 """
 from __future__ import annotations
-import streamlit as st
+
+import os
+
 from utils.local_db import (
     cargar_clientes_db,
     guardar_cliente_db,
@@ -15,9 +20,8 @@ from utils.local_db import (
     cargar_proveedores_combinados,
 )
 
-# Re-exportar para que otras páginas no tengan que cambiar sus imports
 __all__ = [
-    "login", "logout", "session_activa", "restaurar_sesion_desde_cookie",
+    "login", "logout", "session_activa",
     "get_org_info", "get_organizacion_id",
     "cargar_clientes_db", "guardar_cliente_db", "eliminar_cliente_db",
     "cargar_proveedores_db", "guardar_proveedor_db", "eliminar_proveedor_db",
@@ -30,35 +34,22 @@ _DEFAULT_PASSWORD = "learnix2024"
 
 
 def _get_password() -> str:
-    try:
-        return st.secrets.get("APP_PASSWORD", _DEFAULT_PASSWORD)
-    except Exception:
-        return _DEFAULT_PASSWORD
+    return os.environ.get("APP_PASSWORD", _DEFAULT_PASSWORD)
 
 
-def login(email: str, password: str) -> tuple[bool, str]:
+def login(email: str, password: str) -> dict:
+    """Valida credenciales. Devuelve {"success": True} o {"success": False, "error": "..."}."""
     if password == _get_password():
-        st.session_state["autenticado"]     = True
-        st.session_state["sb_user_email"]   = email or "usuario"
-        st.session_state["sb_rol"]          = "admin"
-        st.session_state["intentos_login"]  = 0
-        st.session_state["bloqueado_hasta"] = 0
-        return True, ""
-    return False, "Contraseña incorrecta."
+        return {"success": True, "email": email or "usuario", "role": "admin"}
+    return {"success": False, "error": "Contraseña incorrecta."}
 
 
-def logout() -> None:
-    conservar = {"intentos_login", "bloqueado_hasta"}
-    for k in [k for k in st.session_state if k not in conservar]:
-        del st.session_state[k]
+def logout(access_token: str = "") -> dict:
+    return {"success": True}
 
 
 def session_activa() -> bool:
-    return bool(st.session_state.get("autenticado"))
-
-
-def restaurar_sesion_desde_cookie() -> bool:
-    return False
+    return True
 
 
 def get_org_info() -> dict:

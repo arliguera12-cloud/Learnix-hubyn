@@ -1,31 +1,907 @@
 """
-Extractor de DTEs de Compras.
-Encapsula la lógica de pages/2_Extractor_DTE_Compras.py sin dependencias de Streamlit.
+Extractor de DTEs de Compras (DTE-01/03/05/06/11).
+Lógica portada de pages/2_Extractor_DTE_Compras.py sin dependencias de Streamlit.
 """
-from typing import Any
+import re
+import pdfplumber
 
-from utils.pdf_utils import extraer_texto_pdf
-from utils.ai_utils import procesar_dte_con_gemini
-from utils.qa_utils import validar_compras
-from utils.constants import TIPOS_VALIDOS_COMPRAS, MAX_VALORES_LOOP_COMPRAS
+from utils.pdf_utils import (
+    safe_str,
+    limpiar_monto,
+    extraer_y_formatear_fecha,
+    extraer_texto_pdf,
+)
+from utils.ai_utils import (
+    gemini_disponible,
+    procesar_dte_con_gemini,
+    es_nombre_sospechoso,
+    necesita_verificacion,
+    verificar_compra_con_gemini,
+)
+from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
+from utils.qr_reader import extraer_datos_qr as _extraer_qr
+from utils.constants import TIPOS_VALIDOS_COMPRAS
 
 
-def extraer_compras(pdf_bytes: bytes, declarante_id: str) -> dict[str, Any]:
-    """Extrae registros de compras a partir de los bytes de un PDF."""
-    texto = extraer_texto_pdf(pdf_bytes)
 
-    registros_raw = procesar_dte_con_gemini(
-        texto=texto,
-        tipo_dte="compras",
-        max_registros=MAX_VALORES_LOOP_COMPRAS,
-        declarante_id=declarante_id,
+_log = logging.getLogger(__name__)
+
+PALABRAS_BASURA_NOMBRE = [
+    "DOCUMENTO", "TRIBUTARIO", "ELECTRONICO", "ELECTRÓNICO",
+    "REPRESENTACIÓN", "REPRESENTACION", "EMISOR", "FACTURA",
+    "CONSUMIDOR", "COMPROBANTE", "CODIGO", "CÓDIGO", "SELLO",
+    "VERSION", "VERSIÓN", "TRANSMISION", "TRANSMISIÓN",
+    "MINISTERIO", "HACIENDA", "MUNICIPIO", "ACTIVIDAD",
+    "ECONOMICA", "AGENCIA", "EFECTIVO", "HORA", "EMISIÓN",
+    "EMISION", "GENERACIÓN", "GENERACION", "TELÉFONO",
+    "TELEFONO", "TIPO ESTABLECIMIENTO", "ESTABLECIMIENTO",
+    "CASA MATRIZ", "SUCURSAL:", "NIT:", "NRC:",
+    "NUMERO DE CONTROL", "NÚMERO DE CONTROL",
+    "MODELO DE FACTURACION", "TIPO DE TRANSMISION",
+]
+
+BASURA_ESTRICTA = {"@", "EMAIL", "CORREO", ".COM", "WWW.", "HTTP", "FACTURA.GOB"}
+
+PREFIJOS_DIRECCION = (
+    "KM ", "KM.", "AV.", "AV ", "AVENIDA", "CALLE ", "PASAJE",
+    "COLONIA", "COL.", "URB.", "URB ", "URBANIZACION", "URBANIZACIÓN",
+    "RESIDENCIAL", "LOTIFICACION", "BARRIO", "CANTON", "CANTÓN",
+    "CARRETERA", "CARR.", "BULEVAR", "BOULEVARD", "BLVD", "BLVD.",
+    "POLIGONO", "LOCAL ", "NIVEL ", "PISO ", "EDIFICIO",
+    "CENTRO COMERCIAL", "COMPLEJO", "PARQUE INDUSTRIAL",
+    "FINAL ", "ENTRE ", "#", "NO.", "S/N",
+)
+
+NOMBRES_INVALIDOS = {
+    "MATRIZ", "LOCAL", "SUCURSAL", "AGENCIA", "OFICINA",
+    "ESTABLECIMIENTO", "PUNTO DE VENTA", "ALMACEN", "BODEGA",
+}
+
+CORTE_NOMBRE = re.compile(
+    r"\s*(?:NIT|NRC|GIRO|ACTIVIDAD|DIRECCI[OÓ]N|CORREO|TEL[EÉ]F|"
+    r"TIPO\s+ESTAB|MUNICIPIO|DEPARTAMENTO|DISTRITO|DEPTO|NUMERO\s+DE\s+CONTROL|"
+    r"MODELO\s+(?:DE|FACTURACI)|TIPO\s+(?:DE\s+TRANS|TRANSMISI)|"
+    r"CONDICI[OÓ]N|SUCURSAL|N\.?\s*I\.?\s*T\.?\s*[:\s]|"
+    r"N\.?\s*R\.?\s*C\.?\s*[:\s]|N[UÚ]MERO\s+DE|REGISTRO|PROCESAMIENTO|"
+    r"\d{4}[\s\-]\d{6})"
+    r".*$",
+    re.I | re.S,
+)
+
+def es_linea_direccion(texto: str) -> bool:
+    L = safe_str(texto).upper().strip()
+    return any(L.startswith(p) or (f" {p}" in L[:60]) for p in PREFIJOS_DIRECCION)
+
+SKIP_LINEAS = re.compile(
+    r'^(?:DOCUMENTO|TRIBUTARIO|ELECTR[OÓ]NICO|ELECTRONICO|COMPROBANTE|'
+    r'CR[EÉ]DITO|CREDITO|FISCAL|C[OÓ]DIGO|CODIGO|SELLO|N[UÚ]MERO|NUMERO|'
+    r'MODELO\s+(?:DE|FACTURACI)|M[OÓ]DULO\s+DE|TIPO\s+(?:DE|TRANSMISI)|'
+    r'TRANSMISI[OÓ]N|MONEDA|VERSI[OÓ]N\s+JSON|HORA\s+EMISI|'
+    r'ACTIVIDAD|CONDICI[OÓ]N|DISTRITO|DEPTO|DEPARTAMENTO|MUNICIPIO|'
+    r'SUCURSAL|DIRECCI[OÓ]N|TEL[EÉ]FONO|TELEFONO|'
+    r'FECHA\s*[:\s]|FECHA\s+Y\s+HORA|FECHA\s+PROCESADO|FECHA\s+EMISI|'
+    r'RECEPTOR|EMISOR|CLIENTE|DTE-|VENTA\s+A\s+CUENTA|DOCUMENTOS\s+RELAC|'
+    r'P[AÁ]GINA|PAGINA|VER\.|VERSI[OÓ]N|VERSION|[A-F0-9]{8}-|'
+    r'\d{2}[/\-]\d{2}[/\-]\d{4}|\d{2}:\d{2}:\d{2})',
+    re.I
+)
+
+
+
+def cargar_proveedores_json() -> dict:
+    """
+    Retorna dict combinado {nit: {nombre, nrc}} para el motor de extracción:
+      - Catálogo global (proveedores_globales) como base
+      - Catálogo privado de la org encima con prioridad máxima
+    Compatible con el formato interno dict{nit:{nombre,nrc}} del extractor.
+    """
+    try:
+        from utils.local_db import cargar_proveedores_combinados
+        return cargar_proveedores_combinados()
+    except Exception:
+        return {}
+
+
+def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> str:
+    """
+    Extrae el nombre del EMISOR (proveedor) del DTE.
+
+    Bugs corregidos vs. versión original:
+    - limpiar(): re.sub usaba `s` como patrón en lugar de "" como reemplazo.
+    - Estrategia 1: el split cortaba el nombre antes de retornarlo.
+    - Se agrega Estrategia 0: buscar entre sección [EMISOR] … [RECEPTOR].
+    """
+    texto       = safe_str(texto)
+    receptor_up = safe_str(receptor_nombre).strip().upper()
+
+    # ── Función interna de limpieza (CORREGIDA) ──────────────────────────────
+    def limpiar(s: str) -> str:
+        s = safe_str(s)
+        # Quitar nombre del receptor si se coló
+        if receptor_up and len(receptor_up) > 3:
+            s = re.compile(re.escape(receptor_up), re.I).sub("", s)
+        # Cortar en segunda ocurrencia de "Nombre o Razón" (layout columnar)
+        partes = re.split(r'\s+[Nn]ombre\s+[Oo]\s+[Rr]az', s, maxsplit=1)
+        s = partes[0]
+        # Quitar etiquetas de campo al inicio
+        s = re.sub(
+            r'^[\s\-:]*(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|'
+            r'NOMBRE\s+COMERCIAL|EMISOR|DATOS\s+DEL\s+EMISOR)[\s:]*',
+            "", s, flags=re.I,           # ← CORREGIDO: reemplazo es "", no s
+        ).strip()
+        # CORTE_NOMBRE: quitar todo desde keywords contables en adelante
+        s = CORTE_NOMBRE.sub("", s).strip()   # ← CORREGIDO: .sub("", s)
+        s = re.sub(r'^[-_.,;:\s]+|[-_.,;:\s]+$', "", s)
+        # Quitar NIT/NRC inline
+        s = re.sub(r'\b(?:NIT|NRC)\s*:?\s*[\d\-]+', '', s, flags=re.I).strip()
+        s = re.sub(r'\s{2,}', ' ', s)
+        return s.upper()
+
+    # ── Validador ─────────────────────────────────────────────────────────────
+    def valido(s: str) -> bool:
+        T = safe_str(s).strip().upper()
+        if len(T) < 4 or len(T) > 90:
+            return False
+        if receptor_up and (T == receptor_up or T.startswith(receptor_up[:12])):
+            return False
+        if any(b in T for b in BASURA_ESTRICTA):
+            return False
+        if es_linea_direccion(T):
+            return False
+        if T in NOMBRES_INVALIDOS:
+            return False
+        digitos = sum(c.isdigit() for c in T)
+        if len(T) > 0 and digitos / len(T) > 0.40:
+            return False
+        if re.fullmatch(r'[\d\s\-\.\/\(\)]+', T):
+            return False
+        if not re.search(r'[A-ZÁÉÍÓÚÑÜ]', T):
+            return False
+        if SKIP_LINEAS.match(T):
+            return False
+        # Red de seguridad: rechazar metadata fiscal (MODELO FACTURACIÓN, etc.)
+        if es_nombre_sospechoso(T):
+            return False
+        return True
+
+    # ── Estrategia -2 (MÁXIMA PRIORIDAD): columna izquierda por posición ──────
+    # En el DTE estándar de Hacienda, emisor y receptor van en DOS columnas:
+    #   Nombre o razon social:            Nombre o razon social:
+    #   JULIO CÉSAR JOVEL SÁNCHEZ         JONATHAN GUILLERMO RUIZ HERNANDEZ
+    #   NIT:08193003731016 NRC:965596     # NIT: 05020905931015 NRC:2774784
+    # El EMISOR (proveedor) SIEMPRE es la columna IZQUIERDA. Esto funciona
+    # también para personas naturales (sin sufijo legal) y evita confundir el
+    # nombre del cliente (columna derecha) o truncar la razón social.
+    _lineas_vis = texto.split('\n')
+    for _i, _ln in enumerate(_lineas_vis):
+        _labels = [m.start() for m in re.finditer(
+            r'[Nn]ombre\s+[Oo]\s+[Rr]az[oó]n\s+[Ss]ocial', _ln)]
+        if not _labels:
+            continue
+        # Línea de nombres = siguiente línea no vacía
+        _nom_line = ""
+        for _j in range(_i + 1, min(_i + 4, len(_lineas_vis))):
+            if _lineas_vis[_j].strip():
+                _nom_line = _lineas_vis[_j]
+                break
+        if not _nom_line:
+            continue
+        # Estrategia de corte (de más a menos confiable):
+        # 1) Gap de 3+ espacios en la línea de nombres  →  columna izquierda
+        # 2) Receptor conocido aparece en la línea      →  cortar antes de él
+        # 3) Posición de la 2ª etiqueta como referencia →  si cae en espacio
+        # 4) Tomar la línea completa (1 sola columna)
+        _izq = _nom_line  # default: una sola columna
+        if len(_labels) >= 2:
+            _gap = re.search(r'\S(\s{3,})\S', _nom_line)
+            if _gap:
+                _izq = _nom_line[:_gap.start() + 1]
+            elif receptor_up and len(receptor_up) >= 5:
+                # Buscar las primeras 12 letras del receptor en la línea
+                _m_rec = re.search(re.escape(receptor_up[:12]), _nom_line, re.I)
+                if _m_rec:
+                    _izq = _nom_line[:_m_rec.start()]
+                else:
+                    # Cortar en el punto medio entre las dos etiquetas
+                    _mid = (_labels[0] + _labels[1]) // 2
+                    if _mid < len(_nom_line):
+                        _izq = _nom_line[:_mid]
+            else:
+                _split = _labels[1]
+                if _split <= len(_nom_line) and not _nom_line[_split:_split+1].strip():
+                    _izq = _nom_line[:_split]
+        else:
+            # Una sola etiqueta: puede haber columnas separadas con gap
+            _gap = re.search(r'\S(\s{3,})\S', _nom_line)
+            if _gap:
+                _izq = _nom_line[:_gap.start() + 1]
+        _cand = limpiar(_izq)
+        if valido(_cand) and len(_cand) >= 4:
+            _log.debug("extraer_nombre_emisor: estrategia=-2 (columna izq) → %s", _cand)
+            return _cand
+
+    # ── Estrategia -1 (ALTA PRIORIDAD): nombre por sufijo legal ─────────────
+    # Las razones sociales salvadoreñas casi siempre terminan en una forma
+    # jurídica (S.A. DE C.V., S.A., LTDA, etc.). La metadata del DTE nunca.
+    # GUARD: solo busca en la sección EMISOR (antes de RECEPTOR/CLIENTE).
+    _texto_emisor_sl = texto
+    for _pat_sl in [r'(?i)\bEMISOR\s+RECEPTOR\b', r'(?i)DATOS\s+DEL\s+RECEPTOR',
+                    r'(?i)DATOS\s+DEL\s+CLIENTE', r'(?i)\bRECEPTOR\b', r'(?i)\bCLIENTE\b']:
+        _parts_sl = re.split(_pat_sl, texto, maxsplit=1)
+        if len(_parts_sl) >= 2:
+            _texto_emisor_sl = _parts_sl[0]
+            break
+    _SUFIJO_LEGAL = re.compile(
+        r'([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9&.,\- ]{2,70}?,?\s*'
+        r'(?:S\.?\s*A\.?\s+DE\s+C\.?\s*V\.?|'          # S.A. DE C.V.
+        r'S\.?\s*A\.?\s*S\.?|'                          # S.A.S.
+        r'S\.?\s*A\.?(?![A-Z])|'                        # S.A.
+        r'S\.?\s+DE\s+R\.?\s*L\.?(?:\s+DE\s+C\.?\s*V\.?)?|'  # S. DE R.L. (DE C.V.)
+        r'LTDA\.?|'                                     # LTDA
+        r'S\.?\s+EN\s+C\.?))',                          # S. EN C.
+        re.I,
     )
+    for _ln in _texto_emisor_sl.split('\n'):
+        m_sl = _SUFIJO_LEGAL.search(_ln)
+        if not m_sl:
+            continue
+        candidato = limpiar(m_sl.group(1))
+        if valido(candidato) and len(candidato) >= 6:
+            _log.debug("extraer_nombre_emisor: estrategia=-1 (sufijo legal) → %s", candidato)
+            return candidato
 
-    registros_validos, errores = validar_compras(registros_raw)
+    # ── Estrategia 0: sección explícita [EMISOR] … [RECEPTOR] ────────────────
+    # Busca un bloque etiquetado "EMISOR" y extrae el nombre dentro de él
+    m_bloque = re.search(
+        r'(?:DATOS\s+DEL\s+)?EMISOR\s*\n([\s\S]{10,400}?)(?:DATOS\s+DEL\s+)?(?:RECEPTOR|CLIENTE)',
+        texto, re.I,
+    )
+    if m_bloque:
+        bloque = m_bloque.group(1)
+        for linea in bloque.split('\n'):
+            l = safe_str(linea).strip()
+            if not l or len(l) < 4:
+                continue
+            if SKIP_LINEAS.match(l):
+                continue
+            if any(b in l.upper() for b in BASURA_ESTRICTA):
+                continue
+            candidato = limpiar(l)
+            if valido(candidato):
+                _log.debug("extraer_nombre_emisor: estrategia=0 (bloque EMISOR) → %s", candidato)
+                return candidato
 
-    return {
-        "tipo": "compras",
-        "registros": registros_validos,
-        "errores": errores,
-        "total_registros": len(registros_validos),
-    }
+    # ── Estrategia 1: etiqueta "Nombre o Razón Social:" (primer match = emisor)
+    # CORREGIDO: tomamos group(1) directamente sin re-split innecesario
+    for m_nom in re.finditer(
+        r'[Nn]ombre\s+[Oo]\s+[Rr]az[oó]n\s+[Ss]ocial\s*:\s*([^\n]{4,120})',
+        texto,
+    ):
+        # Ignorar si el contexto anterior indica que es sección RECEPTOR
+        ctx_prev = texto[max(0, m_nom.start() - 120):m_nom.start()].upper()
+        if any(w in ctx_prev for w in ['RECEPTOR', 'CLIENTE', 'DATOS DEL RECEPTOR']):
+            continue
+        candidato = limpiar(m_nom.group(1))
+        if valido(candidato):
+            _log.debug("extraer_nombre_emisor: estrategia=1 (etiqueta NRS) → %s", candidato)
+            return candidato
+
+    # ── Estrategia 2: texto antes del receptor ───────────────────────────────
+    parte_emisor = texto
+    for pat in [
+        r'(?i)\bEMISOR\s+RECEPTOR\b',
+        r'(?i)DATOS\s+DEL\s+RECEPTOR',
+        r'(?i)DATOS\s+DEL\s+CLIENTE',
+        r'(?i)\bRECEPTOR\b',
+        r'(?i)\bCLIENTE\b',
+    ]:
+        parts = re.split(pat, texto, maxsplit=1)
+        if len(parts) >= 2:
+            parte_emisor = parts[0]
+            break
+
+    # ── Estrategia 3: palabras comerciales en bloque emisor ──────────────────
+    for linea in parte_emisor.split('\n'):
+        l = safe_str(linea).strip()
+        if not l or len(l) < 4:
+            continue
+        if SKIP_LINEAS.match(l):
+            continue
+        if any(b in l.upper() for b in BASURA_ESTRICTA):
+            continue
+        tiene_comercial = any(w in l.upper() for w in PALABRAS_COMERCIALES)
+        candidato = limpiar(l)
+        if valido(candidato) and (tiene_comercial or len(candidato) >= 8):
+            _log.debug("extraer_nombre_emisor: estrategia=3 (palabras comerciales) → %s", candidato)
+            return candidato
+
+    # ── Estrategia 4: primera línea no-metadata del documento ────────────────
+    for linea in texto.split('\n')[:20]:
+        l = safe_str(linea).strip()
+        if not l or len(l) < 4:
+            continue
+        if SKIP_LINEAS.match(l):
+            continue
+        if any(b in l.upper() for b in BASURA_ESTRICTA):
+            continue
+        candidato = limpiar(l)
+        if valido(candidato):
+            _log.debug("extraer_nombre_emisor: estrategia=4 (primeras líneas) → %s", candidato)
+            return candidato
+
+    # ── Estrategia 5: líneas anteriores al NIT del proveedor ─────────────────
+    if nit_prov and len(nit_prov) >= 9:
+        lineas = texto.split('\n')
+        for i, linea in enumerate(lineas):
+            if nit_prov in re.sub(r'[^0-9]', '', linea):
+                for offset in [1, 2, 3]:
+                    if i - offset >= 0:
+                        candidato = limpiar(lineas[i - offset].strip())
+                        if valido(candidato):
+                            _log.debug("extraer_nombre_emisor: estrategia=5 (cerca NIT) → %s", candidato)
+                            return candidato
+
+    _log.debug("extraer_nombre_emisor: todas las estrategias fallaron")
+    return ""
+
+
+def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedores_db: dict = None) -> dict:
+    """
+    Extrae datos de un DTE de compra.
+    Correcciones aplicadas:
+    - Sello: regex sin \\b en t_no_sp (no funciona en strings sin espacios).
+    - UUID fallback: separado del sello para no mezclar hex puro con alfanumérico.
+    - Montos: loop de reconciliación O(n²) con índice de IVA, más rápido y preciso.
+    - Sub-Total: patrón más restrictivo para no capturar subtotales de línea.
+    - DTE-01 de compra: exentas = tot (sin IVA).
+    """
+    if not file_bytes or len(file_bytes) < 512:
+        return {"error_fatal": "Archivo vacio o demasiado pequeño."}
+
+    # ── Vision-First: extraer con IA antes de pdfplumber ─────────────────────
+    _nit_rec_ctx = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
+    _nom_rec_ctx = safe_str(cliente_activo.get('nombre', '')).strip().upper()
+
+    gemini_correcciones: list[str] = []
+    _vision_campos: dict  = {}
+    _vision_alertas: list = []
+    _vision_audit: dict   = {}
+
+    if vision_disponible():
+        _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+            file_bytes,
+            "compras",
+            {"nit": _nit_rec_ctx, "nombre": _nom_rec_ctx},
+        )
+        gemini_correcciones = [
+            f"Vision: {a}" for a in _vision_alertas
+        ] if _vision_alertas else (
+            [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+            if _vision_campos else []
+        )
+
+    try:
+        try:
+            texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
+        except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
+            if not _vision_campos.get("num_control"):
+                return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+            texto_lineal = texto_visual = ""
+        except Exception as e:
+            if "password" in str(e).lower() or "encrypt" in str(e).lower():
+                return {"error_fatal": "PDF protegido con contraseña. Desbloquéalo antes de subir."}
+            raise
+
+        texto_completo = texto_lineal + "\n" + texto_visual
+
+        if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
+            return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
+
+        t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
+        t_no_sp = re.sub(r'\s+', '', t_clean).upper()
+
+        # ── Número de Control DTE ─────────────────────────────────────────────
+        tipo        = ""
+        ctrl        = ""
+        num_control = ""
+
+        m_ctrl = re.search(r'(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})', t_clean, re.I)
+        if not m_ctrl:
+            m_ctrl = re.search(r'(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})', t_no_sp)
+
+        if m_ctrl:
+            ctrl = m_ctrl.group(1).upper()
+            tipo = m_ctrl.group(2) if m_ctrl.lastindex and m_ctrl.lastindex >= 2 else ""
+            if not tipo:
+                m_tipo = re.search(r'DTE-(\d{2})', ctrl)
+                tipo   = m_tipo.group(1) if m_tipo else ""
+            num_control = ctrl.replace("-", "")
+
+        if not ctrl:
+            # Fallback: Vision extrajo num_control pero pdfplumber no lo encontró en texto
+            _vc_ctrl = safe_str(_vision_campos.get("num_control", ""))
+            _m_vc = re.search(r'(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})', _vc_ctrl, re.I)
+            if _m_vc:
+                ctrl        = _m_vc.group(1).upper()
+                tipo        = _m_vc.group(2)
+                num_control = ctrl.replace("-", "")
+            else:
+                return {"error_tipo": "No se detecto Numero de Control DTE valido."}
+        if tipo not in TIPOS_VALIDOS_COMPRAS:
+            return {
+                "error_tipo": (
+                    f"DTE-{tipo} no admitido en compras. "
+                    f"Validos: {', '.join(sorted(TIPOS_VALIDOS_COMPRAS))}."
+                )
+            }
+
+        # ── Sello de Recepción ─────────────────────────────────────────────────
+        # CORREGIDO: no usar \b en t_no_sp (cadena sin espacios).
+        # Los sellos son ~40 chars alfanuméricos (pueden incluir Q,T,I,K…).
+        sello = ""
+
+        # Intento 1: etiqueta explícita en texto con espacios
+        m_sello1 = re.search(
+            r'[Ss]ello\s+(?:[Dd][Gg][Ii]|de\s+[Rr]ecepci[oó]n)\s*:?\s*([A-Z0-9]{30,50})',
+            t_clean, re.I,
+        )
+        if m_sello1:
+            sello = m_sello1.group(1)[:40]
+
+        # Intento 2: año + 36 alfanuméricos en texto sin espacios
+        # Usamos lookahead/lookbehind en lugar de \b (que no funciona correctamente en strings sin espacios)
+        if not sello:
+            m_sello2 = re.search(r'(?<![A-Z0-9])(20[2-3]\d[A-Z0-9]{36})(?![A-Z0-9])', t_no_sp)
+            if not m_sello2:
+                m_sello2 = re.search(r'(20[2-3]\d[A-Z0-9]{36})', t_no_sp)
+            if m_sello2:
+                sello = m_sello2.group(1)
+
+        # Intento 3: buscar "SELLO" en t_no_sp y capturar lo que sigue
+        if not sello:
+            m_sello3 = re.search(r'SELLO[A-Z]*:?([A-Z0-9]{30,50})', t_no_sp)
+            if m_sello3:
+                sello = m_sello3.group(1)[:40]
+
+        # ── Código de Generación (UUID) ────────────────────────────────────────
+        # CORREGIDO: separado completamente del sello. UUID = hex puro 8-4-4-4-12.
+        gen           = ""
+        UUID_PATTERN  = (
+            r'([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}'
+            r'-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})'
+        )
+
+        # Con etiqueta
+        m_gen1 = re.search(
+            r'[Cc][oó]digo\s+(?:de\s+)?[Gg]eneraci[oó]n\s*:?\s*' + UUID_PATTERN,
+            t_clean,
+        )
+        if m_gen1:
+            gen = m_gen1.group(1).upper()
+
+        # Sin etiqueta en texto con espacios
+        if not gen:
+            m_gen2 = re.search(UUID_PATTERN, t_clean)
+            if m_gen2:
+                gen = m_gen2.group(1).upper()
+
+        # Fallback: buscar 32 hex puros en t_no_sp y formatear como UUID
+        if not gen:
+            m_gen3 = re.search(r'(?<![A-Z0-9])([0-9A-F]{32})(?![A-Z0-9])', t_no_sp)
+            if m_gen3:
+                raw = m_gen3.group(1)
+                gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}".upper()
+
+        gen_sin_guiones = gen.replace("-", "")
+
+        # ── Fecha de emisión ────────────────────────────────────────────────────
+        fecha = extraer_y_formatear_fecha(texto_lineal)
+        if not fecha:
+            fecha = extraer_y_formatear_fecha(texto_completo)
+
+        # ── Datos del Receptor ─────────────────────────────────────────────────
+        nit_receptor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nit', '')))
+        dui_receptor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('dui', '')))
+        nrc_receptor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nrc', '')))
+        nom_receptor = safe_str(cliente_activo.get('nombre', '')).strip().upper()
+        excluir_nits = {nit_receptor, dui_receptor, nrc_receptor} - {""}
+
+        # ── NIT del Proveedor/Emisor ───────────────────────────────────────────
+        nit_prov     = ""
+        dui_prov     = ""
+        nom_prov     = ""
+        es_nuevo     = True
+        if proveedores_db is None:
+            proveedores_db = cargar_proveedores_json()
+
+        # Separar sección EMISOR del texto
+        parte_emisor = texto_lineal
+        for pat in [
+            r'(?i)\bEMISOR\s+RECEPTOR\b',
+            r'(?i)DATOS\s+DEL\s+RECEPTOR',
+            r'(?i)DATOS\s+DEL\s+CLIENTE',
+            r'(?i)\bRECEPTOR\b',
+            r'(?i)\bCLIENTE\b',
+        ]:
+            parts = re.split(pat, texto_lineal, maxsplit=1)
+            if len(parts) >= 2:
+                parte_emisor = parts[0]
+                break
+
+        PATRON_NIT = re.compile(
+            r'N\.?\s*I\.?\s*T\.?\s*[:\s]\s*'
+            r'((?:\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d)|\d{14})',
+            re.I,
+        )
+
+        # Buscar NIT con etiqueta en sección emisor
+        m_nit = PATRON_NIT.search(parte_emisor)
+        if m_nit:
+            nit_cand = re.sub(r'[^0-9]', '', m_nit.group(1))
+            if nit_cand not in excluir_nits and len(nit_cand) == 14:
+                nit_prov = nit_cand
+
+        # Si no, buscar en todo el texto
+        if not nit_prov:
+            for m in PATRON_NIT.finditer(texto_completo):
+                nit_cand = re.sub(r'[^0-9]', '', m.group(1))
+                if nit_cand not in excluir_nits and len(nit_cand) == 14:
+                    nit_prov = nit_cand
+                    break
+
+        # Fallback: formato DGII explícito (XXXX-XXXXXX-XXX-X) — evita capturar
+        # fechas concatenadas o códigos de barras de 14 dígitos sin guiones.
+        if not nit_prov:
+            for m in re.finditer(
+                r'\b(\d{4}[\s\-]\d{6}[\s\-]\d{3}[\s\-]\d)\b', texto_completo
+            ):
+                nit_cand = re.sub(r'[^0-9]', '', m.group(1))
+                if nit_cand not in excluir_nits and len(nit_cand) == 14:
+                    nit_prov = nit_cand
+                    break
+
+        # DUI del proveedor (solo si no hay NIT)
+        if not nit_prov:
+            for m in re.finditer(r'\b(\d{8}[\s\-]?\d|\d{9})\b', parte_emisor):
+                nit_cand = re.sub(r'[^0-9]', '', m.group(0))
+                if nit_cand not in excluir_nits and len(nit_cand) == 9:
+                    dui_prov = nit_cand
+                    break
+
+        # ── Nombre del Proveedor ───────────────────────────────────────────────
+        id_lookup = nit_prov or dui_prov
+        if id_lookup and id_lookup in proveedores_db:
+            entrada = proveedores_db[id_lookup]
+            nom_prov = safe_str(
+                entrada.get("nombre", "") if isinstance(entrada, dict) else entrada
+            )
+            es_nuevo = False
+
+        if es_nuevo:
+            nombre_encontrado = extraer_nombre_emisor(texto_lineal, nit_prov, nom_receptor)
+            if not nombre_encontrado:
+                nombre_encontrado = extraer_nombre_emisor(texto_visual, nit_prov, nom_receptor)
+            nom_prov = nombre_encontrado if nombre_encontrado else ""
+
+        # ── Guard: emisor no puede ser el mismo que el receptor ──────────────
+        if nit_prov and nit_prov == nit_receptor:
+            nit_prov = ""
+            nom_prov = ""
+
+        # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
+        if _vision_campos.get("fecha"):
+            fecha    = _vision_campos["fecha"]
+        if _vision_campos.get("nom_prov"):
+            nom_prov = _vision_campos["nom_prov"]
+        if _vision_campos.get("nit_prov"):
+            nit_prov = _vision_campos["nit_prov"]
+
+        # ── Groq: corrige campos vacíos/dudosos independientemente de Vision ──
+        # Se ejecuta siempre que Groq esté disponible, no solo cuando Vision falla.
+        # Vision puede haber llenado algunos campos pero dejado otros vacíos.
+        if gemini_disponible():
+            _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "nom_prov": nom_prov}
+            _necesita, _ = necesita_verificacion(_campos_act, nit_receptor)
+            if _necesita:
+                # texto_visual preserva columnas EMISOR|RECEPTOR — mejor para el modelo.
+                # Evitar concatenar lineal+visual (duplica contenido y gasta contexto).
+                _texto_ia = texto_visual if texto_visual.strip() else texto_lineal
+                _corr_dict, gemini_correcciones = verificar_compra_con_gemini(
+                    _texto_ia,
+                    _campos_act,
+                    nit_receptor,
+                    nom_receptor,
+                )
+                # Solo aplicar corrección si el campo estaba vacío o Groq da uno mejor
+                if _corr_dict.get("fecha") and not fecha:
+                    fecha    = _corr_dict["fecha"]
+                if _corr_dict.get("nom_prov") and (not nom_prov or nom_prov == nom_receptor):
+                    nom_prov = _corr_dict["nom_prov"]
+                if _corr_dict.get("nit_prov") and not nit_prov:
+                    nit_prov = _corr_dict["nit_prov"]
+
+        # ── FOVIAL y COTRANS ───────────────────────────────────────────────────
+        # CORREGIDO: en facturas de combustible la etiqueta viene seguida de la
+        # TARIFA entre paréntesis y luego el monto real, p. ej.
+        #   "FOVIAL ($0.20 Ctvs. por galón) $ 0.86"
+        # El patrón anterior ($? inmediato a la etiqueta) capturaba la tarifa
+        # ($0.20) o nada. Ahora tomamos el ÚLTIMO monto en $ de la línea.
+        fovial  = 0.0
+        cotrans = 0.0
+        m_fov = (
+            re.search(r'[Ff][Oo][Vv][Ii][Aa][Ll][^\n]*\$\s*(\d[\d,.]*)', t_clean)
+            or re.search(r'[Ff][Oo][Vv][Ii][Aa][Ll]\s*:?\s*(\d[\d,.]*)', t_clean)
+        )
+        m_cot = (
+            re.search(r'[Cc][Oo][Tt][Rr][Aa][Nn][Ss][^\n]*\$\s*(\d[\d,.]*)', t_clean)
+            or re.search(r'[Cc][Oo][Tt][Rr][Aa][Nn][Ss]\s*:?\s*(\d[\d,.]*)', t_clean)
+        )
+        if m_fov:
+            fovial = limpiar_monto(m_fov.group(1))
+        if m_cot:
+            cotrans = limpiar_monto(m_cot.group(1))
+        fovial_cotrans = round(fovial + cotrans, 2)
+
+        # ── Exentas / No Sujetas ───────────────────────────────────────────────
+        exe = 0.0
+        for pat in [
+            r'[Vv]tas?\.?\s+[Ee]xentas?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Vv]entas?\s+[Ee]xentas?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Tt]otal\s+[Ee]xento\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'\b[Ee]xentas?\s*:?\s*\$?\s*(\d[\d,.]+)',
+        ]:
+            m_exe = re.search(pat, t_clean)
+            if m_exe:
+                val = limpiar_monto(m_exe.group(1))
+                if val > 0:
+                    exe = val
+                    break
+        exe = max(exe, fovial_cotrans)
+
+        # ── IVA Retenido ───────────────────────────────────────────────────────
+        ret = 0.0
+        for pat in [
+            r'[Ii][Vv][Aa]\s+[Rr]etenido\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Rr]etenci[oó]n\s+[Ii][Vv][Aa]\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Rr]etenci[oó]n\s*:?\s*\$?\s*(\d[\d,.]+)',
+        ]:
+            m_ret = re.search(pat, t_clean)
+            if m_ret:
+                ret = limpiar_monto(m_ret.group(1))
+                if ret > 0:
+                    break
+
+        # ── IVA Percibido ──────────────────────────────────────────────────────
+        perc   = 0.0
+        m_perc = re.search(
+            r'[Ii][Vv][Aa]\s+[Pp]ercibido\s*:?\s*\$?\s*(\d[\d,.]+)', t_clean
+        )
+        if m_perc:
+            perc = limpiar_monto(m_perc.group(1))
+
+        # ── Total a Pagar ──────────────────────────────────────────────────────
+        tot = 0.0
+        for pat in [
+            r'[Tt]otal\s+a\s+[Pp]agar\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Tt]otal\s+[Pp]agar\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Mm]onto\s+[Tt]otal\s+de\s+la\s+[Oo]peraci[oó]n\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Vv]alor\s+[Tt]otal\s+a\s+[Pp]agar\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Tt]OTAL\s*:?\s*\$?\s*(\d[\d,.]+)',
+        ]:
+            m_tot = re.search(pat, t_clean)
+            if m_tot:
+                tot = limpiar_monto(m_tot.group(1))
+                if tot > 0:
+                    break
+
+        # ── IVA / Crédito Fiscal ───────────────────────────────────────────────
+        iva = 0.0
+        for pat in [
+            r'[Ii]mpuesto\s+al\s+[Vv]alor\s+[Aa]gregado\s*13\s*%?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Ii]mpuesto\s+al\s+[Vv]alor\s+[Aa]gregado\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Ii][Vv][Aa]\s*13\s*%?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'13\s*%\s*[Ii][Vv][Aa]\s*:?\s*\$?\s*(\d[\d,.]+)',
+            # Tolera texto intermedio entre "Débito Fiscal" y el monto, p. ej.
+            # "Iva Débito Fiscal PST $1.62" (combustible / PowerCloud).
+            r'[Ii][Vv][Aa]\s+[Dd][eé]bito\s+[Ff]iscal[^\d\n]*(\d[\d,.]+)',
+            r'[Cc]r[eé]dito\s+[Ff]iscal\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Dd][eé]bito\s+[Ff]iscal[^\d\n]*(\d[\d,.]+)',
+        ]:
+            m_iva = re.search(pat, t_clean)
+            if m_iva:
+                iva = limpiar_monto(m_iva.group(1))
+                if iva > 0:
+                    break
+
+        # ── Gravadas ───────────────────────────────────────────────────────────
+        gra = 0.0
+        for pat in [
+            r'[Vv]ta\.?\s+[Gg]ravada\s+[Nn]eta\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Vv]entas?\s+[Gg]ravadas?\s+[Ll]ocales?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            # "Total ventas gravadas: $ 16.55" — base imponible real del CCF
+            # (no confundir con "Monto total gravado", que en combustible suma
+            #  FOVIAL/COTRANS/IVA e infla la base).
+            r'[Tt]otal\s+[Vv]entas?\s+[Gg]ravad[ao]s?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Tt]otal\s+[Gg]ravad[ao]\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'\b[Gg]ravado\s*:?\s*(\d[\d,.]+)',
+            r'[Ss]umatoria\s+de\s+[Vv]entas\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Ss]ub[\s\-]?[Tt]otal\s+(?:[Gg]ravad[ao]|[Vv]entas?)\s*:?\s*\$?\s*(\d[\d,.]+)',
+            # Layouts DTE comunes
+            r'[Mm]onto\s+[Ss]ujeto\s+a\s+(?:[Ii][Vv][Aa]|[Gg]ravar)\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Vv]entas\s+[Nn]etas?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Tt]otal\s+[Oo]peracion(?:es)?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Vv]alor\s+(?:de\s+)?[Vv]entas?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Bb]ase\s+[Ii]mponible\s*:?\s*\$?\s*(\d[\d,.]+)',
+            r'[Mm]onto\s+[Gg]ravado\s*:?\s*\$?\s*(\d[\d,.]+)',
+        ]:
+            m_grav = re.search(pat, t_clean)
+            if m_grav:
+                gra = limpiar_monto(m_grav.group(1))
+                if gra > 0:
+                    break
+
+        # ── Lógica de Reconciliación ───────────────────────────────────────────
+        iva_calculado = False
+        encontrado    = tot > 0 and iva > 0 and gra > 0
+
+        # DTE-01 de compra: factura de sujeto excluido, sin crédito fiscal
+        if not encontrado and tipo == "01":
+            iva       = 0.0
+            gra       = max(round(tot - exe, 2), 0.0)
+            encontrado = tot > 0
+
+        # DTE-14: sujeto excluido (igual, sin IVA)
+        if not encontrado and tipo == "14":
+            iva       = 0.0
+            gra       = max(round(tot - exe, 2), 0.0)
+            encontrado = tot > 0
+
+        # ── Búsqueda por consistencia matemática (O(n²) con índice IVA) ────────
+        # CORREGIDO: en lugar de triple loop O(n³), construir índice de IVA
+        # para buscar pares (gravadas, iva) que cumplan la relación 13%.
+        if not encontrado:
+            montos_raw = re.findall(
+                r'(?<![A-Z\-])(\d{1,3}(?:[,\.]\d{3})*[,\.]\d{2}|\d+\.\d{2}|\d+,\d{2})',
+                t_clean,
+            )
+            set_montos: set[float] = set()
+            for rv in montos_raw:
+                v = limpiar_monto(rv)
+                if 0.01 < v < 1_000_000:
+                    set_montos.add(round(v, 2))
+
+            valores = sorted(list(set_montos), reverse=True)[:MAX_VALORES_LOOP]
+            # Construir set para búsqueda O(1)
+            set_valores = set(valores)
+
+            for vg in valores:
+                vi_esperado = round(vg * 0.13, 2)
+                # Tolerancia ±1 centavo
+                for delta in [0, 0.01, -0.01, 0.02, -0.02]:
+                    vi_cand = round(vi_esperado + delta, 2)
+                    if vi_cand not in set_valores:
+                        continue
+                    vt_cand = round(vg + vi_cand + exe - ret + perc, 2)
+                    # Buscar total dentro de ±0.10
+                    for vt in valores:
+                        if abs(vt - vt_cand) <= 0.10 and vt > vg:
+                            gra       = vg
+                            iva       = vi_cand
+                            tot       = vt
+                            encontrado = True
+                            break
+                    if encontrado:
+                        break
+                if encontrado:
+                    break
+
+        # ── Ajustes finales ───────────────────────────────────────────────────
+        if not encontrado:
+            if tot > 0 and iva > 0 and gra == 0.0:
+                gra       = max(round(tot - iva - exe + ret - perc, 2), 0.0)
+                encontrado = True
+            elif tot > 0 and iva == 0.0 and gra == 0.0 and tipo == "03":
+                gra           = round((tot - exe + ret - perc) / 1.13, 2)
+                iva           = round(tot - exe + ret - perc - gra, 2)
+                iva_calculado = True
+                encontrado    = True
+            elif tot == 0.0 and gra > 0 and iva > 0:
+                tot = round(gra + iva + exe - ret + perc, 2)
+
+        # ── Guard de consistencia fiscal (combustible / CCF) ──────────────────
+        # En facturas de combustible varios totales ("Sub-Total", "Monto total
+        # gravado", total - iva) incluyen FOVIAL/COTRANS y/o el propio IVA, lo
+        # que infla la base gravada y produce falsos "IVA ≠ gravadas×13%".
+        # El IVA al 13% es el ancla legal más confiable: si la base no cuadra
+        # con él y el exceso se explica por FOVIAL/COTRANS (±IVA), derivamos la
+        # base imponible real desde el IVA y movemos FOVIAL/COTRANS a exentas.
+        if tipo in ("03", "05", "06") and iva > 0 and gra > 0:
+            if abs(iva - round(gra * 0.13, 2)) > 0.05:
+                base_real = round(iva / 0.13, 2)
+                exceso    = round(gra - base_real, 2)
+                if (
+                    fovial_cotrans > 0
+                    or abs(exceso - fovial_cotrans) <= 0.05
+                    or abs(exceso - (fovial_cotrans + iva)) <= 0.05
+                ):
+                    gra = base_real
+                    exe = max(exe, fovial_cotrans)
+
+        gra = max(gra, 0.0)
+        iva = max(iva, 0.0)
+        tot = max(tot, 0.0)
+
+        # ── Completar campos desde Vision cuando regex obtuvo vacío/0 ─────────
+        if _vision_campos:
+            if _vision_campos.get("gravadas") and gra == 0.0:
+                gra = round(float(_vision_campos["gravadas"]), 2)
+            if _vision_campos.get("iva") and iva == 0.0:
+                iva = round(float(_vision_campos["iva"]), 2)
+            if _vision_campos.get("total") and tot == 0.0:
+                tot = round(float(_vision_campos["total"]), 2)
+            if _vision_campos.get("exentas") and exe == 0.0:
+                exe = round(float(_vision_campos["exentas"]), 2)
+            # Sello: Vision es la fuente primaria (~40 chars); regex como respaldo
+            v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
+            if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
+                sello = v_sello
+
+        # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
+        try:
+            _qr = _extraer_qr(file_bytes)
+            if _qr.get("codigo_generacion"):
+                gen = _qr["codigo_generacion"].upper()
+                gen_sin_guiones = gen.replace("-", "")
+            if _qr.get("num_control") and not ctrl:
+                _qc = _qr["num_control"].upper()
+                _mq = re.search(r'DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18}', _qc, re.I)
+                if _mq:
+                    ctrl        = _qc
+                    tipo        = _mq.group(1)
+                    num_control = ctrl.replace("-", "")
+            # NIT del emisor del QR como respaldo si regex no lo encontró
+            if not nit_prov and _qr.get("nit_emisor_qr"):
+                _nq = re.sub(r'[^0-9]', '', str(_qr["nit_emisor_qr"]))
+                if len(_nq) == 14 and _nq not in excluir_nits:
+                    nit_prov = _nq
+            # Fecha del QR como respaldo si regex no la encontró
+            if not fecha and _qr.get("fecha_qr"):
+                _fq = str(_qr["fecha_qr"]).strip()
+                _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fq)
+                if _mf:
+                    fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
+        except Exception:
+            pass
+
+        return {
+            "fecha"          : fecha,
+            "tipo"           : tipo,
+            "num_control"    : num_control,
+            "num_control_raw": ctrl,
+            "sello"          : sello,
+            "gen"            : gen,
+            "gen_sin_guiones": gen_sin_guiones,
+            "nit_prov"       : nit_prov,
+            "dui_prov"       : dui_prov,
+            "nom_prov"       : nom_prov,
+            "exe"            : round(exe,  2),
+            "gra"            : round(gra,  2),
+            "iva"            : round(iva,  2),
+            "ret"            : round(ret,  2),
+            "perc"           : round(perc, 2),
+            "tot"            : round(tot,  2),
+            "fovial"         : round(fovial,  2),
+            "cotrans"        : round(cotrans, 2),
+            "estado"              : "OK",
+            "iva_calc"            : iva_calculado,
+            "es_nuevo"            : es_nuevo,
+            "gemini_correcciones" : gemini_correcciones,
+            "_vision_campos"      : _vision_campos,
+            "_vision_alertas"     : _vision_alertas,
+            "_vision_audit"       : _vision_audit,
+        }
+
+    except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
+        return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
+    except Exception as err:
+        return {"error_extraccion": safe_str(err)}
