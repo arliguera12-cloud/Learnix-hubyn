@@ -1,38 +1,92 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
-export default function PdfUploader({ onUpload, loading }) {
-  const [file, setFile] = useState(null)
+export default function PdfUploader({ onUpload, loading, multiple = false }) {
+  const inputRef = useRef(null)
+  const [files, setFiles] = useState([])
   const [declaranteId, setDeclaranteId] = useState('')
+  const [nombreDeclarante, setNombreDeclarante] = useState('')
+  const [dragging, setDragging] = useState(false)
+
+  function handleFiles(selected) {
+    const pdfs = Array.from(selected).filter(f => f.name.toLowerCase().endsWith('.pdf'))
+    setFiles(pdfs)
+  }
+
+  function handleDrop(e) {
+    e.preventDefault()
+    setDragging(false)
+    handleFiles(e.dataTransfer.files)
+  }
 
   function handleSubmit(e) {
     e.preventDefault()
-    if (!file || !declaranteId) return
-    onUpload(file, declaranteId)
+    if (!files.length || !declaranteId.trim()) return
+    onUpload(multiple ? files : files[0], declaranteId.trim(), nombreDeclarante.trim())
   }
 
+  const canSubmit = files.length > 0 && declaranteId.trim() && !loading
+
   return (
-    <form onSubmit={handleSubmit} className="pdf-uploader">
-      <label>
-        ID del declarante
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">NIT del declarante *</label>
+          <input
+            className="input"
+            placeholder="06141503071023"
+            value={declaranteId}
+            onChange={e => setDeclaranteId(e.target.value)}
+            maxLength={14}
+            required
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Nombre / Razón social</label>
+          <input
+            className="input"
+            placeholder="EMPRESA S.A. DE C.V."
+            value={nombreDeclarante}
+            onChange={e => setNombreDeclarante(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* Drop zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+        onClick={() => inputRef.current?.click()}
+        className={`border-2 border-dashed rounded-xl px-6 py-8 text-center cursor-pointer transition-colors duration-150
+          ${dragging ? 'border-brand-500 bg-brand-500/10' : 'border-surface-500 hover:border-surface-400 bg-surface-800'}`}
+      >
+        <p className="text-2xl mb-2">📄</p>
+        <p className="text-sm text-slate-300">
+          {files.length
+            ? files.map(f => f.name).join(', ')
+            : 'Arrastra el PDF aquí o haz clic para seleccionar'}
+        </p>
+        <p className="text-xs text-slate-500 mt-1">Solo archivos .pdf{multiple ? ' — múltiples permitidos' : ''}</p>
         <input
-          type="text"
-          value={declaranteId}
-          onChange={(e) => setDeclaranteId(e.target.value)}
-          placeholder="ej. 06141503071023"
-          required
-        />
-      </label>
-      <label>
-        Archivo PDF
-        <input
+          ref={inputRef}
           type="file"
           accept=".pdf"
-          onChange={(e) => setFile(e.target.files[0] ?? null)}
-          required
+          multiple={multiple}
+          className="hidden"
+          onChange={e => handleFiles(e.target.files)}
         />
-      </label>
-      <button type="submit" disabled={loading || !file || !declaranteId}>
-        {loading ? 'Procesando…' : 'Extraer DTE'}
+      </div>
+
+      <button type="submit" disabled={!canSubmit} className="btn-primary w-full py-2.5">
+        {loading ? (
+          <span className="flex items-center justify-center gap-2">
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+            </svg>
+            Procesando…
+          </span>
+        ) : 'Extraer DTE'}
       </button>
     </form>
   )

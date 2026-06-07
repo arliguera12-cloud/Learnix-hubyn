@@ -14,34 +14,32 @@ api.interceptors.request.use(async (config) => {
   return config
 })
 
+// ─── Helper ────────────────────────────────────────────────────────────────
+
+function buildForm(file, declaranteId, nombre = '') {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('declarante_id', declaranteId)
+  if (nombre) form.append('nombre_declarante', nombre)
+  return form
+}
+
 // ─── DTEs ──────────────────────────────────────────────────────────────────
 
-export function procesarVentas(file, declaranteId) {
-  const form = new FormData()
-  form.append('file', file)
-  form.append('declarante_id', declaranteId)
-  return api.post('/procesar/ventas', form)
+export function procesarVentas(file, declaranteId, nombre) {
+  return api.post('/procesar/ventas', buildForm(file, declaranteId, nombre))
 }
 
-export function procesarCompras(file, declaranteId) {
-  const form = new FormData()
-  form.append('file', file)
-  form.append('declarante_id', declaranteId)
-  return api.post('/procesar/compras', form)
+export function procesarCompras(file, declaranteId, nombre) {
+  return api.post('/procesar/compras', buildForm(file, declaranteId, nombre))
 }
 
-export function procesarRetenciones(file, declaranteId) {
-  const form = new FormData()
-  form.append('file', file)
-  form.append('declarante_id', declaranteId)
-  return api.post('/procesar/retenciones', form)
+export function procesarRetenciones(file, declaranteId, nombre) {
+  return api.post('/procesar/retenciones', buildForm(file, declaranteId, nombre))
 }
 
-export function procesarSujetosExcluidos(file, declaranteId) {
-  const form = new FormData()
-  form.append('file', file)
-  form.append('declarante_id', declaranteId)
-  return api.post('/procesar/sujetos-excluidos', form)
+export function procesarSujetosExcluidos(file, declaranteId, nombre) {
+  return api.post('/procesar/sujetos-excluidos', buildForm(file, declaranteId, nombre))
 }
 
 // ─── Declarantes ───────────────────────────────────────────────────────────
