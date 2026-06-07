@@ -1,0 +1,274 @@
+{
+  "informe": "F07",
+  "anexo": 1,
+  "nombre_anexo": "Detalle de Ventas a Contribuyentes",
+  "numero_anexo_valor_fijo": "1",
+  "configuracion_archivo": {
+    "formato": "CSV",
+    "separador": ";",
+    "codificacion": "UTF-8",
+    "incluye_encabezados": false,
+    "formato_celdas": "Texto"
+  },
+  "instrucciones_llenado": {
+    "orden_procesamiento": "Un DTE por fila. Sin filas de encabezado.",
+    "cuando_monto_no_aplica": "Colocar 0.00",
+    "permitir_negativos": false,
+    "fuente_datos": {
+      "clase_documento": "Para DTEs siempre '4'",
+      "tipo_documento": "Derivar del tipo de DTE: CCF=03, NC=05, ND=06",
+      "numero_resolucion": "Para DTE: número de control sin guiones (col D)",
+      "serie_documento": "Para DTE: sello de recepción (col E)",
+      "numero_documento": "Para DTE: código de generación sin guiones (col F)",
+      "numero_control_interno": "Para DTE: dejar completamente vacío (col G)",
+      "identificacion_cliente": "XOR entre columna H (NIT/NRC) y columna Q (DUI). Nunca ambos."
+    },
+    "regla_periodo": {
+      "desde_enero_2022": "Personas naturales: completar DUI en col Q y dejar vacío col H",
+      "antes_enero_2022": "Completar NIT/NRC en col H y dejar vacío col Q",
+      "columnas_renta_R_S": "Obligatorias desde Enero 2025. Para periodos anteriores colocar '0' en ambas."
+    }
+  },
+  "estructura_columnas": [
+    {
+      "columna": "A",
+      "campo": "fecha_emision",
+      "tipo": "Texto",
+      "formato": "DD/MM/AAAA",
+      "longitud_exacta": 10,
+      "obligatorio": true,
+      "descripcion": "Fecha de emisión del documento. Debe coincidir con el mes y año del período declarado."
+    },
+    {
+      "columna": "B",
+      "campo": "clase_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 1,
+      "obligatorio": true,
+      "valores_permitidos": ["1", "2", "4"],
+      "mapeo_valores": {
+        "1": "Impreso por Imprenta o Tiquetes",
+        "2": "Formulario Único",
+        "4": "Documento Tributario Electrónico DTE"
+      }
+    },
+    {
+      "columna": "C",
+      "campo": "tipo_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 2,
+      "obligatorio": true,
+      "valores_permitidos": ["03", "05", "06"],
+      "mapeo_valores": {
+        "03": "Comprobante de Crédito Fiscal",
+        "05": "Nota de Crédito",
+        "06": "Nota de Débito"
+      }
+    },
+    {
+      "columna": "D",
+      "campo": "numero_resolucion",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Si col B = '4': número de control del DTE sin guiones. Para docs anteriores a nov-2022: código de generación sin guiones."
+    },
+    {
+      "columna": "E",
+      "campo": "serie_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Si col B = '4': sello de recepción del DTE."
+    },
+    {
+      "columna": "F",
+      "campo": "numero_documento",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": true,
+      "regla_dte": "Si col B = '4': código de generación del DTE sin guiones (32 chars). Para docs anteriores a nov-2022: número de control sin guiones (28 chars)."
+    },
+    {
+      "columna": "G",
+      "campo": "numero_control_interno",
+      "tipo": "Texto",
+      "longitud_maxima": 100,
+      "obligatorio": false,
+      "regla_dte": "Si col B = '4': DEJAR COMPLETAMENTE VACÍO. Si col B = '2' (Formulario Único): mismo valor que col F.",
+      "valor_dte": null
+    },
+    {
+      "columna": "H",
+      "campo": "nit_o_nrc_cliente",
+      "tipo": "Texto",
+      "longitud_maxima": 14,
+      "obligatorio": "Condicional",
+      "descripcion": "NIT (14 dígitos) o NRC sin guiones/pleca. Vacío si se completa col Q (DUI). Obligatorio si col Q está vacía.",
+      "regla_xor": "No puede coexistir con col Q"
+    },
+    {
+      "columna": "I",
+      "campo": "nombre_razon_social",
+      "tipo": "Texto",
+      "longitud_maxima": null,
+      "obligatorio": true,
+      "descripcion": "Nombre completo, razón social o denominación del cliente contribuyente."
+    },
+    {
+      "columna": "J",
+      "campo": "ventas_exentas",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00",
+      "descripcion": "Monto de ventas exentas. Punto decimal sin separador de miles."
+    },
+    {
+      "columna": "K",
+      "campo": "ventas_no_sujetas",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00",
+      "descripcion": "Monto de operaciones no sujetas a IVA."
+    },
+    {
+      "columna": "L",
+      "campo": "ventas_gravadas_locales",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00",
+      "descripcion": "Monto neto de ventas gravadas locales (sin IVA)."
+    },
+    {
+      "columna": "M",
+      "campo": "debito_fiscal",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00",
+      "descripcion": "Débito Fiscal IVA. Validar: M = L × 13% (tolerancia ±0.02)."
+    },
+    {
+      "columna": "N",
+      "campo": "ventas_cuenta_terceros_no_domiciliados",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00",
+      "descripcion": "Ventas a cuenta de terceros no domiciliados."
+    },
+    {
+      "columna": "O",
+      "campo": "debito_fiscal_cuenta_terceros",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "valor_cero": "0.00",
+      "descripcion": "Débito fiscal por ventas a cuenta de terceros."
+    },
+    {
+      "columna": "P",
+      "campo": "total_ventas",
+      "tipo": "Numérico",
+      "longitud_maxima": 10,
+      "decimales": 2,
+      "permitir_negativos": false,
+      "obligatorio": true,
+      "descripcion": "Total de ventas del documento. Sin negativos."
+    },
+    {
+      "columna": "Q",
+      "campo": "dui_cliente",
+      "tipo": "Texto",
+      "longitud_exacta": 9,
+      "obligatorio": "Condicional",
+      "descripcion": "DUI sin guiones/pleca. Solo para personas naturales desde enero 2022. Si se completa, col H debe estar vacía.",
+      "regla_xor": "No puede coexistir con col H",
+      "antes_enero_2022": "Dejar completamente vacío"
+    },
+    {
+      "columna": "R",
+      "campo": "tipo_operacion_renta",
+      "tipo": "Texto",
+      "longitud_maxima": 2,
+      "obligatorio": true,
+      "vigente_desde": "Enero 2025",
+      "antes_enero_2025": "Colocar '0'",
+      "valores_permitidos": ["1", "2", "3", "4", "12", "13"],
+      "mapeo_valores": {
+        "1": "Gravada",
+        "2": "No Gravada o Exento",
+        "3": "Excluido o no Constituye Renta",
+        "4": "Mixta (mismo doc con operación gravada y exenta)",
+        "12": "Ingresos sujetos de retención en F14 consolidados en F910",
+        "13": "Sujetos pasivos excluidos (art. 6 LISR) o ingresos sin hecho generador ISR"
+      }
+    },
+    {
+      "columna": "S",
+      "campo": "tipo_ingreso_renta",
+      "tipo": "Texto",
+      "longitud_maxima": 2,
+      "obligatorio": true,
+      "vigente_desde": "Enero 2025",
+      "antes_enero_2025": "Colocar '0'",
+      "valores_permitidos": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "13"],
+      "mapeo_valores": {
+        "1": "Profesiones, Artes y Oficios",
+        "2": "Actividades de Servicios",
+        "3": "Actividades Comerciales",
+        "4": "Actividades Industriales",
+        "5": "Actividades Agropecuarias",
+        "6": "Utilidades y Dividendos",
+        "7": "Exportaciones de bienes",
+        "8": "Servicios Realizados en el Exterior y Utilizados en El Salvador",
+        "9": "Exportaciones de servicios",
+        "10": "Otras Rentas Gravables",
+        "12": "Ingresos sujetos de retención en F14 consolidados en F910",
+        "13": "Sujetos pasivos excluidos (art. 6 LISR) o ingresos sin hecho generador ISR"
+      }
+    },
+    {
+      "columna": "T",
+      "campo": "numero_anexo",
+      "tipo": "Texto",
+      "longitud_exacta": 1,
+      "obligatorio": true,
+      "valor_fijo": "1",
+      "descripcion": "Identificador del anexo. Siempre '1' para este reporte."
+    }
+  ],
+  "reglas_cruzadas": [
+    {
+      "id": "VAL_01",
+      "regla": "XOR(columna_H, columna_Q)",
+      "mensaje": "NIT/NRC (col H) y DUI (col Q) no pueden coexistir. Uno debe estar vacío."
+    },
+    {
+      "id": "VAL_02",
+      "regla": "columna_M == columna_L * 0.13",
+      "tolerancia": 0.02,
+      "mensaje": "El débito fiscal (M) debe ser el 13% de las ventas gravadas locales (L)."
+    },
+    {
+      "id": "VAL_03",
+      "regla": "Sin comas como separador de miles. Solo punto decimal.",
+      "mensaje": "Formato numérico inválido."
+    }
+  ]
+}
