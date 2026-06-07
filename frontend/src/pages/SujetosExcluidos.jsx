@@ -1,32 +1,14 @@
-import { useState } from 'react'
+import ExtractorPage from '../components/ExtractorPage'
 import { procesarSujetosExcluidos } from '../services/api'
-import PdfUploader from '../components/PdfUploader'
-import ResultadosTabla from '../components/ResultadosTabla'
 
 export default function SujetosExcluidos() {
-  const [resultados, setResultados] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  async function handleUpload(file, declaranteId) {
-    setLoading(true)
-    setError(null)
-    try {
-      const { data } = await procesarSujetosExcluidos(file, declaranteId)
-      setResultados(data)
-    } catch (err) {
-      setError(err.response?.data?.detail ?? err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
-    <div className="page">
-      <h1>Extractor DTE — Sujetos Excluidos</h1>
-      <PdfUploader onUpload={handleUpload} loading={loading} />
-      {error && <p className="error">{error}</p>}
-      {resultados && <ResultadosTabla data={resultados} />}
-    </div>
+    <ExtractorPage
+      titulo="Extractor DTE — Sujetos Excluidos"
+      icono="📋"
+      descripcion="Extrae comprobantes de sujetos excluidos con retención renta 10% (DTE-14). Genera Anexo 5 — Casilla 66 para F-07."
+      tipo="sujetos_excluidos"
+      apiFn={(file, dId, nombre) => procesarSujetosExcluidos(file, dId, nombre)}
+    />
   )
 }

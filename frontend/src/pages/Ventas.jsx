@@ -1,32 +1,14 @@
-import { useState } from 'react'
+import ExtractorPage from '../components/ExtractorPage'
 import { procesarVentas } from '../services/api'
-import PdfUploader from '../components/PdfUploader'
-import ResultadosTabla from '../components/ResultadosTabla'
 
 export default function Ventas() {
-  const [resultados, setResultados] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  async function handleUpload(file, declaranteId) {
-    setLoading(true)
-    setError(null)
-    try {
-      const { data } = await procesarVentas(file, declaranteId)
-      setResultados(data)
-    } catch (err) {
-      setError(err.response?.data?.detail ?? err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
-    <div className="page">
-      <h1>Extractor DTE — Ventas</h1>
-      <PdfUploader onUpload={handleUpload} loading={loading} />
-      {error && <p className="error">{error}</p>}
-      {resultados && <ResultadosTabla data={resultados} />}
-    </div>
+    <ExtractorPage
+      titulo="Extractor DTE — Ventas"
+      icono="📤"
+      descripcion="Extrae CCF, Notas de Crédito/Débito (DTE-03, 05, 06) y Facturas Consumidor Final (DTE-01). Genera Anexos 1 y 2 para F-07."
+      tipo="ventas"
+      apiFn={(file, dId, nombre) => procesarVentas(file, dId, nombre)}
+    />
   )
 }

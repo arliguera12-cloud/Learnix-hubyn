@@ -1,18 +1,30 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './services/auth'
+import Layout from './components/Layout'
 
-import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
-import Ventas from './pages/Ventas'
-import Compras from './pages/Compras'
-import Retenciones from './pages/Retenciones'
+import Login            from './pages/Login'
+import Dashboard        from './pages/Dashboard'
+import Ventas           from './pages/Ventas'
+import Compras          from './pages/Compras'
+import Retenciones      from './pages/Retenciones'
 import SujetosExcluidos from './pages/SujetosExcluidos'
-import Clientes from './pages/Clientes'
-import Proveedores from './pages/Proveedores'
+import Clientes         from './pages/Clientes'
+import Proveedores      from './pages/Proveedores'
 
 function ProtectedRoute({ children }) {
-  const { session } = useAuth()
-  return session ? children : <Navigate to="/login" replace />
+  const { session, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-surface-900 flex items-center justify-center">
+        <div className="animate-spin h-8 w-8 border-2 border-brand-500 border-t-transparent rounded-full" />
+      </div>
+    )
+  }
+
+  if (!session) return <Navigate to="/login" replace />
+
+  return <Layout>{children}</Layout>
 }
 
 export default function App() {
