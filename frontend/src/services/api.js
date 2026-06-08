@@ -24,7 +24,7 @@ function buildForm(file, declaranteId, nombre = '') {
   return form
 }
 
-// ─── DTEs ──────────────────────────────────────────────────────────────────
+// ─── DTEs (single) ─────────────────────────────────────────────────────────
 
 export function procesarVentas(file, declaranteId, nombre) {
   return api.post('/procesar/ventas', buildForm(file, declaranteId, nombre))
@@ -40,6 +40,32 @@ export function procesarRetenciones(file, declaranteId, nombre) {
 
 export function procesarSujetosExcluidos(file, declaranteId, nombre) {
   return api.post('/procesar/sujetos-excluidos', buildForm(file, declaranteId, nombre))
+}
+
+// ─── DTEs (lote / multi-PDF) ───────────────────────────────────────────────
+
+function buildLoteForm(files, declaranteId, nombre = '') {
+  const form = new FormData()
+  for (const f of files) form.append('files', f)
+  form.append('declarante_id', declaranteId)
+  if (nombre) form.append('nombre_declarante', nombre)
+  return form
+}
+
+export function procesarVentasLote(files, declaranteId, nombre) {
+  return api.post('/procesar/ventas/lote', buildLoteForm(files, declaranteId, nombre))
+}
+
+export function procesarComprasLote(files, declaranteId, nombre) {
+  return api.post('/procesar/compras/lote', buildLoteForm(files, declaranteId, nombre))
+}
+
+export function procesarRetencionesLote(files, declaranteId, nombre) {
+  return api.post('/procesar/retenciones/lote', buildLoteForm(files, declaranteId, nombre))
+}
+
+export function procesarSujetosExcluidosLote(files, declaranteId, nombre) {
+  return api.post('/procesar/sujetos-excluidos/lote', buildLoteForm(files, declaranteId, nombre))
 }
 
 // ─── Declarantes ───────────────────────────────────────────────────────────

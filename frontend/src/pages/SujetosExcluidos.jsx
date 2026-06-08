@@ -1,5 +1,5 @@
 import ExtractorPage from '../components/ExtractorPage'
-import { procesarSujetosExcluidos } from '../services/api'
+import { procesarSujetosExcluidos, procesarSujetosExcluidosLote } from '../services/api'
 
 export default function SujetosExcluidos() {
   return (
@@ -8,7 +8,8 @@ export default function SujetosExcluidos() {
       icono="📋"
       descripcion="Extrae comprobantes de sujetos excluidos con retención renta 10% (DTE-14). Genera Anexo 5 — Casilla 66 para F-07."
       tipo="sujetos_excluidos"
-      apiFn={(file, dId, nombre) => procesarSujetosExcluidos(file, dId, nombre)}
+      apiFn={procesarSujetosExcluidos}
+      loteApiFn={procesarSujetosExcluidosLote}
     />
   )
 }

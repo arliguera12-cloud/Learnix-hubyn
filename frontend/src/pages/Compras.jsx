@@ -1,5 +1,5 @@
 import ExtractorPage from '../components/ExtractorPage'
-import { procesarCompras } from '../services/api'
+import { procesarCompras, procesarComprasLote } from '../services/api'
 
 export default function Compras() {
   return (
@@ -8,7 +8,8 @@ export default function Compras() {
       icono="📥"
       descripcion="Extrae CCF recibidos de proveedores (DTE-03, 05, 06, 11). Genera Anexo 3 para F-07."
       tipo="compras"
-      apiFn={(file, dId, nombre) => procesarCompras(file, dId, nombre)}
+      apiFn={procesarCompras}
+      loteApiFn={procesarComprasLote}
     />
   )
 }

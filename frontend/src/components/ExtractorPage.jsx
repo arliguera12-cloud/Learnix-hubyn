@@ -2,24 +2,50 @@ import { useState } from 'react'
 import PdfUploader from './PdfUploader'
 import ResultadosTabla from './ResultadosTabla'
 
-export default function ExtractorPage({ titulo, icono, descripcion, tipo, apiFn }) {
-  const [resultado, setResultado] = useState(null)
-  const [loading,   setLoading]   = useState(false)
-  const [error,     setError]     = useState(null)
+export default function ExtractorPage({ titulo, icono, descripcion, tipo, apiFn, loteApiFn }) {
+  const [resultados, setResultados] = useState([])
+  const [loading,    setLoading]    = useState(false)
+  const [error,      setError]      = useState(null)
+  const [progress,   setProgress]   = useState(null) // { done, total } during batch
   const [declaranteId, setDeclaranteId] = useState('')
 
-  async function handleUpload(file, dId, nombre) {
+  async function handleUpload(filesOrFile, dId, nombre) {
     setLoading(true)
     setError(null)
+    setProgress(null)
     setDeclaranteId(dId)
+
+    const isMultiple = Array.isArray(filesOrFile)
+
     try {
-      const { data } = await apiFn(file, dId, nombre)
-      setResultado(data)
+      if (isMultiple && loteApiFn) {
+        // Batch call — single request, multiple files
+        const { data } = await loteApiFn(filesOrFile, dId, nombre)
+        const items = data.resultados ?? []
+        if (data.errores?.length) {
+          setError(data.errores.map(e => `${e.filename}: ${e.error}`).join('\n'))
+        }
+        setResultados(items)
+      } else if (isMultiple) {
+        // Sequential fallback when no loteApiFn
+        const acc = []
+        for (let i = 0; i < filesOrFile.length; i++) {
+          setProgress({ done: i, total: filesOrFile.length })
+          const { data } = await apiFn(filesOrFile[i], dId, nombre)
+          acc.push(data)
+        }
+        setProgress({ done: filesOrFile.length, total: filesOrFile.length })
+        setResultados(acc)
+      } else {
+        const { data } = await apiFn(filesOrFile, dId, nombre)
+        setResultados([data])
+      }
     } catch (err) {
       const detail = err.response?.data?.detail
       setError(typeof detail === 'string' ? detail : JSON.stringify(detail ?? err.message))
     } finally {
       setLoading(false)
+      setProgress(null)
     }
   }
 
@@ -33,19 +59,33 @@ export default function ExtractorPage({ titulo, icono, descripcion, tipo, apiFn 
       </div>
 
       <div className="card">
-        <PdfUploader onUpload={handleUpload} loading={loading} />
+        <PdfUploader onUpload={handleUpload} loading={loading} multiple={!!loteApiFn} />
       </div>
+
+      {progress && (
+        <div className="card">
+          <p className="text-sm text-slate-300">
+            Procesando {progress.done + 1} de {progress.total}…
+          </p>
+          <div className="mt-2 h-1.5 bg-surface-700 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-brand-500 transition-all duration-300"
+              style={{ width: `${((progress.done + 1) / progress.total) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="card border-red-800 bg-red-900/20">
           <p className="text-red-400 font-semibold text-sm">⚠️ Error</p>
-          <p className="text-red-300 text-sm mt-1">{error}</p>
+          <pre className="text-red-300 text-sm mt-1 whitespace-pre-wrap">{error}</pre>
         </div>
       )}
 
-      {resultado && (
-        <ResultadosTabla data={resultado} tipo={tipo} declaranteId={declaranteId} />
-      )}
+      {resultados.map((r, i) => (
+        <ResultadosTabla key={i} data={r} tipo={tipo} declaranteId={declaranteId} />
+      ))}
     </div>
   )
 }
