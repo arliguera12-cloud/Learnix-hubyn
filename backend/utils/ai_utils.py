@@ -300,10 +300,14 @@ RECEPTOR (comprador):
   NIT   : {nit_receptor}
   Nombre: {nom_receptor}
 
-CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores):
+CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores, 0 = no encontrado):
   fecha_emision : "{campos.get('fecha', '')}"
   nit_emisor    : "{campos.get('nit_prov', '')}"
   nombre_emisor : "{campos.get('nom_prov', '')}"
+  exe (exentas) : {campos.get('exe', 0)}
+  gra (gravadas): {campos.get('gra', 0)}
+  iva (crédito) : {campos.get('iva', 0)}
+  tot (total)   : {campos.get('tot', 0)}
 
 TEXTO DEL PDF:
 {texto_pdf[:6000]}
@@ -311,10 +315,16 @@ TEXTO DEL PDF:
 {_ejemplos}
 {_INSTRUCCIONES_COT}
 
-CAMPOS A VERIFICAR:
+CAMPOS A VERIFICAR O EXTRAER (usa null si ya está correcto o no aparece):
   • fecha    : Fecha de EMISIÓN en formato DD/MM/YYYY
   • nit_prov : NIT del EMISOR (14 dígitos); NO puede ser {nit_receptor}
   • nom_prov : Razón social del EMISOR; NO puede ser "{nom_receptor}" ni metadata
+  • exe      : Compras exentas / no sujetas (número, 0 si no hay); null si el regex ya lo obtuvo
+  • gra      : Compras gravadas — base imponible SIN IVA (número); null si el regex ya lo obtuvo
+  • iva      : Crédito fiscal / IVA 13% (número); null si el regex ya lo obtuvo
+  • tot      : Total a pagar (número); null si el regex ya lo obtuvo
+  IMPORTANTE: extrae montos solo si el valor del campo en "CAMPOS EXTRAÍDOS" es 0 o vacío.
+  Verifica: gra × 0.13 ≈ iva (tolerancia ±$0.02); tot ≈ gra + iva + exe.
 {_FORMATO_JSON_BASE}
 Estructura requerida:
 {{
@@ -322,6 +332,10 @@ Estructura requerida:
   "fecha": "DD/MM/YYYY o null",
   "nit_prov": "14 dígitos o null",
   "nom_prov": "nombre del emisor o null",
+  "exe": 0.0,
+  "gra": 0.0,
+  "iva": 0.0,
+  "tot": 0.0,
   "correcciones": ["descripción de cada campo modificado"],
   "auditoria_ia": {{"modelo_utilizado": "llama-3.3-70b-versatile", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
 }}"""
@@ -912,6 +926,11 @@ def _extraer_campos_corregidos(resultado: dict, campos_actuales: dict, tipo_dte:
             campos_corr["nit_prov"] = nit
         elif nit and len(nit) == 9:
             campos_corr["dui_prov"] = nit
+        # Montos: aplicar solo cuando el regex devolvió 0
+        for campo_monto in ("gra", "iva", "exe", "tot"):
+            val_ia = normalizar_monto_ia(resultado.get(campo_monto))
+            if val_ia is not None and val_ia > 0 and float(campos_actuales.get(campo_monto, 0) or 0) == 0:
+                campos_corr[campo_monto] = round(val_ia, 2)
 
     elif tipo_dte == "retenciones":
         nom = _validar_nombre(resultado.get("nom_prov"), campos_actuales.get("nom_prov", ""))
@@ -1556,6 +1575,8 @@ def necesita_verificacion(campos: dict, nit_receptor: str) -> tuple[bool, list[s
         razones.append("Fecha de emisión no encontrada")
     if not campos.get("nit_prov", "").strip():
         razones.append("NIT del emisor no encontrado")
+    if float(campos.get("tot", 0) or 0) == 0 and float(campos.get("gra", 0) or 0) == 0:
+        razones.append("Montos principales (gravadas/total) no extraídos por regex")
     # Solo llamar a Groq-texto si quedó algún campo dudoso o vacío.
     return bool(razones), razones
 

@@ -622,6 +622,15 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                     nom_prov = _corr_dict["nom_prov"]
                 if _corr_dict.get("nit_prov") and not nit_prov:
                     nit_prov = _corr_dict["nit_prov"]
+                # Montos: Groq extrae cuando regex devolvió 0
+                if _corr_dict.get("gra") and gra == 0.0:
+                    gra = float(_corr_dict["gra"])
+                if _corr_dict.get("iva") and iva == 0.0:
+                    iva = float(_corr_dict["iva"])
+                if _corr_dict.get("exe") and exe == 0.0:
+                    exe = float(_corr_dict["exe"])
+                if _corr_dict.get("tot") and tot == 0.0:
+                    tot = float(_corr_dict["tot"])
 
         # ── FOVIAL y COTRANS ───────────────────────────────────────────────────
         # CORREGIDO: en facturas de combustible la etiqueta viene seguida de la
