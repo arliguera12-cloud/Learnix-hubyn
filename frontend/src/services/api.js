@@ -76,9 +76,13 @@ export function getDeclarantes() {
 
 // ─── Exportación ───────────────────────────────────────────────────────────
 
-export function exportarExcel(tipo, declaranteId, periodo) {
-  const params = { tipo, declarante_id: declaranteId, ...(periodo && { periodo }) }
-  return api.get('/exportar/excel', { params, responseType: 'blob' })
+export function exportarExcel(tipo, declaranteId, registros, periodo) {
+  return api.post('/exportar/excel', {
+    tipo,
+    declarante_id: declaranteId,
+    registros,
+    ...(periodo && { periodo }),
+  }, { responseType: 'blob' })
 }
 
 export default api
