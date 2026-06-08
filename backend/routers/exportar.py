@@ -1,7 +1,7 @@
 """
 Exportación al formato exacto F-07 — Ministerio de Hacienda El Salvador.
-POST /exportar/excel → .xlsx con columnas exactas de cada Anexo.
-Sin filas de título, sin metadata, primera fila = nombres de columnas.
+Columnas y nombres copiados exactamente del MVP Streamlit (pages/1_ y 2_).
+POST /exportar/excel → .xlsx
 """
 import io
 import re
@@ -14,220 +14,212 @@ from pydantic import BaseModel
 router = APIRouter()
 
 _TIPOS_VALIDOS = {"ventas", "compras", "retenciones", "sujetos_excluidos"}
-
-# Tipos DTE → Anexo al que pertenecen
 _TIPOS_CONTRIBUYENTES = {"03", "05", "06"}
 _TIPOS_CONSUMIDOR     = {"01", "02", "10", "11"}
 
 
 # ─── Utilidades ────────────────────────────────────────────────────────────
 
-def _fmt(v, decimals: int = 2) -> str:
-    """Número como texto con punto decimal, sin separador de miles."""
-    try:
-        return f"{float(v or 0):.{decimals}f}"
-    except (TypeError, ValueError):
-        return "0.00"
+def _f(v) -> float:
+    try: return round(float(v or 0), 2)
+    except: return 0.0
+
+def _s(v) -> str:
+    return str(v or "")
+
+def _clean(v) -> str:
+    return re.sub(r"[-]", "", _s(v))
 
 
-def _clean(s) -> str:
-    return re.sub(r"[-]", "", str(s or ""))
+# ─── Compras — columnas exactas del MVP (pages/2_Extractor_DTE_Compras.py) ─
 
-
-# ─── Anexo 1: Ventas a Contribuyentes (A-T, 20 cols) ──────────────────────
-
-COLS_ANX1 = [
-    "fecha_emision", "clase_documento", "tipo_documento",
-    "numero_resolucion", "serie_documento", "numero_documento",
-    "numero_control_interno",
-    "nit_o_nrc_cliente", "nombre_razon_social",
-    "ventas_exentas", "ventas_no_sujetas", "ventas_gravadas_locales",
-    "debito_fiscal",
-    "ventas_cuenta_terceros_no_domiciliados", "debito_fiscal_cuenta_terceros",
-    "total_ventas",
-    "dui_cliente", "tipo_operacion_renta", "tipo_ingreso_renta",
-    "numero_anexo",
+_COLS_COMPRAS_F07 = [
+    "A. Fecha Emisión",         "B. Clase Documento",         "C. Tipo Documento",
+    "D. Num Documento (UUID)",  "E. NIT/NRC Proveedor",       "F. Nombre Proveedor",
+    "G. Compras Exentas/NS",    "H. Internac. Exentas/NS",    "I. Import. Exentas/NS",
+    "J. Compras Gravadas",      "K. Internac. Grav. Bienes",  "L. Import. Grav. Bienes",
+    "M. Import. Grav. Servicios","N. Crédito Fiscal (IVA)",   "O. Total Compras",
+    "P. DUI Proveedor",
+    "Q. Tipo Operación",        "R. Clasificación",
+    "S. Sector",                "T. Tipo Costo/Gasto",        "U. Num Anexo",
 ]
+_ANCHOS_COMPRAS = [12,2,3,38,16,45,12,12,12,12,12,12,12,12,14,10,2,2,2,2,3]
 
-def _row_anx1(r: dict) -> dict:
+def _row_compras(r: dict, tipo_op="1", clasif="2", sector="4",
+                 tipo_cg="2", periodo_feb2024=True) -> dict:
+    gra = _f(r.get("gra")); exe = _f(r.get("exe")); iva = _f(r.get("iva"))
+    tot = _f(r.get("tot")) or (exe + gra)
+    q = tipo_op if periodo_feb2024 else "0"
+    s = sector   if periodo_feb2024 else "0"
+    rc = clasif  if periodo_feb2024 else "0"
+    tc = tipo_cg if periodo_feb2024 else "0"
     return {
-        "fecha_emision":                         str(r.get("fecha") or ""),
-        "clase_documento":                       "4",
-        "tipo_documento":                        str(r.get("tipo") or ""),
-        "numero_resolucion":                     _clean(r.get("num_control") or ""),
-        "serie_documento":                       str(r.get("sello") or ""),
-        "numero_documento":                      _clean(r.get("gen_sin_guiones") or r.get("gen") or ""),
-        "numero_control_interno":                "",
-        "nit_o_nrc_cliente":                     str(r.get("nit_cli") or ""),
-        "nombre_razon_social":                   str(r.get("nom_cli") or ""),
-        "ventas_exentas":                        _fmt(r.get("exentas")),
-        "ventas_no_sujetas":                     _fmt(r.get("no_sujetas")),
-        "ventas_gravadas_locales":               _fmt(r.get("gravadas")),
-        "debito_fiscal":                         _fmt(r.get("debito")),
-        "ventas_cuenta_terceros_no_domiciliados": _fmt(r.get("terceros")),
-        "debito_fiscal_cuenta_terceros":         _fmt(r.get("deb_terc")),
-        "total_ventas":                          _fmt(r.get("total")),
-        "dui_cliente":                           str(r.get("dui_cli") or ""),
-        "tipo_operacion_renta":                  str(r.get("tipo_operacion_renta") or "0"),
-        "tipo_ingreso_renta":                    str(r.get("tipo_ingreso_renta") or "0"),
-        "numero_anexo":                          "1",
+        "A. Fecha Emisión":          _s(r.get("fecha")),
+        "B. Clase Documento":        "4",
+        "C. Tipo Documento":         _s(r.get("tipo")),
+        "D. Num Documento (UUID)":   _clean(r.get("gen_sin_guiones") or r.get("gen")),
+        "E. NIT/NRC Proveedor":      _s(r.get("nit_prov")),
+        "F. Nombre Proveedor":       _s(r.get("nom_prov")),
+        "G. Compras Exentas/NS":     exe,
+        "H. Internac. Exentas/NS":   0.0,
+        "I. Import. Exentas/NS":     0.0,
+        "J. Compras Gravadas":       gra,
+        "K. Internac. Grav. Bienes": 0.0,
+        "L. Import. Grav. Bienes":   0.0,
+        "M. Import. Grav. Servicios":0.0,
+        "N. Crédito Fiscal (IVA)":   iva,
+        "O. Total Compras":          tot,
+        "P. DUI Proveedor":          _s(r.get("dui_prov")),
+        "Q. Tipo Operación":         q,
+        "R. Clasificación":          rc,
+        "S. Sector":                 s,
+        "T. Tipo Costo/Gasto":       tc,
+        "U. Num Anexo":              "3",
     }
 
 
-# ─── Anexo 2: Ventas a Consumidor Final (A-W, 23 cols) ────────────────────
+# ─── Ventas Contribuyentes — Anexo 1 (A-T, 20 cols) ──────────────────────
 
-COLS_ANX2 = [
-    "fecha_emision", "clase_documento", "tipo_documento",
-    "numero_resolucion", "serie_documento",
-    "numero_control_interno_del", "numero_control_interno_al",
-    "numero_documento_del", "numero_documento_al",
-    "numero_maquina_registradora",
-    "ventas_exentas", "ventas_internas_exentas_no_proporcionalidad",
-    "ventas_no_sujetas", "ventas_gravadas_locales",
-    "exportaciones_dentro_centroamerica", "exportaciones_fuera_centroamerica",
-    "exportaciones_servicios", "ventas_zonas_francas_dpa",
-    "ventas_cuenta_terceros_no_domiciliados",
-    "total_ventas",
-    "tipo_operacion_renta", "tipo_ingreso_renta",
-    "numero_anexo",
+_COLS_CONTRIB = [
+    "A. Fecha Emisión",          "B. Clase Documento",     "C. Tipo Documento",
+    "D. Num Resolución",         "E. Serie (Sello)",        "F. Num Documento (UUID)",
+    "G. Control Interno",        "H. NIT/NRC Cliente",      "I. Nombre Cliente",
+    "J. Ventas Exentas",         "K. Ventas No Sujetas",    "L. Ventas Gravadas",
+    "M. Débito Fiscal",          "N. Vtas Cuenta Terceros", "O. Déb. Fiscal Terceros",
+    "P. Total Ventas",
+    "Q. DUI Cliente",            "R. Tipo Operación (Renta)",
+    "S. Tipo Ingreso (Renta)",   "T. Num Anexo",
 ]
+_ANCHOS_CONTRIB = [12,3,3,35,45,35,12,16,45,12,12,12,12,12,12,14,14,4,4,3]
 
-def _row_anx2(r: dict) -> dict:
-    tipo   = str(r.get("tipo") or "")
-    gen_sg = _clean(r.get("gen_sin_guiones") or r.get("gen") or "")
+def _row_contrib(r: dict, tipo_op_renta="1", tipo_ingreso_renta="3",
+                 periodo_ene2025=True) -> dict:
+    tor = tipo_op_renta     if periodo_ene2025 else "0"
+    tir = tipo_ingreso_renta if periodo_ene2025 else "0"
     return {
-        "fecha_emision":                         str(r.get("fecha") or ""),
-        "clase_documento":                       "4",
-        "tipo_documento":                        tipo,
-        "numero_resolucion":                     "N/A",
-        "serie_documento":                       "N/A",
-        "numero_control_interno_del":            "N/A",
-        "numero_control_interno_al":             "N/A",
-        "numero_documento_del":                  gen_sg,
-        "numero_documento_al":                   gen_sg,
-        "numero_maquina_registradora":           str(r.get("num_maq") or "") if tipo == "10" else "",
-        "ventas_exentas":                        _fmt(r.get("exentas")),
-        "ventas_internas_exentas_no_proporcionalidad": "0.00",
-        "ventas_no_sujetas":                     _fmt(r.get("no_sujetas")),
-        "ventas_gravadas_locales":               _fmt(r.get("gravadas")),
-        "exportaciones_dentro_centroamerica":    "0.00",
-        "exportaciones_fuera_centroamerica":     "0.00",
-        "exportaciones_servicios":               "0.00",
-        "ventas_zonas_francas_dpa":              "0.00",
-        "ventas_cuenta_terceros_no_domiciliados": _fmt(r.get("terceros")),
-        "total_ventas":                          _fmt(r.get("total")),
-        "tipo_operacion_renta":                  str(r.get("tipo_operacion_renta") or "0"),
-        "tipo_ingreso_renta":                    str(r.get("tipo_ingreso_renta") or "0"),
-        "numero_anexo":                          "2",
+        "A. Fecha Emisión":         _s(r.get("fecha")),
+        "B. Clase Documento":       "4",
+        "C. Tipo Documento":        _s(r.get("tipo")),
+        "D. Num Resolución":        _clean(r.get("num_control")),
+        "E. Serie (Sello)":         _s(r.get("sello")),
+        "F. Num Documento (UUID)":  _clean(r.get("gen_sin_guiones") or r.get("gen")),
+        "G. Control Interno":       "",
+        "H. NIT/NRC Cliente":       _s(r.get("nit_cli")),
+        "I. Nombre Cliente":        _s(r.get("nom_cli")),
+        "J. Ventas Exentas":        _f(r.get("exentas")),
+        "K. Ventas No Sujetas":     _f(r.get("no_sujetas")),
+        "L. Ventas Gravadas":       _f(r.get("gravadas")),
+        "M. Débito Fiscal":         _f(r.get("debito")),
+        "N. Vtas Cuenta Terceros":  _f(r.get("terceros")),
+        "O. Déb. Fiscal Terceros":  _f(r.get("deb_terc")),
+        "P. Total Ventas":          _f(r.get("total")),
+        "Q. DUI Cliente":           _s(r.get("dui_cli")),
+        "R. Tipo Operación (Renta)":tor,
+        "S. Tipo Ingreso (Renta)":  tir,
+        "T. Num Anexo":             "1",
     }
 
 
-# ─── Anexo 3: Compras (A-U, 21 cols) ──────────────────────────────────────
+# ─── Ventas Consumidor Final — Anexo 2 (A-W, 23 cols) ────────────────────
 
-COLS_ANX3 = [
-    "fecha_emision", "clase_documento", "tipo_documento", "numero_documento",
-    "nit_o_nrc_proveedor", "nombre_proveedor",
-    "compras_internas_exentas_no_sujetas",
-    "internaciones_exentas_no_sujetas",
-    "importaciones_exentas_no_sujetas",
-    "compras_internas_gravadas",
-    "internaciones_gravadas_bienes",
-    "importaciones_gravadas_bienes",
-    "importaciones_gravadas_servicios",
-    "credito_fiscal", "total_compras",
-    "dui_proveedor",
-    "tipo_operacion", "clasificacion", "sector", "tipo_costo_gasto",
-    "numero_anexo",
+_COLS_CONSUMIDOR = [
+    "A. Fecha Emisión",              "B. Clase Documento",          "C. Tipo Documento",
+    "D. Num Resolución",             "E. Serie Documento",          "F. N° Control Interno DEL",
+    "G. N° Control Interno AL",      "H. N° Documento DEL (UUID)",  "I. N° Documento AL (UUID)",
+    "J. N° Máquina Registradora",
+    "K. Ventas Exentas",             "L. Exentas No Prop.",         "M. Ventas No Sujetas",
+    "N. Ventas Gravadas (c/IVA)",    "O. Export. dentro CA",        "P. Export. fuera CA",
+    "Q. Export. Servicios",          "R. Vtas Zonas Francas DPA",   "S. Vtas Cuenta Terceros",
+    "T. Total Ventas",
+    "U. Tipo Operación (Renta)",     "V. Tipo Ingreso (Renta)",     "W. Num Anexo",
 ]
+_ANCHOS_CONSUMIDOR = [12,3,3,8,8,8,8,35,35,16,12,12,12,14,12,12,12,12,12,14,4,4,3]
 
-def _row_anx3(r: dict) -> dict:
-    exe = float(r.get("exe") or 0)
-    gra = float(r.get("gra") or 0)
-    iva = float(r.get("iva") or 0)
-    tot = float(r.get("tot") or 0) or (exe + gra)
+def _row_consumidor(r: dict, tipo_op_renta="1", tipo_ingreso_renta="3",
+                    periodo_ene2025=True) -> dict:
+    gen_sg = _clean(r.get("gen_sin_guiones") or r.get("gen"))
+    tipo   = _s(r.get("tipo"))
+    tor = tipo_op_renta     if periodo_ene2025 else "0"
+    tir = tipo_ingreso_renta if periodo_ene2025 else "0"
     return {
-        "fecha_emision":                          str(r.get("fecha") or ""),
-        "clase_documento":                        "4",
-        "tipo_documento":                         str(r.get("tipo") or ""),
-        "numero_documento":                       _clean(r.get("gen_sin_guiones") or r.get("gen") or ""),
-        "nit_o_nrc_proveedor":                    str(r.get("nit_prov") or ""),
-        "nombre_proveedor":                       str(r.get("nom_prov") or ""),
-        "compras_internas_exentas_no_sujetas":    _fmt(exe),
-        "internaciones_exentas_no_sujetas":       "0.00",
-        "importaciones_exentas_no_sujetas":       "0.00",
-        "compras_internas_gravadas":              _fmt(gra),
-        "internaciones_gravadas_bienes":          "0.00",
-        "importaciones_gravadas_bienes":          "0.00",
-        "importaciones_gravadas_servicios":       "0.00",
-        "credito_fiscal":                         _fmt(iva),
-        "total_compras":                          _fmt(tot),
-        "dui_proveedor":                          str(r.get("dui_prov") or ""),
-        "tipo_operacion":                         str(r.get("tipo_operacion") or "0"),
-        "clasificacion":                          str(r.get("clasificacion") or "0"),
-        "sector":                                 str(r.get("sector") or "0"),
-        "tipo_costo_gasto":                       str(r.get("tipo_costo_gasto") or "0"),
-        "numero_anexo":                           "3",
+        "A. Fecha Emisión":             _s(r.get("fecha")),
+        "B. Clase Documento":           "4",
+        "C. Tipo Documento":            tipo,
+        "D. Num Resolución":            "N/A",
+        "E. Serie Documento":           "N/A",
+        "F. N° Control Interno DEL":    "N/A",
+        "G. N° Control Interno AL":     "N/A",
+        "H. N° Documento DEL (UUID)":   gen_sg,
+        "I. N° Documento AL (UUID)":    gen_sg,
+        "J. N° Máquina Registradora":  _s(r.get("num_maq")) if tipo == "10" else "",
+        "K. Ventas Exentas":            _f(r.get("exentas")),
+        "L. Exentas No Prop.":          0.0,
+        "M. Ventas No Sujetas":         _f(r.get("no_sujetas")),
+        "N. Ventas Gravadas (c/IVA)":   _f(r.get("gravadas")),
+        "O. Export. dentro CA":         0.0,
+        "P. Export. fuera CA":          0.0,
+        "Q. Export. Servicios":         0.0,
+        "R. Vtas Zonas Francas DPA":    0.0,
+        "S. Vtas Cuenta Terceros":      _f(r.get("terceros")),
+        "T. Total Ventas":              _f(r.get("total")),
+        "U. Tipo Operación (Renta)":    tor,
+        "V. Tipo Ingreso (Renta)":      tir,
+        "W. Num Anexo":                 "2",
     }
 
 
-# ─── Anexo 5: Sujetos Excluidos (A-M, 13 cols) ────────────────────────────
+# ─── Retenciones — Anexo 7 (A-I, 9 cols) ──────────────────────────────────
 
-COLS_ANX5 = [
-    "tipo_documento_identidad", "numero_identificacion",
-    "nombre_sujeto_excluido", "fecha_emision",
-    "serie_documento", "numero_documento",
-    "monto_operacion", "monto_retencion_iva_13pct",
-    "tipo_operacion", "clasificacion", "sector", "tipo_costo_gasto",
-    "numero_anexo",
+_COLS_RETENCION = [
+    "A. NIT Agente",        "B. Fecha Emisión",      "C. Tipo Documento",
+    "D. Serie Documento",   "E. Num Documento",
+    "F. Monto Sujeto",      "G. Monto Retención 1%",
+    "H. DUI Agente",        "I. Num Anexo",
 ]
+_ANCHOS_RETENCION = [16,12,3,40,36,14,14,12,3]
 
-def _row_anx5(r: dict) -> dict:
-    id_raw   = str(r.get("id_sujeto") or "")
-    id_clean = re.sub(r"[-\s]", "", id_raw)
-    if len(id_clean) == 14 and id_clean.isdigit():
-        tipo_id = "1"
-    elif len(id_clean) == 9 and id_clean.isdigit():
-        tipo_id = "2"
-    else:
-        tipo_id = "3"
-    gen_sg = _clean(r.get("gen") or r.get("num_control") or "")
+def _row_retencion(r: dict) -> dict:
     return {
-        "tipo_documento_identidad":  tipo_id,
-        "numero_identificacion":     id_clean,
-        "nombre_sujeto_excluido":    str(r.get("nom_sujeto") or ""),
-        "fecha_emision":             str(r.get("fecha") or ""),
-        "serie_documento":           str(r.get("sello") or ""),
-        "numero_documento":          gen_sg,
-        "monto_operacion":           _fmt(r.get("base")),
-        "monto_retencion_iva_13pct": _fmt(r.get("ret")),
-        "tipo_operacion":            str(r.get("tipo_operacion") or "0"),
-        "clasificacion":             str(r.get("clasificacion") or "0"),
-        "sector":                    str(r.get("sector") or "0"),
-        "tipo_costo_gasto":          str(r.get("tipo_costo_gasto") or "0"),
-        "numero_anexo":              "5",
+        "A. NIT Agente":       _s(r.get("nit_prov")),
+        "B. Fecha Emisión":    _s(r.get("fecha")),
+        "C. Tipo Documento":   _s(r.get("tipo") or "07"),
+        "D. Serie Documento":  _s(r.get("sello")),
+        "E. Num Documento":    _clean(r.get("gen")),
+        "F. Monto Sujeto":     _f(r.get("base")),
+        "G. Monto Retención 1%": _f(r.get("ret")),
+        "H. DUI Agente":       _s(r.get("dui_agente")),
+        "I. Num Anexo":        "7",
     }
 
 
-# ─── Anexo 7: Retenciones (A-I, 9 cols) ────────────────────────────────────
+# ─── Sujetos Excluidos — Anexo 5 (A-M, 13 cols) ───────────────────────────
 
-COLS_ANX7 = [
-    "nit_agente", "fecha_emision", "tipo_documento",
-    "serie_documento", "numero_documento",
-    "monto_sujeto", "monto_retencion_1pct",
-    "dui_agente", "numero_anexo",
+_COLS_SUJETOS = [
+    "A. Tipo Doc Identidad",  "B. Num Identificación",  "C. Nombre Sujeto Excluido",
+    "D. Fecha Emisión",       "E. Serie Documento",      "F. Num Documento",
+    "G. Monto Operación",     "H. Retención IVA 13%",
+    "I. Tipo Operación",      "J. Clasificación",        "K. Sector",
+    "L. Tipo Costo/Gasto",    "M. Num Anexo",
 ]
+_ANCHOS_SUJETOS = [3,16,45,12,40,36,14,14,3,3,3,3,3]
 
-def _row_anx7(r: dict) -> dict:
+def _row_sujeto(r: dict) -> dict:
+    id_raw = re.sub(r"[-\s]", "", _s(r.get("id_sujeto")))
+    tipo_id = "1" if len(id_raw)==14 and id_raw.isdigit() else ("2" if len(id_raw)==9 and id_raw.isdigit() else "3")
     return {
-        "nit_agente":            str(r.get("nit_prov") or ""),
-        "fecha_emision":         str(r.get("fecha") or ""),
-        "tipo_documento":        str(r.get("tipo") or "07"),
-        "serie_documento":       str(r.get("sello") or ""),
-        "numero_documento":      _clean(r.get("gen") or ""),
-        "monto_sujeto":          _fmt(r.get("base")),
-        "monto_retencion_1pct":  _fmt(r.get("ret")),
-        "dui_agente":            str(r.get("dui_agente") or ""),
-        "numero_anexo":          "7",
+        "A. Tipo Doc Identidad":    tipo_id,
+        "B. Num Identificación":    id_raw,
+        "C. Nombre Sujeto Excluido":_s(r.get("nom_sujeto")),
+        "D. Fecha Emisión":         _s(r.get("fecha")),
+        "E. Serie Documento":       _s(r.get("sello")),
+        "F. Num Documento":         _clean(r.get("gen") or r.get("num_control")),
+        "G. Monto Operación":       _f(r.get("base")),
+        "H. Retención IVA 13%":     _f(r.get("ret")),
+        "I. Tipo Operación":        _s(r.get("tipo_operacion") or "0"),
+        "J. Clasificación":         _s(r.get("clasificacion") or "0"),
+        "K. Sector":                _s(r.get("sector") or "0"),
+        "L. Tipo Costo/Gasto":      _s(r.get("tipo_costo_gasto") or "0"),
+        "M. Num Anexo":             "5",
     }
 
 
@@ -235,8 +227,9 @@ def _row_anx7(r: dict) -> dict:
 
 def _build_xlsx(sheets: dict) -> bytes:
     """
-    sheets: {nombre_hoja: (columnas_list, filas_list)}
-    Genera xlsx con encabezados como primera fila, sin títulos extras.
+    sheets: {nombre_hoja: (columnas, filas, anchos, col_num_ini, col_num_fin)}
+    Primera fila = nombres de columnas (header=True).
+    Sin filas de título. Formato numérico #,##0.00 en columnas monetarias.
     """
     try:
         import pandas as pd
@@ -245,28 +238,34 @@ def _build_xlsx(sheets: dict) -> bytes:
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        for nombre, (cols, filas) in sheets.items():
+        for nombre, (cols, filas, anchos, num_ini, num_fin) in sheets.items():
             df = pd.DataFrame(filas, columns=cols) if filas else pd.DataFrame(columns=cols)
+            # header=True → primera fila = nombres de columnas exactos del Anexo
             df.to_excel(writer, index=False, sheet_name=nombre[:31])
 
             ws = writer.sheets[nombre[:31]]
-            # Auto-ancho de columnas
-            for col_cells in ws.columns:
-                max_len = max(
-                    (len(str(c.value)) if c.value is not None else 0)
-                    for c in col_cells
-                )
-                ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 3, 55)
-
-            # Estilo de encabezado (primera fila)
+            # Anchos exactos del MVP
+            for idx, ancho in enumerate(anchos, 1):
+                try:
+                    ws.column_dimensions[ws.cell(1, idx).column_letter].width = ancho
+                except Exception:
+                    pass
+            # Formato numérico en columnas monetarias
+            if num_ini and num_fin:
+                for fila in ws.iter_rows(min_row=2, max_row=ws.max_row,
+                                         min_col=num_ini, max_col=num_fin):
+                    for celda in fila:
+                        if isinstance(celda.value, (int, float)):
+                            celda.number_format = '#,##0.00'
+            # Estilo encabezado
             try:
                 from openpyxl.styles import Font, PatternFill
-                header_fill = PatternFill("solid", fgColor="1C2333")
+                fill = PatternFill("solid", fgColor="1C2333")
                 for cell in ws[1]:
                     cell.font = Font(bold=True, color="FFFFFF")
-                    cell.fill = header_fill
+                    cell.fill = fill
             except Exception:
-                pass  # openpyxl styles opcionales
+                pass
 
     return buf.getvalue()
 
@@ -278,6 +277,16 @@ class ExportarRequest(BaseModel):
     declarante_id: str
     periodo: Optional[str] = None
     registros: List[Dict[str, Any]]
+    # Compras Q-T
+    tipo_op:        str  = "1"
+    clasif:         str  = "2"
+    sector:         str  = "4"
+    tipo_cg:        str  = "2"
+    periodo_feb2024: bool = True
+    # Ventas R-S / U-V
+    tipo_op_renta:      str  = "1"
+    tipo_ingreso_renta: str  = "3"
+    periodo_ene2025:    bool = True
 
 
 # ─── Endpoint ───────────────────────────────────────────────────────────────
@@ -285,8 +294,8 @@ class ExportarRequest(BaseModel):
 @router.post("/excel")
 async def exportar_excel(body: ExportarRequest):
     """
-    Genera xlsx F-07 con las columnas exactas del Anexo correspondiente.
-    Sin filas de título, sin metadata — primera fila = nombres de columnas.
+    Genera xlsx F-07 con columnas exactas del Anexo.
+    Primera fila = nombres de columnas. Sin filas de título.
     """
     if body.tipo not in _TIPOS_VALIDOS:
         raise HTTPException(
@@ -298,34 +307,33 @@ async def exportar_excel(body: ExportarRequest):
     sheets: dict = {}
 
     if body.tipo == "ventas":
-        anx1 = [_row_anx1(r) for r in body.registros
-                if str(r.get("tipo") or "") in _TIPOS_CONTRIBUYENTES]
-        anx2 = [_row_anx2(r) for r in body.registros
-                if str(r.get("tipo") or "") in _TIPOS_CONSUMIDOR]
-        # Registros sin tipo conocido → contribuyentes por defecto
-        sin_tipo = [_row_anx1(r) for r in body.registros
-                    if str(r.get("tipo") or "") not in _TIPOS_CONTRIBUYENTES | _TIPOS_CONSUMIDOR]
-        anx1.extend(sin_tipo)
-        sheets["Anexo1_Contribuyentes"] = (COLS_ANX1, anx1)
-        sheets["Anexo2_ConsumidorFinal"] = (COLS_ANX2, anx2)
+        contrib = [_row_contrib(r, body.tipo_op_renta, body.tipo_ingreso_renta, body.periodo_ene2025)
+                   for r in body.registros if _s(r.get("tipo")) in _TIPOS_CONTRIBUYENTES
+                   or _s(r.get("tipo")) not in _TIPOS_CONTRIBUYENTES | _TIPOS_CONSUMIDOR]
+        consumidor = [_row_consumidor(r, body.tipo_op_renta, body.tipo_ingreso_renta, body.periodo_ene2025)
+                      for r in body.registros if _s(r.get("tipo")) in _TIPOS_CONSUMIDOR]
+        sheets["Ventas_Contribuyentes"] = (_COLS_CONTRIB,    contrib,   _ANCHOS_CONTRIB,    10, 16)
+        sheets["Ventas_Consumidor"]     = (_COLS_CONSUMIDOR, consumidor,_ANCHOS_CONSUMIDOR, 11, 20)
 
     elif body.tipo == "compras":
-        filas = [_row_anx3(r) for r in body.registros]
-        sheets["Anexo3_Compras"] = (COLS_ANX3, filas)
+        filas = [_row_compras(r, body.tipo_op, body.clasif, body.sector,
+                              body.tipo_cg, body.periodo_feb2024)
+                 for r in body.registros]
+        sheets["Compras_F07"] = (_COLS_COMPRAS_F07, filas, _ANCHOS_COMPRAS, 7, 15)
 
     elif body.tipo == "retenciones":
-        filas = [_row_anx7(r) for r in body.registros]
-        sheets["Anexo7_Retenciones"] = (COLS_ANX7, filas)
+        filas = [_row_retencion(r) for r in body.registros]
+        sheets["Retenciones_Anexo7"] = (_COLS_RETENCION, filas, _ANCHOS_RETENCION, 6, 7)
 
     elif body.tipo == "sujetos_excluidos":
-        filas = [_row_anx5(r) for r in body.registros]
-        sheets["Anexo5_SujetosExcluidos"] = (COLS_ANX5, filas)
+        filas = [_row_sujeto(r) for r in body.registros]
+        sheets["SujetosExcluidos_Anexo5"] = (_COLS_SUJETOS, filas, _ANCHOS_SUJETOS, 7, 8)
 
     nombre_tipo = {
         "ventas": "Ventas", "compras": "Compras",
         "retenciones": "Retenciones", "sujetos_excluidos": "SujetosExcluidos",
     }[body.tipo]
-    filename = f"F07_Anexo_{nombre_tipo}_{body.declarante_id}_{periodo_str}.xlsx"
+    filename = f"F07_{nombre_tipo}_{body.declarante_id}_{periodo_str}.xlsx"
     mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     xlsx_bytes = _build_xlsx(sheets)
