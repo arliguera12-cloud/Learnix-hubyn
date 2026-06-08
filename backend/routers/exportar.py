@@ -30,6 +30,12 @@ def _s(v) -> str:
 def _clean(v) -> str:
     return re.sub(r"[-]", "", _s(v))
 
+_VACIOS = {None, "", "—", "–", "-"}
+
+def _tiene_datos(r: dict, campos=("fecha", "tipo", "gen")) -> bool:
+    """Devuelve True si al menos uno de los campos clave tiene valor real."""
+    return any(_s(r.get(c)).strip() not in _VACIOS for c in campos)
+
 
 # ─── Compras — columnas exactas del MVP (pages/2_Extractor_DTE_Compras.py) ─
 
@@ -307,26 +313,27 @@ async def exportar_excel(body: ExportarRequest):
     sheets: dict = {}
 
     if body.tipo == "ventas":
+        regs_v = [r for r in body.registros if _tiene_datos(r)]
         contrib = [_row_contrib(r, body.tipo_op_renta, body.tipo_ingreso_renta, body.periodo_ene2025)
-                   for r in body.registros if _s(r.get("tipo")) in _TIPOS_CONTRIBUYENTES
+                   for r in regs_v if _s(r.get("tipo")) in _TIPOS_CONTRIBUYENTES
                    or _s(r.get("tipo")) not in _TIPOS_CONTRIBUYENTES | _TIPOS_CONSUMIDOR]
         consumidor = [_row_consumidor(r, body.tipo_op_renta, body.tipo_ingreso_renta, body.periodo_ene2025)
-                      for r in body.registros if _s(r.get("tipo")) in _TIPOS_CONSUMIDOR]
+                      for r in regs_v if _s(r.get("tipo")) in _TIPOS_CONSUMIDOR]
         sheets["Ventas_Contribuyentes"] = (_COLS_CONTRIB,    contrib,   _ANCHOS_CONTRIB,    10, 16)
         sheets["Ventas_Consumidor"]     = (_COLS_CONSUMIDOR, consumidor,_ANCHOS_CONSUMIDOR, 11, 20)
 
     elif body.tipo == "compras":
         filas = [_row_compras(r, body.tipo_op, body.clasif, body.sector,
                               body.tipo_cg, body.periodo_feb2024)
-                 for r in body.registros]
+                 for r in body.registros if _tiene_datos(r)]
         sheets["Compras_F07"] = (_COLS_COMPRAS_F07, filas, _ANCHOS_COMPRAS, 7, 15)
 
     elif body.tipo == "retenciones":
-        filas = [_row_retencion(r) for r in body.registros]
+        filas = [_row_retencion(r) for r in body.registros if _tiene_datos(r, ("fecha", "tipo", "gen"))]
         sheets["Retenciones_Anexo7"] = (_COLS_RETENCION, filas, _ANCHOS_RETENCION, 6, 7)
 
     elif body.tipo == "sujetos_excluidos":
-        filas = [_row_sujeto(r) for r in body.registros]
+        filas = [_row_sujeto(r) for r in body.registros if _tiene_datos(r, ("fecha", "id_sujeto", "gen"))]
         sheets["SujetosExcluidos_Anexo5"] = (_COLS_SUJETOS, filas, _ANCHOS_SUJETOS, 7, 8)
 
     nombre_tipo = {
