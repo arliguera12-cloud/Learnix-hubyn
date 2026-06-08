@@ -11,7 +11,7 @@ export default function ResultadosTabla({ data, tipo, declaranteId }) {
 
   async function handleExportar() {
     try {
-      const res = await exportarExcel(tipo, declaranteId)
+      const res = await exportarExcel(tipo, declaranteId, [registro])
       const url = URL.createObjectURL(new Blob([res.data]))
       const a = document.createElement('a')
       a.href = url

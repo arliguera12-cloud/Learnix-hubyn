@@ -8,7 +8,7 @@ export default function Clientes() {
   const [error,    setError]    = useState(null)
 
   useEffect(() => {
-    supabase.from('clientes').select('*').order('nombre')
+    supabase.from('clientes').select('*').order('nombre_comercial')
       .then(({ data, error }) => {
         if (error) setError(error.message)
         else setTodos(data ?? [])
@@ -17,7 +17,7 @@ export default function Clientes() {
   }, [])
 
   const filtrados = todos.filter(c =>
-    c.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
+    c.nombre_comercial?.toLowerCase().includes(busqueda.toLowerCase()) ||
     c.nit?.includes(busqueda) ||
     c.dui?.includes(busqueda)
   )
@@ -63,7 +63,7 @@ export default function Clientes() {
                 {filtrados.map((c, i) => (
                   <tr key={c.nit ?? i} className="hover:bg-surface-700/50 transition-colors">
                     <td className="table-cell font-mono text-xs text-slate-300">{c.nit}</td>
-                    <td className="table-cell font-medium text-slate-100">{c.nombre}</td>
+                    <td className="table-cell font-medium text-slate-100">{c.nombre_comercial}</td>
                     <td className="table-cell font-mono text-xs">{c.dui || '—'}</td>
                     <td className="table-cell font-mono text-xs">{c.nrc || '—'}</td>
                     <td className="table-cell text-slate-400">{c.actividad || '—'}</td>

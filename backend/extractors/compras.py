@@ -3,6 +3,7 @@ Extractor de DTEs de Compras (DTE-01/03/05/06/11).
 Lógica portada de pages/2_Extractor_DTE_Compras.py sin dependencias de Streamlit.
 """
 import re
+import logging
 import pdfplumber
 
 from utils.pdf_utils import (
@@ -20,7 +21,9 @@ from utils.ai_utils import (
 )
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
-from utils.constants import TIPOS_VALIDOS_COMPRAS
+from utils.constants import TIPOS_VALIDOS_COMPRAS, MAX_VALORES_LOOP_COMPRAS
+
+MAX_VALORES_LOOP = MAX_VALORES_LOOP_COMPRAS
 
 
 

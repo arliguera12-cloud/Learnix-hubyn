@@ -7,6 +7,7 @@ import sys
 import os
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from typing import List
 
 # Asegurar que backend/ esté en el path para que utils.* funcionen
 _backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -154,6 +155,70 @@ async def procesar_sujetos_excluidos(
     cliente = _build_cliente_activo(declarante_id, nombre=nombre_declarante)
     result = extraer_sujetos_nativo(pdf_bytes, cliente)
     return _handle_extractor_result(result, "sujetos_excluidos", file.filename, declarante_id)
+
+
+# ---------------------------------------------------------------------------
+# Lote (multi-PDF)
+# ---------------------------------------------------------------------------
+
+def _process_lote(files: List[UploadFile], extractor_fn, tipo: str,
+                  declarante_id: str, nombre_declarante: str = "", nrc_declarante: str = "") -> dict:
+    cliente = _build_cliente_activo(declarante_id, nombre=nombre_declarante, nrc=nrc_declarante)
+    resultados = []
+    errores = []
+    for f in files:
+        try:
+            pdf_bytes = _read_pdf_bytes(f)
+            result = extractor_fn(pdf_bytes, cliente)
+            resultados.append(_handle_extractor_result(result, tipo, f.filename, declarante_id))
+        except HTTPException as e:
+            errores.append({"filename": f.filename, "error": e.detail})
+        except Exception as e:
+            errores.append({"filename": f.filename, "error": str(e)})
+    return {"resultados": resultados, "errores": errores, "total": len(files),
+            "exitosos": len(resultados), "fallidos": len(errores)}
+
+
+@router.post("/ventas/lote")
+async def procesar_ventas_lote(
+    files: List[UploadFile] = File(...),
+    declarante_id: str = Form(...),
+    nombre_declarante: str = Form(""),
+    nrc_declarante: str = Form(""),
+):
+    return _process_lote(files, extraer_venta_nativo_pro, "ventas",
+                         declarante_id, nombre_declarante, nrc_declarante)
+
+
+@router.post("/compras/lote")
+async def procesar_compras_lote(
+    files: List[UploadFile] = File(...),
+    declarante_id: str = Form(...),
+    nombre_declarante: str = Form(""),
+    nrc_declarante: str = Form(""),
+):
+    return _process_lote(files, extraer_compra_nativo_pro, "compras",
+                         declarante_id, nombre_declarante, nrc_declarante)
+
+
+@router.post("/retenciones/lote")
+async def procesar_retenciones_lote(
+    files: List[UploadFile] = File(...),
+    declarante_id: str = Form(...),
+    nombre_declarante: str = Form(""),
+):
+    return _process_lote(files, extraer_retencion_nativa, "retenciones",
+                         declarante_id, nombre_declarante)
+
+
+@router.post("/sujetos-excluidos/lote")
+async def procesar_sujetos_excluidos_lote(
+    files: List[UploadFile] = File(...),
+    declarante_id: str = Form(...),
+    nombre_declarante: str = Form(""),
+):
+    return _process_lote(files, extraer_sujetos_nativo, "sujetos_excluidos",
+                         declarante_id, nombre_declarante)
 
 
 # ---------------------------------------------------------------------------
