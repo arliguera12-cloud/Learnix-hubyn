@@ -21,7 +21,7 @@ export default function Sidebar() {
 
   // Agrupar items de nav
   const grupos = []
-  let grupoActual = null
+  let grupoActual = undefined // sentinel distinto de null para forzar el primer push
   for (const item of NAV) {
     if (item.group !== grupoActual) {
       grupoActual = item.group
