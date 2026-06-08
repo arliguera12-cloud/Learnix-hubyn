@@ -119,6 +119,32 @@ export function exportarExcel(tipo, declaranteId, registros, periodo) {
   }, { responseType: 'blob' })
 }
 
+export function exportarExcelCompras(declaranteId, registros, opts = {}) {
+  return api.post('/exportar/excel', {
+    tipo: 'compras',
+    declarante_id: declaranteId,
+    registros,
+    tipo_op:  opts.tipo_op  ?? '1',
+    clasif:   opts.clasif   ?? '2',
+    sector:   opts.sector   ?? '4',
+    tipo_cg:  opts.tipo_cg  ?? '2',
+    periodo_feb2024: opts.periodo_feb2024 ?? true,
+    ...(opts.periodo && { periodo: opts.periodo }),
+  }, { responseType: 'blob' })
+}
+
+export function exportarExcelVentas(declaranteId, registros, opts = {}) {
+  return api.post('/exportar/excel', {
+    tipo: 'ventas',
+    declarante_id: declaranteId,
+    registros,
+    tipo_op_renta:      opts.tipo_op_renta      ?? '1',
+    tipo_ingreso_renta: opts.tipo_ingreso_renta ?? '3',
+    periodo_ene2025:    opts.periodo_ene2025    ?? true,
+    ...(opts.periodo && { periodo: opts.periodo }),
+  }, { responseType: 'blob' })
+}
+
 // ─── Declarantes ───────────────────────────────────────────────────────────
 
 export function getDeclarantes() {
