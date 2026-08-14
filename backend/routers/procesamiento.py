@@ -3,16 +3,8 @@ Endpoints de extracción de DTEs.
 Cada endpoint recibe un PDF (multipart/form-data) y devuelve JSON estructurado
 con los datos extraídos, listos para guardarse en Supabase.
 """
-import sys
-import os
-
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from typing import List
-
-# Asegurar que backend/ esté en el path para que utils.* funcionen
-_backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _backend_dir not in sys.path:
-    sys.path.insert(0, _backend_dir)
 
 from extractors.ventas import extraer_venta_nativo_pro
 from extractors.compras import extraer_compra_nativo_pro

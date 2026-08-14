@@ -9,7 +9,10 @@ import time
 
 log = logging.getLogger(__name__)
 
-_BASE = os.path.join(os.path.dirname(__file__), "..", "data")
+_BASE = os.environ.get(
+    "LOCAL_DB_DIR",
+    os.path.join(os.path.dirname(__file__), "..", "data"),
+)
 _CLIENTES_FILE    = os.path.join(_BASE, "clientes.json")
 _PROVEEDORES_FILE = os.path.join(_BASE, "proveedores.json")
 

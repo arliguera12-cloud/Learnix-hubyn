@@ -1,6 +1,7 @@
 -- =============================================================
--- LEARNIX DTE HUB — SUPABASE SCHEMA  v1.0
--- Ejecuta este script completo en: Supabase → SQL Editor → Run
+-- LEARNIX DTE HUB — SUPABASE SCHEMA  v1.0  (LEGADO)
+-- ⚠️  NO EJECUTAR — superado por db/01_schema_saas.sql
+-- Se conserva solo como referencia histórica.
 -- =============================================================
 
 -- ─────────────────────────────────────────────

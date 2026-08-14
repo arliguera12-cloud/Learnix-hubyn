@@ -11,13 +11,8 @@ Learnix-hubyn/
 │
 ├── backend/          ← FastAPI (Python) — deploy en Railway
 ├── frontend/         ← React + Vite — deploy en Vercel
-│
-│   ── Streamlit (referencia, no eliminar aún) ──
-├── app.py
-├── pages/
-├── components/
-├── utils/
-└── styles.py
+├── db/                ← Scripts SQL de Supabase (orden de ejecución en db/README.md)
+└── docs/               ← Documentación adicional
 ```
 
 ### Stack tecnológico
@@ -45,21 +40,24 @@ backend/
 │   ├── procesamiento.py     ← POST /procesar/{ventas,compras,retenciones,sujetos-excluidos}
 │   │                           GET  /procesar/declarantes
 │   └── exportar.py          ← GET  /exportar/excel
-├── extractors/              ← Lógica de extracción por tipo de DTE (sin Streamlit)
+├── extractors/              ← Lógica de extracción por tipo de DTE
 │   ├── ventas.py
 │   ├── compras.py
 │   ├── retenciones.py
 │   └── sujetos_excluidos.py
-├── utils/                   ← Copia de utils/ raíz (sin modificar)
+├── utils/
 │   ├── ai_utils.py          ← Motor IA dual (Groq + Vertex), circuit breaker
 │   ├── pdf_utils.py         ← Extracción texto PDF
 │   ├── qa_utils.py          ← Validación fiscal DGII
 │   ├── concurrent_processor.py
 │   ├── supabase_client.py
 │   ├── export_utils.py
+│   ├── local_db.py          ← Almacenamiento local JSON (clientes/proveedores)
 │   ├── constants.py
 │   └── anexos_schema/       ← Definición de campos por anexo DGII
+├── data/                    ← clientes.json / proveedores.json (almacenamiento local)
 ├── requirements.txt
+├── railway.json
 └── .env.example
 ```
 
@@ -101,6 +99,7 @@ frontend/
 │   └── App.jsx                   ← Router + rutas protegidas
 ├── package.json
 ├── vite.config.js
+├── vercel.json                    ← SPA rewrite para React Router
 └── .env.example
 ```
 
@@ -129,6 +128,9 @@ npm run dev
 | `GEMINI_API_KEY` | API key alternativa (Gemini Developer API) |
 | `VERTEX_PROJECT` | ID del proyecto en Google Cloud |
 | `VERTEX_LOCATION` | Región de Vertex AI (ej. `us-central1`) |
+| `APP_PASSWORD` | Contraseña de acceso a la app |
+| `EXTRA_CORS_ORIGINS` | Orígenes CORS extra permitidos, separados por coma |
+| `LOCAL_DB_DIR` | Override opcional de la ruta de `data/` (ver nota abajo) |
 
 ### Frontend (`.env`)
 
@@ -146,16 +148,20 @@ npm run dev
 
 1. Conectar repositorio en Railway
 2. Configurar **Root Directory**: `backend`
-3. Agregar variables de entorno
-4. Railway detecta `requirements.txt` y ejecuta `uvicorn main:app --host 0.0.0.0 --port $PORT`
+3. Agregar variables de entorno (ver tabla arriba)
+4. Railway detecta `backend/railway.json` y ejecuta `uvicorn main:app --host 0.0.0.0 --port $PORT`
 
 ### Frontend → Vercel
 
 1. Conectar repositorio en Vercel
 2. Configurar **Root Directory**: `frontend`
-3. Framework preset: **Vite**
+3. Framework preset: **Vite** (Vercel detecta `frontend/vercel.json` para el rewrite SPA)
 4. Agregar variables de entorno `VITE_*`
 5. Agregar la URL de Vercel a `EXTRA_CORS_ORIGINS` en el backend
+
+### Base de datos → Supabase
+
+Ver `db/README.md` para el orden de ejecución de los scripts SQL.
 
 ---
 
@@ -171,13 +177,6 @@ npm run dev
 
 ---
 
-## Streamlit (legado — referencia)
+## Nota sobre almacenamiento local
 
-Los archivos originales de Streamlit (`app.py`, `pages/`, `components/`, `styles.py`) se mantienen en la raíz como referencia durante la migración. **No eliminar hasta completar y validar la nueva arquitectura.**
-
-Para ejecutar la versión Streamlit:
-
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
+`backend/utils/local_db.py` guarda clientes y proveedores en `backend/data/*.json`. En Railway este directorio es efímero (se reinicia en cada deploy), así que este almacenamiento es apto para desarrollo local pero no para producción estable. Migrar clientes/proveedores a tablas de Supabase queda como mejora futura.

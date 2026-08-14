@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,11 +11,14 @@ app = FastAPI(
     version="2.0.0",
 )
 
-# Orígenes permitidos: desarrollo local + Vercel
+# Orígenes permitidos: desarrollo local + orígenes extra vía env (p. ej. tu URL de Vercel)
+_extra_origins = [
+    o.strip() for o in os.environ.get("EXTRA_CORS_ORIGINS", "").split(",") if o.strip()
+]
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
-    "https://*.vercel.app",
+    *_extra_origins,
 ]
 
 app.add_middleware(
