@@ -20,8 +20,9 @@ Auditado (no reescrito — ya estaba implementado):
 | `db_ventas`, `db_compras`, `db_retenciones`, `db_sujetos` | ✅ (`db/02_dte_tables.sql`) | Por `user_id` (SELECT/INSERT/DELETE; sin UPDATE — los registros son inmutables por diseño, se reemplazan con delete+insert) |
 | `proveedores` | ✅ (`db/03_proveedores.sql`) | Por `organizacion_id`, delete solo admin |
 | `proveedores_globales` | ✅ (`db/03_proveedores.sql`) | Lectura para cualquier usuario autenticado, escritura solo `service_role` |
+| `clientes_directorio`, `proveedores_directorio` | ✅ (`db/06_local_data_tables.sql`) | Por `organizacion_id` (nullable), delete solo admin. Hoy solo accedidas por `backend/utils/local_db.py` vía `service_role` (bypass RLS) — las políticas protegen cualquier acceso futuro directo desde el frontend, que hoy no existe para estas dos tablas |
 
-No se encontraron huecos: cada tabla con datos de usuario tiene RLS habilitado y políticas coherentes con el modelo de acceso. El backend usa `SUPABASE_KEY` (o `SUPABASE_SERVICE_KEY` si está definida) solo para el healthcheck — el resto del acceso a datos ocurre desde el frontend con la `anon key`, que sí respeta RLS.
+No se encontraron huecos: cada tabla con datos de usuario tiene RLS habilitado y políticas coherentes con el modelo de acceso. El backend usa `SUPABASE_KEY` (o `SUPABASE_SERVICE_KEY` si está definida) para el healthcheck y para el directorio de clientes/proveedores (`local_db.py`) — el resto del acceso a datos ocurre desde el frontend con la `anon key`, que sí respeta RLS.
 
 ## Rate limiting
 
@@ -49,6 +50,5 @@ Todo vía variables de entorno (`backend/.env.example`, `frontend/.env.example`)
 
 ## Pendiente / fuera de esta fase
 
-- **Blocker antes de un deploy real a Railway:** `clientes.json`/`proveedores.json` viven en `backend/data/*.json` — Railway tiene filesystem efímero, se pierden en cada redeploy. Migrar a tablas Supabase antes de depender de este almacenamiento en producción.
 - Rate limiting in-memory → Redis, si se escala a múltiples instancias.
 - No hay tests ni CI en el repo (fuera de alcance de esta fase).

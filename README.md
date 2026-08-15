@@ -54,12 +54,11 @@ backend/
 │   ├── qa_utils.py          ← Validación fiscal DGII
 │   ├── concurrent_processor.py
 │   ├── auth_dependency.py   ← Verificación del JWT de Supabase Auth
-│   ├── supabase_admin.py    ← Cliente Supabase (healthcheck)
+│   ├── supabase_admin.py    ← Cliente Supabase (service role)
 │   ├── export_utils.py
-│   ├── local_db.py          ← Almacenamiento local JSON (clientes/proveedores)
+│   ├── local_db.py          ← Directorio clientes/proveedores (tablas Supabase)
 │   ├── constants.py
 │   └── anexos_schema/       ← Definición de campos por anexo DGII
-├── data/                    ← clientes.json / proveedores.json (almacenamiento local)
 ├── requirements.txt
 ├── railway.json
 └── .env.example
@@ -127,7 +126,7 @@ npm run dev
 |----------|-------------|
 | `SUPABASE_URL` | URL del proyecto Supabase |
 | `SUPABASE_KEY` | Anon key de Supabase |
-| `SUPABASE_SERVICE_KEY` | Service role key (opcional, healthcheck; nunca en el frontend) |
+| `SUPABASE_SERVICE_KEY` | Service role key (opcional, healthcheck y directorio de clientes/proveedores; nunca en el frontend) |
 | `SUPABASE_JWT_SECRET` | Settings → API → JWT Secret — verifica el JWT emitido por Supabase Auth |
 | `GROQ_API_KEY` | API key de Groq Cloud |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Ruta al JSON de la cuenta de servicio GCP |
@@ -138,7 +137,6 @@ npm run dev
 | `ALLOWED_ORIGINS` | Orígenes CORS explícitos permitidos, separados por coma |
 | `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_BURST` | Límites de rate limiting por IP |
 | `BLOCKED_IPS` | IPs bloqueadas manualmente, separadas por coma |
-| `LOCAL_DB_DIR` | Override opcional de la ruta de `data/` (ver nota abajo) |
 
 ### Frontend (`.env`)
 
@@ -191,9 +189,13 @@ Ver [`docs/SECURITY.md`](docs/SECURITY.md) para el detalle completo: verificaci�
 
 ---
 
-## Nota sobre almacenamiento local
+## Directorio de clientes/proveedores
 
-`backend/utils/local_db.py` guarda clientes y proveedores en `backend/data/*.json`. En Railway este directorio es efímero (se reinicia en cada deploy), así que este almacenamiento es apto para desarrollo local pero no para producción estable. Migrar clientes/proveedores a tablas de Supabase queda como mejora futura — **blocker antes de depender de esto en producción**.
+`backend/utils/local_db.py` persiste el directorio de clientes y proveedores (usado por los extractors para autocompletar) en las tablas `clientes_directorio`/`proveedores_directorio` de Supabase (`db/06_local_data_tables.sql`), con RLS habilitado. Antes vivía en `backend/data/*.json` sobre el filesystem del backend, que en Railway es efímero y se perdía en cada redeploy — ya resuelto.
+
+Si venías de una instalación con datos en `backend/data/*.json`, corre `scripts/migrate_local_json.py` **contra el filesystem de esa instalación, antes de actualizar a esta versión** (una vez actualizado, esos archivos ya no existen en el repo). Ver el docstring del script para el uso exacto.
+
+**Nota de arquitectura:** el frontend (`Clientes.jsx`/`Proveedores.jsx`) lee directo de las tablas `clientes`/`proveedores` (multi-tenant, `db/01`/`db/03`) — un directorio distinto y hoy desconectado de `clientes_directorio`/`proveedores_directorio`. Unificarlos requeriría enhebrar `organizacion_id` a través de los extractors (que hoy corren sin contexto de organización); queda fuera de alcance de esta migración, documentado como mejora futura.
 
 ---
 
@@ -201,5 +203,6 @@ Ver [`docs/SECURITY.md`](docs/SECURITY.md) para el detalle completo: verificaci�
 
 - `qa_utils.py`, `export_utils.py`, `gmail_utils.py`, `drive_utils.py`, `gemini_utils.py`, `rag_validator.py`, `nit_validator.py` en `backend/utils/` no están conectados a la cadena viva del backend (`main.py` → `routers` → `extractors` → `utils`). `qa_utils.py` tiene validadores matemáticos reales (`validar_montos_*`) pensados para conectarse a un futuro pipeline de confianza — no eliminar, solo quitar su `import streamlit`. El resto son candidatos a limpieza o a un futuro "Centro de Correos" (Gmail/Drive).
 - Rate limiting en memoria → Redis, si se escala a múltiples instancias de Railway.
-- Sistema de diseño: los tokens de color/tipografía/radios de Certia (ContaSV) ya están aplicados vía `frontend/tailwind.config.js` + `frontend/src/index.css` (heredado por toda la UI). Componentes decorativos del sistema editorial de Certia (sello registral, "stamp" rotado, regla doble de encabezado, símbolo `§`) quedaron fuera de esta fase — son componentes nuevos, no una traducción de tokens existentes.
+- Unificar `clientes_directorio`/`proveedores_directorio` con las tablas `clientes`/`proveedores` que ya usa el frontend (ver nota de arquitectura arriba) — requiere enhebrar `organizacion_id` por los extractors.
+- Sistema de diseño: los tokens de color/tipografía/radios de Certia (ContaSV) ya están aplicados vía `frontend/tailwind.config.js` + `frontend/src/index.css` (heredado por toda la UI), incluyendo los componentes editoriales (`.registro-seal`, `.rule-double`, `.stamp`).
 - No hay tests ni CI en el repo.

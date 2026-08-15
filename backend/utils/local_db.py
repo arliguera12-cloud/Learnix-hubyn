@@ -1,97 +1,50 @@
 """
-local_db.py — Almacenamiento local en JSON para clientes y proveedores.
+local_db.py — Directorio de clientes y proveedores, persistido en Supabase
+(tablas clientes_directorio / proveedores_directorio, ver db/06_local_data_tables.sql).
+
+Reemplaza el almacenamiento anterior en JSON sobre el filesystem del backend
+(backend/data/*.json), que se perdía en cada redeploy de Railway (filesystem
+efímero).
+
+Compatibilidad: todas las funciones mantienen la misma firma e interfaz que
+la versión JSON (mismos nombres, mismos tipos de retorno) para no romper a
+los extractors/routers que ya las importan. Se agregó un parámetro opcional
+`organizacion_id` al final de cada función — por defecto None, que preserva
+el comportamiento histórico (un directorio compartido, sin distinción de
+organización, igual que el JSON plano de antes). Los llamadores actuales
+(extractors, /procesar/declarantes) no pasan este parámetro; queda disponible
+para cuando se enhebre el contexto de organización/usuario a través de esas
+rutas, lo cual está fuera de alcance de esta migración.
 """
 from __future__ import annotations
-import json
+
 import logging
-import os
-import time
+
+from utils.supabase_admin import get_supabase
 
 log = logging.getLogger(__name__)
 
-_BASE = os.environ.get(
-    "LOCAL_DB_DIR",
-    os.path.join(os.path.dirname(__file__), "..", "data"),
-)
-_CLIENTES_FILE    = os.path.join(_BASE, "clientes.json")
-_PROVEEDORES_FILE = os.path.join(_BASE, "proveedores.json")
-
-_MAX_RETRIES = 3
-_RETRY_DELAY = 0.05  # segundos
+_CLIENTES_TABLE = "clientes_directorio"
+_PROVEEDORES_TABLE = "proveedores_directorio"
 
 
-def _leer(path: str) -> dict:
-    for attempt in range(_MAX_RETRIES):
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                log.warning("_leer(%s): contenido inesperado, retornando {}", path)
-                return {}
-            return data
-        except FileNotFoundError:
-            return {}
-        except json.JSONDecodeError as exc:
-            log.warning("_leer(%s): JSON inválido (intento %d): %s", path, attempt + 1, exc)
-            if attempt < _MAX_RETRIES - 1:
-                time.sleep(_RETRY_DELAY * (2 ** attempt))
-        except OSError as exc:
-            log.warning("_leer(%s): error de I/O (intento %d): %s", path, attempt + 1, exc)
-            if attempt < _MAX_RETRIES - 1:
-                time.sleep(_RETRY_DELAY * (2 ** attempt))
-    return {}
-
-
-def _escribir(path: str, data: dict) -> None:
-    """Escritura atómica: escribe en .tmp y renombra para evitar corrupción."""
-    dir_ = os.path.dirname(path)
-    os.makedirs(dir_, exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-    os.replace(tmp, path)
-    _invalidar_cache(path)
-
-
-# ── Cache en memoria (módulo-level, vive por proceso) ────────────────────────
-
-_cache: dict[str, dict] = {}
-_cache_mtime: dict[str, float] = {}
-
-
-def _invalidar_cache(path: str) -> None:
-    _cache.pop(path, None)
-    _cache_mtime.pop(path, None)
-
-
-def _leer_con_cache(path: str) -> dict:
-    try:
-        mtime = os.path.getmtime(path)
-        if _cache_mtime.get(path) == mtime and path in _cache:
-            return _cache[path]
-    except OSError:
-        pass
-    data = _leer(path)
-    try:
-        _cache[path] = data
-        _cache_mtime[path] = os.path.getmtime(path)
-    except OSError:
-        pass
-    return data
+def _org_eq(query, organizacion_id: str | None):
+    """Filtra por organizacion_id, o por filas sin organización (legado) si es None."""
+    if organizacion_id is None:
+        return query.is_("organizacion_id", "null")
+    return query.eq("organizacion_id", organizacion_id)
 
 
 # ── Clientes ──────────────────────────────────────────────────────────────────
 
-def cargar_clientes_db() -> list[dict]:
-    raw = _leer_con_cache(_CLIENTES_FILE)
-    result = []
-    for nit, v in raw.items():
-        row = dict(v)
-        row.setdefault("id", nit)
-        row.setdefault("nit", nit)
-        row.setdefault("nombre_comercial", row.pop("nombre", ""))
-        result.append(row)
-    return sorted(result, key=lambda x: x.get("nombre_comercial", ""))
+def cargar_clientes_db(organizacion_id: str | None = None) -> list[dict]:
+    try:
+        query = get_supabase().table(_CLIENTES_TABLE).select("*")
+        resp = _org_eq(query, organizacion_id).order("nombre_comercial").execute()
+        return resp.data or []
+    except Exception as exc:
+        log.error("cargar_clientes_db: %s", exc)
+        return []
 
 
 def guardar_cliente_db(
@@ -100,33 +53,39 @@ def guardar_cliente_db(
     nrc: str = "",
     dui: str = "",
     actividad: str = "",
+    organizacion_id: str | None = None,
 ) -> tuple[bool, str]:
     try:
-        data = _leer(_CLIENTES_FILE)
-        data[nit] = {
-            "nit":       nit,
-            "nombre":    nombre.strip().upper(),
-            "nrc":       nrc or "",
-            "dui":       dui or "",
-            "actividad": actividad.strip().upper(),
+        row = {
+            "nit":              nit,
+            "nombre_comercial": nombre.strip().upper(),
+            "nrc":              nrc or "",
+            "dui":              dui or "",
+            "actividad":        actividad.strip().upper(),
+            "organizacion_id":  organizacion_id,
         }
-        _escribir(_CLIENTES_FILE, data)
+        sb = get_supabase()
+        existing = _org_eq(
+            sb.table(_CLIENTES_TABLE).select("id").eq("nit", nit), organizacion_id
+        ).execute()
+        if existing.data:
+            sb.table(_CLIENTES_TABLE).update(row).eq("id", existing.data[0]["id"]).execute()
+        else:
+            sb.table(_CLIENTES_TABLE).insert(row).execute()
         return True, ""
     except Exception as exc:
         log.error("guardar_cliente_db(%s): %s", nit, exc)
         return False, str(exc)
 
 
-def eliminar_cliente_db(cliente_id: str) -> bool:
+def eliminar_cliente_db(cliente_id: str, organizacion_id: str | None = None) -> bool:
     try:
-        data = _leer(_CLIENTES_FILE)
-        if cliente_id in data:
-            del data[cliente_id]
-        else:
-            key = next((k for k, v in data.items() if v.get("nit") == cliente_id), None)
-            if key:
-                del data[key]
-        _escribir(_CLIENTES_FILE, data)
+        sb = get_supabase()
+        resp = sb.table(_CLIENTES_TABLE).delete().eq("id", cliente_id).execute()
+        if not resp.data:
+            _org_eq(
+                sb.table(_CLIENTES_TABLE).delete().eq("nit", cliente_id), organizacion_id
+            ).execute()
         return True
     except Exception as exc:
         log.error("eliminar_cliente_db(%s): %s", cliente_id, exc)
@@ -135,76 +94,87 @@ def eliminar_cliente_db(cliente_id: str) -> bool:
 
 # ── Proveedores ───────────────────────────────────────────────────────────────
 
-def cargar_proveedores_db() -> list[dict]:
-    raw = _leer_con_cache(_PROVEEDORES_FILE)
-    result = []
-    for nit, v in raw.items():
-        row = dict(v)
-        row.setdefault("id", nit)
-        row.setdefault("nit", nit)
-        row.setdefault("nombre_comercial", row.pop("nombre", ""))
-        result.append(row)
-    return sorted(result, key=lambda x: x.get("nombre_comercial", ""))
-
-
-def guardar_proveedor_db(nit: str, nombre: str, nrc: str = "") -> bool:
+def cargar_proveedores_db(organizacion_id: str | None = None) -> list[dict]:
     try:
-        data = _leer(_PROVEEDORES_FILE)
-        data[nit] = {
-            "nombre": nombre.strip().upper(),
-            "nrc":    nrc or "",
+        query = get_supabase().table(_PROVEEDORES_TABLE).select("*")
+        resp = _org_eq(query, organizacion_id).order("nombre_comercial").execute()
+        return resp.data or []
+    except Exception as exc:
+        log.error("cargar_proveedores_db: %s", exc)
+        return []
+
+
+def guardar_proveedor_db(
+    nit: str, nombre: str, nrc: str = "", organizacion_id: str | None = None
+) -> bool:
+    try:
+        row = {
+            "nit":              nit,
+            "nombre_comercial": nombre.strip().upper(),
+            "nrc":              nrc or "",
+            "organizacion_id":  organizacion_id,
         }
-        _escribir(_PROVEEDORES_FILE, data)
+        sb = get_supabase()
+        existing = _org_eq(
+            sb.table(_PROVEEDORES_TABLE).select("id").eq("nit", nit), organizacion_id
+        ).execute()
+        if existing.data:
+            sb.table(_PROVEEDORES_TABLE).update(row).eq("id", existing.data[0]["id"]).execute()
+        else:
+            sb.table(_PROVEEDORES_TABLE).insert(row).execute()
         return True
     except Exception as exc:
         log.error("guardar_proveedor_db(%s): %s", nit, exc)
         return False
 
 
-def eliminar_proveedor_db(proveedor_id: str) -> bool:
+def eliminar_proveedor_db(proveedor_id: str, organizacion_id: str | None = None) -> bool:
     try:
-        data = _leer(_PROVEEDORES_FILE)
-        if proveedor_id in data:
-            del data[proveedor_id]
-        else:
-            key = next((k for k, v in data.items() if v.get("nit") == proveedor_id), None)
-            if key:
-                del data[key]
-        _escribir(_PROVEEDORES_FILE, data)
+        sb = get_supabase()
+        resp = sb.table(_PROVEEDORES_TABLE).delete().eq("id", proveedor_id).execute()
+        if not resp.data:
+            _org_eq(
+                sb.table(_PROVEEDORES_TABLE).delete().eq("nit", proveedor_id), organizacion_id
+            ).execute()
         return True
     except Exception as exc:
         log.error("eliminar_proveedor_db(%s): %s", proveedor_id, exc)
         return False
 
 
-def buscar_proveedor_por_nit(nit: str) -> dict | None:
+def buscar_proveedor_por_nit(nit: str, organizacion_id: str | None = None) -> dict | None:
     if not nit:
         return None
-    data = _leer_con_cache(_PROVEEDORES_FILE)
-    row = data.get(nit)
-    if row:
-        return {
-            "nombre": row.get("nombre", row.get("nombre_comercial", "")),
-            "nrc":    row.get("nrc", ""),
-            "fuente": "privado",
-        }
-    return None
+    try:
+        query = get_supabase().table(_PROVEEDORES_TABLE).select("nombre_comercial,nrc").eq("nit", nit)
+        resp = _org_eq(query, organizacion_id).limit(1).execute()
+        if resp.data:
+            row = resp.data[0]
+            return {"nombre": row.get("nombre_comercial", ""), "nrc": row.get("nrc", ""), "fuente": "privado"}
+        return None
+    except Exception as exc:
+        log.error("buscar_proveedor_por_nit(%s): %s", nit, exc)
+        return None
 
 
-def auto_registrar_proveedor(nit: str, nombre: str, nrc: str = "") -> bool:
+def auto_registrar_proveedor(
+    nit: str, nombre: str, nrc: str = "", organizacion_id: str | None = None
+) -> bool:
     if not nit or not nombre.strip():
         return False
-    if buscar_proveedor_por_nit(nit):
+    if buscar_proveedor_por_nit(nit, organizacion_id):
         return True
-    return guardar_proveedor_db(nit=nit, nombre=nombre, nrc=nrc)
+    return guardar_proveedor_db(nit=nit, nombre=nombre, nrc=nrc, organizacion_id=organizacion_id)
 
 
-def cargar_proveedores_combinados() -> dict:
-    raw = _leer_con_cache(_PROVEEDORES_FILE)
-    return {
-        nit: {
-            "nombre": v.get("nombre", v.get("nombre_comercial", "")),
-            "nrc":    v.get("nrc", ""),
+def cargar_proveedores_combinados(organizacion_id: str | None = None) -> dict:
+    try:
+        query = get_supabase().table(_PROVEEDORES_TABLE).select("nit,nombre_comercial,nrc")
+        resp = _org_eq(query, organizacion_id).execute()
+        return {
+            row["nit"]: {"nombre": row.get("nombre_comercial", ""), "nrc": row.get("nrc", "")}
+            for row in (resp.data or [])
         }
-        for nit, v in raw.items()
-    }
+    except Exception as exc:
+        log.error("cargar_proveedores_combinados: %s", exc)
+        return {}
