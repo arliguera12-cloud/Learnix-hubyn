@@ -80,8 +80,9 @@ export default function Login() {
       <div className="w-full max-w-sm">
         {/* Logo / Header */}
         <div className="text-center mb-8">
-          <p className="text-4xl mb-3">🏛️</p>
+          <div className="registro-seal mx-auto mb-3" data-num="001">L</div>
           <h1 className="text-2xl font-bold text-white">Learnix DTE Hub</h1>
+          <div className="rule-double max-w-[160px] mx-auto" />
           <p className="text-sm text-slate-400 mt-1">Sistema de extracción de DTEs — El Salvador</p>
         </div>
 

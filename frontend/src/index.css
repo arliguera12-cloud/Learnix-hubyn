@@ -2,6 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * CSS custom properties — solo para los componentes editoriales de Certia
+ * (regla doble, sello registral, stamp) que usan var(--x) directamente en
+ * vez de clases Tailwind. El resto del sistema usa los tokens definidos en
+ * tailwind.config.js; estos valores son los mismos, solo expuestos como
+ * variables CSS para ese puñado de componentes.
+ */
+:root {
+  --ink: #f2ede1;
+  --ink-4: #746c5c;
+  --rule: #2d2822;
+  --rule-strong: #d8d2c3;
+  --gold: #d4b45c;
+  --cinnabar: #ed8b73;
+  --font-display: 'Fraunces', 'Times New Roman', Georgia, serif;
+  --font-ui: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
+}
+
 @layer base {
   html {
     @apply bg-surface-900 text-slate-100 antialiased;
@@ -65,5 +84,123 @@
   .table-head {
     @apply px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400
            bg-surface-700 border-b border-surface-600 whitespace-nowrap;
+  }
+
+  /* ═══ Reglas editoriales ═══ */
+  .editorial-header {
+    border-top: 3px solid var(--rule-strong);
+    border-bottom: 1px solid var(--rule-strong);
+    padding: 1.5rem 0 1.15rem;
+    margin-bottom: 1.75rem;
+    position: relative;
+  }
+  .editorial-header::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -4px;
+    height: 1px;
+    background: var(--rule-strong);
+  }
+
+  .rule-double {
+    border-top: 2px solid var(--rule-strong);
+    border-bottom: 1px solid var(--rule-strong);
+    height: 4px;
+    margin: 0.75rem 0 1rem;
+  }
+  .rule-hair {
+    height: 1px;
+    background: var(--rule);
+    margin: 1rem 0;
+    border: 0;
+  }
+  .rule-thick {
+    height: 2px;
+    background: var(--rule-strong);
+    margin: 1rem 0;
+    border: 0;
+  }
+  .rule-divider {
+    height: 6px;
+    border-top: 1px solid var(--rule-strong);
+    border-bottom: 3px double var(--rule-strong);
+    margin: 1.5rem 0;
+  }
+
+  /* ═══ Sello registral ═══ */
+  .registro-seal {
+    width: 72px;
+    height: 72px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px solid var(--ink);
+    border-radius: 2px;
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 2rem;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+    position: relative;
+  }
+  .registro-seal::before {
+    content: 'LEARNIX';
+    position: absolute;
+    top: 3px;
+    left: 0;
+    right: 0;
+    font-family: var(--font-ui);
+    font-size: 0.38rem;
+    letter-spacing: 0.22em;
+    color: var(--gold);
+    font-weight: 600;
+    text-align: center;
+    text-transform: uppercase;
+  }
+  .registro-seal::after {
+    content: '№ ' attr(data-num);
+    position: absolute;
+    bottom: 3px;
+    left: 0;
+    right: 0;
+    font-family: var(--font-mono);
+    font-size: 0.5rem;
+    color: var(--ink-4);
+    text-align: center;
+  }
+
+  .registro-seal-sm {
+    width: 48px;
+    height: 48px;
+    font-size: 1.3rem;
+  }
+  .registro-seal-sm::before {
+    font-size: 0.3rem;
+    top: 2px;
+  }
+  .registro-seal-sm::after {
+    font-size: 0.4rem;
+    bottom: 2px;
+  }
+
+  /* ═══ Stamp rotado (estado borrador / no oficial) ═══ */
+  .stamp {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.35rem 0.75rem;
+    border: 2px solid currentColor;
+    border-radius: 2px;
+    transform: rotate(-4deg);
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-style: italic;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--cinnabar);
+    opacity: 0.85;
   }
 }
