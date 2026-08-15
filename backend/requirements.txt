@@ -26,6 +26,9 @@ openpyxl>=3.1.2
 # Supabase
 supabase>=2.4.0
 
+# Auth — verificación de JWT de Supabase
+pyjwt>=2.8.0
+
 # Utilidades
 requests>=2.28.0
 python-dotenv>=1.0.0

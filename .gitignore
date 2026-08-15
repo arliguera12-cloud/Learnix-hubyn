@@ -14,12 +14,13 @@ build/
 venv/
 env/
 
-# Streamlit
-.streamlit/secrets.toml
+# Node
+node_modules/
 
 # Environment variables (local only)
 .env
-.env.*
+.env.local
+.env.*.local
 
 # Editors & OS
 .DS_Store
@@ -27,6 +28,3 @@ env/
 .vscode/
 *.swp
 *.swo
-
-# Data files (local only)
-data/*.json
