@@ -14,6 +14,7 @@ from utils.pdf_utils import (
 from utils.ai_utils import gemini_disponible, procesar_dte_con_gemini
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
+from utils.qa_utils import calcular_confianza
 
 
 
@@ -251,8 +252,12 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         if _vision_campos.get("ret") and ret == 0.0:
             ret = float(_vision_campos["ret"])
 
-        if not _vision_campos and gemini_disponible():
-            # Fallback textual solo cuando Vision no está disponible
+        _campos_pre_ia = {
+            "id_sujeto": id_sujeto, "nom_sujeto": nom_sujeto, "fecha": fecha,
+            "sello": sello, "gen": gen, "base": base, "ret": ret,
+        }
+        _confianza_pre = calcular_confianza(_campos_pre_ia, "sujetos_excluidos")
+        if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
             _nit_suj = id_sujeto if len(id_sujeto) == 14 else ""
             _dui_suj = id_sujeto if len(id_sujeto) == 9  else ""
             _campos_act = {
@@ -302,6 +307,18 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         except Exception:
             pass
 
+        _campos_finales = {
+            "id_sujeto": id_sujeto, "nom_sujeto": nom_sujeto, "fecha": fecha,
+            "sello": sello, "gen": gen, "base": base, "ret": ret,
+        }
+        _confianza = calcular_confianza(_campos_finales, "sujetos_excluidos")
+        if _confianza["score"] >= 85:
+            estado = "OK"
+        elif _confianza["score"] >= 50:
+            estado = "REVISAR"
+        else:
+            estado = "REVISION_MANUAL"
+
         return {
             "fecha"               : fecha,
             "id_sujeto"           : id_sujeto,
@@ -312,6 +329,11 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             "num_control"         : num_control,
             "base"                : base,
             "ret"                 : ret,
+            "estado"              : estado,
+            "confianza"           : _confianza["score"],
+            "campos_faltantes"    : _confianza["campos_faltantes"],
+            "validacion_montos"   : _confianza["validacion_montos"],
+            "detalle_confianza"   : _confianza["detalle"],
             "gemini_correcciones" : gemini_correcciones,
             "_vision_campos"      : _vision_campos,
             "_vision_alertas"     : _vision_alertas,

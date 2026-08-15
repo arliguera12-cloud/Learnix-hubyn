@@ -2,7 +2,6 @@
 Learnix Hub — QA Fiscal Utils v2.0
 
 Validates mathematical and structural coherence of extracted DTE fields.
-Provides Streamlit UI helpers for the QA gate (banner + field highlighting).
 
 v2.0: agrega funciones de auto-corrección (auto_corregir_*) que calculan
 y proponen los valores correctos según las fórmulas DGII.
@@ -16,7 +15,6 @@ Validation rules per DTE type:
 from __future__ import annotations
 
 import re
-import streamlit as st
 
 
 # ─── Validators de campos individuales ───────────────────────────────────────
@@ -53,12 +51,16 @@ def _monto(val) -> float:
 # ─── Validación fiscal matemática ────────────────────────────────────────────
 
 def validar_montos_ventas(campos: dict) -> list[str]:
-    """Returns fiscal alerts for ventas/compras DTEs (IVA 13%, total coherence)."""
+    """
+    Returns fiscal alerts for ventas/compras DTEs (IVA 13%, total coherence).
+    Acepta ambos juegos de nombres de campo: ventas (gravadas/debito/total/exentas)
+    y compras (gra/iva/tot/exe) — mismas fórmulas, distinta nomenclatura por extractor.
+    """
     alertas: list[str] = []
-    gravadas = _monto(campos.get("gravadas"))
-    iva      = _monto(campos.get("iva"))
-    total    = _monto(campos.get("total"))
-    exentas  = _monto(campos.get("exentas"))
+    gravadas = _monto(campos.get("gravadas") if campos.get("gravadas") is not None else campos.get("gra"))
+    iva      = _monto(campos.get("iva") if campos.get("iva") is not None else campos.get("debito"))
+    total    = _monto(campos.get("total") if campos.get("total") is not None else campos.get("tot"))
+    exentas  = _monto(campos.get("exentas") if campos.get("exentas") is not None else campos.get("exe"))
     no_suj   = _monto(campos.get("no_sujetas"))
 
     if gravadas > 0 and iva > 0:
@@ -264,117 +266,6 @@ def requiere_revision_manual(
     if alertas:
         return True
     return False
-
-
-# ─── Streamlit UI helpers ─────────────────────────────────────────────────────
-
-def mostrar_banner_qa(
-    tipo_dte: str,
-    campos: dict,
-    confianza: int = 100,
-    alertas: list | None = None,
-    container=None,
-) -> None:
-    """
-    Renders the QA status banner inside a Streamlit container.
-
-    ⚠️ Red banner + list of issues when review is needed.
-    ✅ Green inline badge when everything passes.
-    """
-    target   = container or st
-    alertas  = alertas or []
-    invalidos = campos_invalidos_dte(tipo_dte, campos)
-    necesita  = confianza < 65 or bool(invalidos) or bool(alertas)
-
-    if necesita:
-        razones: list[str] = []
-        if confianza < 65:
-            razones.append(f"Confianza IA baja ({confianza}%)")
-        for campo in sorted(invalidos):
-            razones.append(f"Campo con error: <code>{campo}</code>")
-        for alerta in alertas:
-            razones.append(str(alerta))
-
-        items_html = "".join(f"<li>{r}</li>" for r in razones)
-        target.markdown(
-            f"""<div style="background:#3D1212;border:2px solid #E53935;
-            border-radius:8px;padding:12px 16px;margin:6px 0">
-            <span style="color:#EF5350;font-size:1.05rem;font-weight:bold">
-            ⚠️ Requiere Revisión Manual</span>
-            <ul style="color:#FFCDD2;margin:6px 0 0 0;padding-left:18px">
-            {items_html}
-            </ul></div>""",
-            unsafe_allow_html=True,
-        )
-    else:
-        target.markdown(
-            f"""<div style="display:inline-block;background:#1A2C18;
-            border:1px solid #6AB040;border-radius:6px;
-            padding:6px 14px;margin:4px 0">
-            <span style="color:#A8E870">
-            ✅ Datos verificados — Confianza IA: {confianza}%
-            </span></div>""",
-            unsafe_allow_html=True,
-        )
-
-
-def mostrar_indicador_vision(
-    campos_vision: dict,
-    alertas_vision: list,
-    audit_vision: dict,
-    error_vision: str = "",
-    container=None,
-) -> None:
-    """
-    Renders the Vision status indicator inside a Streamlit container.
-    Displays the actual API error when Vision fails, so users can diagnose it.
-    """
-    target = container or st
-
-    if not audit_vision:
-        if error_vision:
-            target.warning(
-                f"⚠️ **IA Vision falló** — se usó regex como respaldo.\n\n"
-                f"Error exacto: `{error_vision}`"
-            )
-        else:
-            target.caption("🔌 IA Vision no disponible — extracción solo por regex")
-        return
-
-    confianza = audit_vision.get("confianza", 0)
-    layout    = audit_vision.get("layout", "")
-    notas     = audit_vision.get("notas", "")
-    modelo    = audit_vision.get("modelo", "ai-vision")
-
-    if confianza >= 85:
-        color, nivel = "#6AB040", "Alta confianza"
-    elif confianza >= 65:
-        color, nivel = "#F0A500", "Confianza moderada"
-    else:
-        color, nivel = "#E53935", "Baja confianza — revisar"
-
-    target.markdown(
-        f"""<div style="background:#1A2C18;border-radius:6px;padding:6px 12px;margin:4px 0">
-        <span style="color:{color};font-weight:bold">
-        👁️ IA Vision</span>
-        <span style="color:#8BAF72"> · {modelo}</span>
-        <span style="color:#666"> · Layout: {layout or 'N/A'}</span>
-        <div style="background:{color};width:{confianza}%;height:5px;
-        border-radius:3px;margin:4px 0"></div>
-        <small style="color:{color}">{nivel} ({confianza}%)</small>
-        </div>""",
-        unsafe_allow_html=True,
-    )
-
-    if notas:
-        target.info(f"📝 {notas}")
-
-    if alertas_vision:
-        for alerta in alertas_vision:
-            target.warning(f"⚠️ {alerta}")
-    elif campos_vision:
-        n = len([v for v in campos_vision.values() if v is not None])
-        target.caption(f"⚡ Vision extrajo {n} campo(s) — sin alertas fiscales")
 
 
 def calcular_estatus_venta(row) -> str:
@@ -647,46 +538,6 @@ def aplicar_autocorrecciones_df(df: "pd.DataFrame", tipo_dte: str) -> "pd.DataFr
     return df
 
 
-def mostrar_boton_autocorreccion(
-    df: "pd.DataFrame",
-    tipo_dte: str,
-    session_key: str,
-    container=None,
-) -> "pd.DataFrame":
-    """
-    Muestra un botón "⚡ Auto-corregir IVA/Retención" en Streamlit.
-    Al presionarlo, aplica las correcciones fiscales al DataFrame y lo guarda
-    en session_state[session_key].
-
-    Returns:
-        DataFrame corregido (o el original si no se presionó el botón).
-    """
-    import streamlit as _st
-    target = container or _st
-
-    filas_con_error = _contar_filas_con_error(df, tipo_dte)
-    if filas_con_error == 0:
-        return df
-
-    label = (
-        f"⚡ Auto-corregir IVA ({filas_con_error} fila{'s' if filas_con_error > 1 else ''})"
-        if tipo_dte in ("ventas", "compras")
-        else f"⚡ Auto-corregir Retención ({filas_con_error} fila{'s' if filas_con_error > 1 else ''})"
-    )
-
-    if target.button(label, type="secondary", help="Recalcula IVA/retención según fórmulas DGII y actualiza las filas con error"):
-        df_corr = aplicar_autocorrecciones_df(df, tipo_dte)
-        try:
-            import streamlit as _st2
-            _st2.session_state[session_key] = df_corr
-        except Exception:
-            pass
-        target.success(f"✅ {filas_con_error} fila(s) corregida(s) automáticamente.")
-        return df_corr
-
-    return df
-
-
 def _contar_filas_con_error(df: "pd.DataFrame", tipo_dte: str) -> int:
     """Cuenta cuántas filas tienen errores de cuadre fiscal."""
     if df is None or (hasattr(df, "empty") and df.empty):
@@ -729,3 +580,61 @@ def razones_revisar_compra(row) -> str:
     if len(sello) < 30:
         razones.append(f"Sello vacío o corto ({len(sello)} chars)")
     return " | ".join(razones)
+
+
+# ─── Score de confianza unificado ────────────────────────────────────────────
+
+_CAMPOS_REQUERIDOS = {
+    "ventas":            ["num_control", "gen", "sello", "fecha", "nom_cli", "gravadas", "total"],
+    "compras":           ["num_control", "gen", "sello", "fecha", "nom_prov", "gra", "tot"],
+    "retenciones":       ["nit_prov", "fecha", "sello", "gen", "base", "ret"],
+    "sujetos_excluidos": ["id_sujeto", "nom_sujeto", "fecha", "sello", "gen", "base", "ret"],
+}
+
+_VALORES_VACIOS = {"", "SIN NOMBRE", "⚠️ REVISAR NOMBRE", None}
+
+
+def _campo_vacio(valor) -> bool:
+    if valor in _VALORES_VACIOS:
+        return True
+    if isinstance(valor, (int, float)):
+        return valor == 0
+    return not str(valor).strip()
+
+
+def calcular_confianza(resultado: dict, tipo_dte: str) -> dict:
+    """
+    Score de confianza 0-100 de un resultado de extracción, basado en:
+      - % de campos requeridos (por tipo de DTE) que no están vacíos.
+      - Validación matemática fiscal (IVA/retención según fórmulas DGII).
+
+    Si la validación matemática falla, el score se topa en 60 — un documento
+    con campos completos pero montos que no cuadran nunca llega a "OK" solo
+    por completitud.
+
+    Returns:
+        {"score": int, "campos_faltantes": list[str],
+         "validacion_montos": "ok"|"error", "detalle": str}
+    """
+    campos = _CAMPOS_REQUERIDOS.get(tipo_dte, [])
+    faltantes = [c for c in campos if _campo_vacio(resultado.get(c))]
+    score = round(100 * (len(campos) - len(faltantes)) / len(campos)) if campos else 100
+
+    validador = _VALIDADORES_MONTOS.get(tipo_dte)
+    alertas = validador(resultado) if validador else []
+    validacion_montos = "error" if alertas else "ok"
+    if alertas:
+        score = min(score, 60)
+
+    detalle_partes = []
+    if faltantes:
+        detalle_partes.append(f"Campos faltantes: {', '.join(faltantes)}")
+    if alertas:
+        detalle_partes.append("; ".join(alertas))
+
+    return {
+        "score": score,
+        "campos_faltantes": faltantes,
+        "validacion_montos": validacion_montos,
+        "detalle": " | ".join(detalle_partes) or "Todos los campos requeridos presentes y montos cuadran.",
+    }

@@ -1,8 +1,11 @@
 """
 Endpoints de extracción de DTEs.
-Cada endpoint recibe un PDF (multipart/form-data) y devuelve JSON estructurado
-con los datos extraídos, listos para guardarse en Supabase.
+Cada endpoint recibe un PDF o (ventas/compras) un JSON firmado por Hacienda
+(multipart/form-data) y devuelve JSON estructurado con los datos extraídos,
+listos para guardarse en Supabase.
 """
+import json as _json
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
 from typing import List
@@ -13,25 +16,54 @@ from extractors.retenciones import extraer_retencion_nativa
 from extractors.sujetos_excluidos import extraer_sujetos_nativo
 from schemas.procesamiento import DeclaranteFields
 from utils.auth_dependency import get_current_user
+from utils.concurrent_processor import procesar_json_nativo_ventas, procesar_json_nativo_compras
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
-_MAX_PDF_SIZE = 10 * 1024 * 1024  # 10MB
+_MAX_PDF_SIZE = 10 * 1024 * 1024   # 10MB
+_MAX_JSON_SIZE = 2 * 1024 * 1024   # 2MB
 
 
 # ---------------------------------------------------------------------------
 # Helper compartido
 # ---------------------------------------------------------------------------
 
-def _read_pdf_bytes(file: UploadFile) -> bytes:
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
-    content = file.file.read()
-    if len(content) > _MAX_PDF_SIZE:
-        raise HTTPException(status_code=400, detail="El archivo excede 10MB")
-    if not content.startswith(b"%PDF-"):
-        raise HTTPException(status_code=400, detail="El archivo no es un PDF válido")
-    return content
+def _read_upload_bytes(file: UploadFile, permitir_json: bool = False) -> tuple[bytes, str]:
+    """
+    Lee y valida el archivo subido. Acepta .pdf siempre; .json solo cuando
+    permitir_json=True (hoy: ventas y compras, que tienen parser JSON nativo
+    contra el schema oficial de Hacienda — ver utils/concurrent_processor.py).
+
+    Returns:
+        (bytes, "pdf"|"json")
+    """
+    filename = (file.filename or "").lower()
+
+    if filename.endswith(".pdf"):
+        content = file.file.read()
+        if len(content) > _MAX_PDF_SIZE:
+            raise HTTPException(status_code=400, detail="El archivo excede 10MB")
+        if not content.startswith(b"%PDF-"):
+            raise HTTPException(status_code=400, detail="El archivo no es un PDF válido")
+        return content, "pdf"
+
+    if filename.endswith(".json"):
+        if not permitir_json:
+            raise HTTPException(
+                status_code=400,
+                detail="Este tipo de DTE aún no soporta carga de JSON, solo PDF",
+            )
+        content = file.file.read()
+        if len(content) > _MAX_JSON_SIZE:
+            raise HTTPException(status_code=400, detail="El archivo JSON excede 2MB")
+        try:
+            _json.loads(content)
+        except Exception:
+            raise HTTPException(status_code=400, detail="El archivo no es un JSON válido")
+        return content, "json"
+
+    tipos_aceptados = "PDF o JSON" if permitir_json else "PDF"
+    raise HTTPException(status_code=400, detail=f"Solo se aceptan archivos {tipos_aceptados}")
 
 
 def _build_cliente_activo(declarante_id: str, nombre: str = "", nit: str = "",
@@ -82,22 +114,23 @@ def _handle_extractor_result(result: dict, tipo: str, filename: str, declarante_
 
 @router.post("/ventas")
 async def procesar_ventas(
-    file: UploadFile = File(..., description="PDF del DTE de ventas"),
+    file: UploadFile = File(..., description="PDF o JSON firmado por Hacienda del DTE de ventas"),
     declarante_id: str = Form(..., description="ID del declarante (NIT sin guiones)"),
     nombre_declarante: str = Form("", description="Nombre/razón social del declarante"),
     nrc_declarante: str = Form("", description="NRC del declarante"),
 ):
     """
     Extrae los datos de un DTE de ventas.
+    Si se sube el JSON oficial firmado por Hacienda, se parsea contra el schema
+    (sin regex/IA, confianza=100). Si se sube PDF, sigue el pipeline regex+IA.
     Devuelve un registro con estructura del Anexo 1 (contribuyentes) o Anexo 2 (consumidor final).
     """
-    pdf_bytes = _read_pdf_bytes(file)
-    cliente = _build_cliente_activo(
-        declarante_id,
-        nombre=nombre_declarante,
-        nrc=nrc_declarante,
-    )
-    result = extraer_venta_nativo_pro(pdf_bytes, cliente)
+    content, ext = _read_upload_bytes(file, permitir_json=True)
+    if ext == "json":
+        result = procesar_json_nativo_ventas(content)
+    else:
+        cliente = _build_cliente_activo(declarante_id, nombre=nombre_declarante, nrc=nrc_declarante)
+        result = extraer_venta_nativo_pro(content, cliente)
     return _handle_extractor_result(result, "ventas", file.filename, declarante_id)
 
 
@@ -107,22 +140,23 @@ async def procesar_ventas(
 
 @router.post("/compras")
 async def procesar_compras(
-    file: UploadFile = File(..., description="PDF del DTE de compras"),
+    file: UploadFile = File(..., description="PDF o JSON firmado por Hacienda del DTE de compras"),
     declarante_id: str = Form(..., description="ID del declarante (NIT sin guiones)"),
     nombre_declarante: str = Form("", description="Nombre/razón social del declarante"),
     nrc_declarante: str = Form("", description="NRC del declarante"),
 ):
     """
-    Extrae los datos de un DTE de compras.
+    Extrae los datos de un DTE de compras (incluye DTE-14 sujeto excluido vía JSON).
+    Si se sube el JSON oficial firmado por Hacienda, se parsea contra el schema
+    (sin regex/IA, confianza=100). Si se sube PDF, sigue el pipeline regex+IA.
     Devuelve un registro con estructura del Anexo 3 DGII.
     """
-    pdf_bytes = _read_pdf_bytes(file)
-    cliente = _build_cliente_activo(
-        declarante_id,
-        nombre=nombre_declarante,
-        nrc=nrc_declarante,
-    )
-    result = extraer_compra_nativo_pro(pdf_bytes, cliente)
+    content, ext = _read_upload_bytes(file, permitir_json=True)
+    if ext == "json":
+        result = procesar_json_nativo_compras(content)
+    else:
+        cliente = _build_cliente_activo(declarante_id, nombre=nombre_declarante, nrc=nrc_declarante)
+        result = extraer_compra_nativo_pro(content, cliente)
     return _handle_extractor_result(result, "compras", file.filename, declarante_id)
 
 
@@ -140,9 +174,9 @@ async def procesar_retenciones(
     Extrae los datos de un DTE de retenciones (DTE-07, casilla 162 / IVA 1%).
     Devuelve un registro con estructura del Anexo 7 DGII.
     """
-    pdf_bytes = _read_pdf_bytes(file)
+    content, _ext = _read_upload_bytes(file, permitir_json=False)
     cliente = _build_cliente_activo(declarante_id, nombre=nombre_declarante)
-    result = extraer_retencion_nativa(pdf_bytes, cliente)
+    result = extraer_retencion_nativa(content, cliente)
     return _handle_extractor_result(result, "retenciones", file.filename, declarante_id)
 
 
@@ -160,25 +194,31 @@ async def procesar_sujetos_excluidos(
     Extrae los datos de un DTE de sujetos excluidos (DTE-14, casilla 66 / retención renta 10%).
     Devuelve un registro con estructura del Anexo 5 DGII.
     """
-    pdf_bytes = _read_pdf_bytes(file)
+    content, _ext = _read_upload_bytes(file, permitir_json=False)
     cliente = _build_cliente_activo(declarante_id, nombre=nombre_declarante)
-    result = extraer_sujetos_nativo(pdf_bytes, cliente)
+    result = extraer_sujetos_nativo(content, cliente)
     return _handle_extractor_result(result, "sujetos_excluidos", file.filename, declarante_id)
 
 
 # ---------------------------------------------------------------------------
-# Lote (multi-PDF)
+# Lote (multi-PDF/JSON)
 # ---------------------------------------------------------------------------
 
-def _process_lote(files: List[UploadFile], extractor_fn, tipo: str,
-                  declarante_id: str, nombre_declarante: str = "", nrc_declarante: str = "") -> dict:
+def _process_lote(
+    files: List[UploadFile], extractor_fn, tipo: str,
+    declarante_id: str, nombre_declarante: str = "", nrc_declarante: str = "",
+    permitir_json: bool = False, json_fn=None,
+) -> dict:
     cliente = _build_cliente_activo(declarante_id, nombre=nombre_declarante, nrc=nrc_declarante)
     resultados = []
     errores = []
     for f in files:
         try:
-            pdf_bytes = _read_pdf_bytes(f)
-            result = extractor_fn(pdf_bytes, cliente)
+            content, ext = _read_upload_bytes(f, permitir_json=permitir_json)
+            if ext == "json" and json_fn is not None:
+                result = json_fn(content)
+            else:
+                result = extractor_fn(content, cliente)
             resultados.append(_handle_extractor_result(result, tipo, f.filename, declarante_id))
         except HTTPException as e:
             errores.append({"filename": f.filename, "error": e.detail})
@@ -196,7 +236,8 @@ async def procesar_ventas_lote(
     nrc_declarante: str = Form(""),
 ):
     return _process_lote(files, extraer_venta_nativo_pro, "ventas",
-                         declarante_id, nombre_declarante, nrc_declarante)
+                         declarante_id, nombre_declarante, nrc_declarante,
+                         permitir_json=True, json_fn=procesar_json_nativo_ventas)
 
 
 @router.post("/compras/lote")
@@ -207,7 +248,8 @@ async def procesar_compras_lote(
     nrc_declarante: str = Form(""),
 ):
     return _process_lote(files, extraer_compra_nativo_pro, "compras",
-                         declarante_id, nombre_declarante, nrc_declarante)
+                         declarante_id, nombre_declarante, nrc_declarante,
+                         permitir_json=True, json_fn=procesar_json_nativo_compras)
 
 
 @router.post("/retenciones/lote")

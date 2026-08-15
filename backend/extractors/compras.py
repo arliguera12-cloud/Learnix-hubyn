@@ -16,11 +16,11 @@ from utils.ai_utils import (
     gemini_disponible,
     procesar_dte_con_gemini,
     es_nombre_sospechoso,
-    necesita_verificacion,
     verificar_compra_con_gemini,
 )
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
+from utils.qa_utils import calcular_confianza
 from utils.constants import TIPOS_VALIDOS_COMPRAS, MAX_VALORES_LOOP_COMPRAS
 
 MAX_VALORES_LOOP = MAX_VALORES_LOOP_COMPRAS
@@ -599,39 +599,6 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
         if _vision_campos.get("nit_prov"):
             nit_prov = _vision_campos["nit_prov"]
 
-        # ── Groq: corrige campos vacíos/dudosos independientemente de Vision ──
-        # Se ejecuta siempre que Groq esté disponible, no solo cuando Vision falla.
-        # Vision puede haber llenado algunos campos pero dejado otros vacíos.
-        if gemini_disponible():
-            _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "nom_prov": nom_prov}
-            _necesita, _ = necesita_verificacion(_campos_act, nit_receptor)
-            if _necesita:
-                # texto_visual preserva columnas EMISOR|RECEPTOR — mejor para el modelo.
-                # Evitar concatenar lineal+visual (duplica contenido y gasta contexto).
-                _texto_ia = texto_visual if texto_visual.strip() else texto_lineal
-                _corr_dict, gemini_correcciones = verificar_compra_con_gemini(
-                    _texto_ia,
-                    _campos_act,
-                    nit_receptor,
-                    nom_receptor,
-                )
-                # Solo aplicar corrección si el campo estaba vacío o Groq da uno mejor
-                if _corr_dict.get("fecha") and not fecha:
-                    fecha    = _corr_dict["fecha"]
-                if _corr_dict.get("nom_prov") and (not nom_prov or nom_prov == nom_receptor):
-                    nom_prov = _corr_dict["nom_prov"]
-                if _corr_dict.get("nit_prov") and not nit_prov:
-                    nit_prov = _corr_dict["nit_prov"]
-                # Montos: Groq extrae cuando regex devolvió 0
-                if _corr_dict.get("gra") and gra == 0.0:
-                    gra = float(_corr_dict["gra"])
-                if _corr_dict.get("iva") and iva == 0.0:
-                    iva = float(_corr_dict["iva"])
-                if _corr_dict.get("exe") and exe == 0.0:
-                    exe = float(_corr_dict["exe"])
-                if _corr_dict.get("tot") and tot == 0.0:
-                    tot = float(_corr_dict["tot"])
-
         # ── FOVIAL y COTRANS ───────────────────────────────────────────────────
         # CORREGIDO: en facturas de combustible la etiqueta viene seguida de la
         # TARIFA entre paréntesis y luego el monto real, p. ej.
@@ -858,6 +825,40 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
                 sello = v_sello
 
+        # ── Escalar a IA textual solo si la confianza está en zona gris ───────
+        _campos_pre_ia = {
+            "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
+            "nom_prov": nom_prov, "gra": gra, "tot": tot,
+        }
+        _confianza_pre = calcular_confianza(_campos_pre_ia, "compras")
+        if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
+            _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "nom_prov": nom_prov}
+            # texto_visual preserva columnas EMISOR|RECEPTOR — mejor para el modelo.
+            # Evitar concatenar lineal+visual (duplica contenido y gasta contexto).
+            _texto_ia = texto_visual if texto_visual.strip() else texto_lineal
+            _corr_dict, gemini_correcciones = verificar_compra_con_gemini(
+                _texto_ia,
+                _campos_act,
+                nit_receptor,
+                nom_receptor,
+            )
+            # Solo aplicar corrección si el campo estaba vacío o Groq da uno mejor
+            if _corr_dict.get("fecha") and not fecha:
+                fecha    = _corr_dict["fecha"]
+            if _corr_dict.get("nom_prov") and (not nom_prov or nom_prov == nom_receptor):
+                nom_prov = _corr_dict["nom_prov"]
+            if _corr_dict.get("nit_prov") and not nit_prov:
+                nit_prov = _corr_dict["nit_prov"]
+            # Montos: Groq extrae cuando regex devolvió 0
+            if _corr_dict.get("gra") and gra == 0.0:
+                gra = float(_corr_dict["gra"])
+            if _corr_dict.get("iva") and iva == 0.0:
+                iva = float(_corr_dict["iva"])
+            if _corr_dict.get("exe") and exe == 0.0:
+                exe = float(_corr_dict["exe"])
+            if _corr_dict.get("tot") and tot == 0.0:
+                tot = float(_corr_dict["tot"])
+
         # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
         try:
             _qr = _extraer_qr(file_bytes)
@@ -885,6 +886,19 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
         except Exception:
             pass
 
+        _campos_finales = {
+            "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
+            "nom_prov": nom_prov, "gra": round(gra, 2), "iva": round(iva, 2),
+            "tot": round(tot, 2), "exe": round(exe, 2),
+        }
+        _confianza = calcular_confianza(_campos_finales, "compras")
+        if _confianza["score"] >= 85:
+            estado = "OK"
+        elif _confianza["score"] >= 50:
+            estado = "REVISAR"
+        else:
+            estado = "REVISION_MANUAL"
+
         return {
             "fecha"          : fecha,
             "tipo"           : tipo,
@@ -904,7 +918,11 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             "tot"            : round(tot,  2),
             "fovial"         : round(fovial,  2),
             "cotrans"        : round(cotrans, 2),
-            "estado"              : "OK",
+            "estado"              : estado,
+            "confianza"           : _confianza["score"],
+            "campos_faltantes"    : _confianza["campos_faltantes"],
+            "validacion_montos"   : _confianza["validacion_montos"],
+            "detalle_confianza"   : _confianza["detalle"],
             "iva_calc"            : iva_calculado,
             "es_nuevo"            : es_nuevo,
             "gemini_correcciones" : gemini_correcciones,
