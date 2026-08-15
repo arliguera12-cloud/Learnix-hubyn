@@ -88,7 +88,7 @@ export default function Login() {
         <div className="card">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Correo electrónico</label>
+              <label className="form-label">Correo electrónico</label>
               <input
                 className="input"
                 type="email"
@@ -101,7 +101,7 @@ export default function Login() {
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Contraseña</label>
+              <label className="form-label">Contraseña</label>
               <input
                 className="input"
                 type="password"

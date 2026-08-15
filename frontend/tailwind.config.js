@@ -30,6 +30,17 @@ export default {
           DEFAULT: '#d4b45c',
           tint: '#2a2110',
         },
+        // Tokens explícitos --ink/--cream (modo oscuro) para componentes
+        // que replican el patrón exacto de Certia (btn-primary, form-label, etc.)
+        ink: {
+          DEFAULT: '#f2ede1',
+          3: '#a89f8b',
+          5: '#4d4638',
+        },
+        cream: {
+          DEFAULT: '#0b0a08',
+          hi: '#131110',
+        },
         // Éxito / ganancia — ledger
         ledger: {
           DEFAULT: '#5fd7be',

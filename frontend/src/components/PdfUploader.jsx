@@ -30,7 +30,7 @@ export default function PdfUploader({ onUpload, loading, multiple = false }) {
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid sm:grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs text-slate-400 mb-1">NIT del declarante *</label>
+          <label className="form-label">NIT del declarante *</label>
           <input
             className="input"
             placeholder="06141503071023"
@@ -41,7 +41,7 @@ export default function PdfUploader({ onUpload, loading, multiple = false }) {
           />
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Nombre / Razón social</label>
+          <label className="form-label">Nombre / Razón social</label>
           <input
             className="input"
             placeholder="EMPRESA S.A. DE C.V."
