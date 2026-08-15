@@ -8,8 +8,11 @@ export default function PdfUploader({ onUpload, loading, multiple = false }) {
   const [dragging, setDragging] = useState(false)
 
   function handleFiles(selected) {
-    const pdfs = Array.from(selected).filter(f => f.name.toLowerCase().endsWith('.pdf'))
-    setFiles(pdfs)
+    const validos = Array.from(selected).filter(f => {
+      const name = f.name.toLowerCase()
+      return name.endsWith('.pdf') || name.endsWith('.json')
+    })
+    setFiles(validos)
   }
 
   function handleDrop(e) {
@@ -66,11 +69,13 @@ export default function PdfUploader({ onUpload, loading, multiple = false }) {
             ? files.map(f => f.name).join(', ')
             : 'Arrastra el PDF aquí o haz clic para seleccionar'}
         </p>
-        <p className="text-xs text-slate-500 mt-1">Solo archivos .pdf{multiple ? ' — múltiples permitidos' : ''}</p>
+        <p className="text-xs text-slate-500 mt-1">
+          PDF o JSON firmado por Hacienda{multiple ? ' — múltiples permitidos' : ''}
+        </p>
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf"
+          accept=".pdf,.json"
           multiple={multiple}
           className="hidden"
           onChange={e => handleFiles(e.target.files)}

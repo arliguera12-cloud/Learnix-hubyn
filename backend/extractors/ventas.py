@@ -19,6 +19,7 @@ from utils.ai_utils import (
 )
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
+from utils.qa_utils import calcular_confianza
 from utils.constants import (
     TIPOS_CONTRIBUYENTES,
     TIPOS_CONSUMIDOR,
@@ -508,30 +509,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
         if _vision_campos.get("dui_cli"):
             dui_cli = _vision_campos["dui_cli"]
 
-        if not _vision_campos and gemini_disponible():
-            # Fallback textual solo cuando Vision no está disponible
-            _campos_act = {
-                "fecha"  : fecha,
-                "nom_cli": nom_cli,
-                "nit_cli": nit_cli,
-                "dui_cli": dui_cli,
-            }
-            _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
-            _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
-                _texto_ia,
-                "ventas",
-                _campos_act,
-                {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
-            )
-            if _corr_dict.get("fecha"):
-                fecha   = _corr_dict["fecha"]
-            if _corr_dict.get("nom_cli"):
-                nom_cli = _corr_dict["nom_cli"]
-            if _corr_dict.get("nit_cli"):
-                nit_cli = _corr_dict["nit_cli"]
-            if _corr_dict.get("dui_cli"):
-                dui_cli = _corr_dict["dui_cli"]
-
         # ── Montos ────────────────────────────────────────────────────────────
         exentas    = 0.0
         no_sujetas = 0.0
@@ -687,6 +664,35 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
                 sello = v_sello
 
+        # ── Escalar a IA textual solo si la confianza está en zona gris ───────
+        _campos_pre_ia = {
+            "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
+            "nom_cli": nom_cli, "gravadas": gravadas, "total": total,
+        }
+        _confianza_pre = calcular_confianza(_campos_pre_ia, "ventas")
+        if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
+            _campos_act = {
+                "fecha"  : fecha,
+                "nom_cli": nom_cli,
+                "nit_cli": nit_cli,
+                "dui_cli": dui_cli,
+            }
+            _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
+            _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
+                _texto_ia,
+                "ventas",
+                _campos_act,
+                {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
+            )
+            if _corr_dict.get("fecha"):
+                fecha   = _corr_dict["fecha"]
+            if _corr_dict.get("nom_cli"):
+                nom_cli = _corr_dict["nom_cli"]
+            if _corr_dict.get("nit_cli"):
+                nit_cli = _corr_dict["nit_cli"]
+            if _corr_dict.get("dui_cli"):
+                dui_cli = _corr_dict["dui_cli"]
+
         # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
         try:
             _qr = _extraer_qr(file_bytes)
@@ -709,6 +715,19 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
         except Exception:
             pass
 
+        _campos_finales = {
+            "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
+            "nom_cli": nom_cli, "gravadas": round(gravadas, 2), "debito": round(debito, 2),
+            "total": round(total, 2), "exentas": round(exentas, 2), "no_sujetas": round(no_sujetas, 2),
+        }
+        _confianza = calcular_confianza(_campos_finales, "ventas")
+        if _confianza["score"] >= 85:
+            estado = "OK"
+        elif _confianza["score"] >= 50:
+            estado = "REVISAR"
+        else:
+            estado = "REVISION_MANUAL"
+
         return {
             "fecha"         : fecha,
             "tipo"          : tipo,
@@ -728,7 +747,11 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             "terceros"      : round(terceros, 2),
             "deb_terc"      : round(deb_terc, 2),
             "total"         : round(total, 2),
-            "estado"              : "OK",
+            "estado"              : estado,
+            "confianza"           : _confianza["score"],
+            "campos_faltantes"    : _confianza["campos_faltantes"],
+            "validacion_montos"   : _confianza["validacion_montos"],
+            "detalle_confianza"   : _confianza["detalle"],
             "iva_calc"            : iva_calc,
             "es_nuevo"            : es_nuevo,
             "gemini_correcciones" : gemini_correcciones,

@@ -241,227 +241,225 @@ def leer_y_procesar_lote(
     return results
 
 
+def _extraer_sello_envoltorio(data: dict, dte: dict, ident: dict) -> str:
+    """Sello de recepción: puede estar en varios niveles del envoltorio de transmisión."""
+    def _ss(v): return re.sub(r"\s+", "", str(v or "")).strip()
+    return (
+        _ss(data.get("selloRecibido"))
+        or _ss(dte.get("selloRecibido"))
+        or _ss((dte.get("respuestaHacienda") or {}).get("selloRecibido"))
+        or _ss((dte.get("responseMH") or {}).get("selloRecibido"))
+        or _ss(ident.get("SelloRecibido"))
+        or _ss(ident.get("selloRecibido"))
+    )
+
+
+def _fecha_ddmmyyyy(fec_emi: str) -> str:
+    """YYYY-MM-DD → DD/MM/YYYY. Si no matchea el formato esperado, retorna tal cual."""
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", fec_emi):
+        y, m, d = fec_emi.split("-")
+        return f"{d}/{m}/{y}"
+    return fec_emi
+
+
+def _tributos_iva_fovial_cotrans(resumen: "DTEResumen") -> tuple[float, float, float]:
+    """Extrae IVA/FOVIAL/COTRANS de la lista de tributos tipada; fallback a totalIva."""
+    iva_val = fovial = cotrans = 0.0
+    for t in resumen.tributos:
+        cod  = t.codigo
+        desc = t.descripcion.upper()
+        val  = t.valor
+        if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
+            iva_val = val
+        elif cod == "C3" or "FOVIAL" in desc:
+            fovial = val
+        elif cod == "59" or "COTRANS" in desc:
+            cotrans = val
+    if not iva_val:
+        iva_val = resumen.totalIva
+    return iva_val, fovial, cotrans
+
+
+def _validar_dte_documento(dte_raw: dict) -> "DTEDocumento | str":
+    """Valida dte_raw contra el schema de Hacienda. Retorna el modelo o un mensaje de error."""
+    from pydantic import ValidationError
+    from schemas.dte_hacienda import DTEDocumento
+
+    try:
+        return DTEDocumento.model_validate(dte_raw)
+    except ValidationError as exc:
+        return f"JSON no cumple el schema de Hacienda: {exc.errors()[0]['msg']} (campo: {'.'.join(str(p) for p in exc.errors()[0]['loc'])})"
+
+
 def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
     """
-    Parses a native Hacienda DTE JSON (ventas side).
-    Returns the same field schema as extraer_venta_nativo_pro so the
-    Streamlit page can handle it without special-casing.
-    Any unexpected parsing error returns blank/zero fields instead of crashing.
+    Parsea un JSON firmado por Hacienda (lado ventas) contra el schema oficial
+    (backend/schemas/dte_hacienda.py) y retorna el mismo shape de campos que
+    extraer_venta_nativo_pro, con confianza=100 (es el documento oficial, sin
+    ambigüedad de OCR/regex).
     """
-    _BLANK = {
-        "tipo": "", "fecha": "", "num_control": "", "num_control_raw": "",
-        "gen": "", "gen_sin_guiones": "", "sello": "",
-        "nom_cli": "CONSUMIDOR FINAL", "nit_cli": "", "dui_cli": "",
-        "gravadas": 0.0, "exentas": 0.0, "no_sujetas": 0.0,
-        "debito": 0.0, "terceros": 0.0, "deb_terc": 0.0,
-        "total": 0.0, "fovial": 0.0, "cotrans": 0.0, "_origen": "json_nativo",
-    }
     try:
         data = json.loads(file_bytes.decode("utf-8-sig"))
     except Exception as exc:
         return {"error_fatal": f"JSON inválido: {exc}"}
 
-    try:
-        # Los datos del DTE vienen dentro de dteJson; fallback a la raíz por compatibilidad
-        dte = data.get("dteJson") or data
+    # Los datos del DTE vienen dentro de dteJson; fallback a la raíz por compatibilidad
+    dte_raw = data.get("dteJson") or data
 
-        ident    = dte.get("identificacion") or {}
-        receptor = dte.get("receptor") or {}
-        resumen  = dte.get("resumen") or {}
+    dte = _validar_dte_documento(dte_raw)
+    if isinstance(dte, str):
+        return {"error_fatal": dte}
 
-        # Sello nómada: puede estar en varios niveles del envoltorio o del DTE
-        def _ss(v): return re.sub(r"\s+", "", str(v or "")).strip()
-        sello = (
-            _ss(data.get("selloRecibido"))
-            or _ss(dte.get("selloRecibido"))
-            or _ss((dte.get("respuestaHacienda") or {}).get("selloRecibido"))
-            or _ss((dte.get("responseMH") or {}).get("selloRecibido"))
-            or _ss(ident.get("SelloRecibido"))
-            or _ss(ident.get("selloRecibido"))
-        )
+    ident    = dte.identificacion
+    receptor = dte.receptor
+    resumen  = dte.resumen
 
-        # Fecha: YYYY-MM-DD → DD/MM/YYYY
-        fecha_raw = str(ident.get("fecEmi") or "")
-        if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_raw):
-            y, m, d = fecha_raw.split("-")
-            fecha = f"{d}/{m}/{y}"
-        else:
-            fecha = fecha_raw
+    sello = _extraer_sello_envoltorio(data, dte_raw, dte_raw.get("identificacion") or {})
+    fecha = _fecha_ddmmyyyy(ident.fecEmi)
 
-        # Identificación del receptor — strip guiones antes de filtrar dígitos
-        _raw_r = str(
-            receptor.get("nit") or receptor.get("dui") or receptor.get("numDocumento") or ""
-        ).replace("-", "").strip()
-        nit_r = re.sub(r"[^0-9]", "", _raw_r)
-        _raw_dui_r = str(receptor.get("numDocumento") or "").replace("-", "").strip()
-        dui_r = re.sub(r"[^0-9]", "", _raw_dui_r)
+    _raw_r = (receptor.nit or receptor.dui or receptor.numDocumento).replace("-", "").strip()
+    nit_r = re.sub(r"[^0-9]", "", _raw_r)
+    dui_r = re.sub(r"[^0-9]", "", receptor.numDocumento.replace("-", "").strip())
 
-        # Identificación del emisor (para validación de pertenencia en ventas)
-        emisor_v = dte.get("emisor") or {}
-        _raw_emit_v = str(
-            emisor_v.get("nit") or emisor_v.get("dui") or emisor_v.get("numDocumento") or ""
-        ).replace("-", "").strip()
-        nit_emisor_v = re.sub(r"[^0-9]", "", _raw_emit_v)
+    _raw_emit_v = (dte.emisor.nit or dte.emisor.dui or dte.emisor.numDocumento).replace("-", "").strip()
+    nit_emisor_v = re.sub(r"[^0-9]", "", _raw_emit_v)
 
-        # Tributos: IVA, FOVIAL, COTRANS — proteger contra None
-        tributos_v = resumen.get("tributos") or []
-        iva_val = fovial = cotrans = 0.0
-        for t in tributos_v:
-            cod  = str(t.get("codigo") or "")
-            desc = str(t.get("descripcion") or "").upper()
-            val  = _safe_float(t.get("valor"))
-            if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
-                iva_val = val
-            elif cod == "C3" or "FOVIAL" in desc:
-                fovial = val
-            elif cod == "59" or "COTRANS" in desc:
-                cotrans = val
-        if not iva_val:
-            iva_val = _safe_float(resumen.get("totalIva"))
+    iva_val, fovial, cotrans = _tributos_iva_fovial_cotrans(resumen)
 
-        gen_uuid = str(ident.get("codigoGeneracion") or "")
-        num_ctrl = str(ident.get("numeroControl") or "")
+    gen_uuid = ident.codigoGeneracion
+    num_ctrl = ident.numeroControl
 
-        return {
-            "tipo"           : str(ident.get("tipoDte") or ""),
-            "fecha"          : fecha,
-            "num_control"    : num_ctrl,
-            "num_control_raw": num_ctrl,
-            "gen"            : gen_uuid,
-            "gen_sin_guiones": gen_uuid.replace("-", ""),
-            "sello"          : sello,
-            "_nit_emisor"    : nit_emisor_v,
-            "nom_cli"        : str(receptor.get("nombre") or "CONSUMIDOR FINAL").upper().strip(),
-            "nit_cli"        : nit_r if len(nit_r) == 14 else "",
-            "dui_cli"        : dui_r if len(dui_r) == 9 else "",
-            "gravadas"       : _safe_float(resumen.get("totalGravada")),
-            "exentas"        : _safe_float(resumen.get("totalExenta")),
-            "no_sujetas"     : _safe_float(resumen.get("totalNoSuj")),
-            "debito"         : iva_val,
-            "terceros"       : 0.0,
-            "deb_terc"       : 0.0,
-            "total"          : _safe_float(resumen.get("totalPagar")),
-            "fovial"         : fovial,
-            "cotrans"        : cotrans,
-            "_origen"        : "json_nativo",
-        }
-    except Exception as exc:
-        log.error("Error inesperado parseando JSON ventas: %s", exc, exc_info=True)
-        return _BLANK
+    resultado = {
+        "tipo"           : ident.tipoDte,
+        "fecha"          : fecha,
+        "num_control"    : num_ctrl,
+        "num_control_raw": num_ctrl,
+        "gen"            : gen_uuid,
+        "gen_sin_guiones": gen_uuid.replace("-", ""),
+        "sello"          : sello,
+        "_nit_emisor"    : nit_emisor_v,
+        "nom_cli"        : (receptor.nombre or "CONSUMIDOR FINAL").upper().strip(),
+        "nit_cli"        : nit_r if len(nit_r) == 14 else "",
+        "dui_cli"        : dui_r if len(dui_r) == 9 else "",
+        "gravadas"       : round(resumen.totalGravada, 2),
+        "exentas"        : round(resumen.totalExenta, 2),
+        "no_sujetas"     : round(resumen.totalNoSuj, 2),
+        "debito"         : round(iva_val, 2),
+        "terceros"       : 0.0,
+        "deb_terc"       : 0.0,
+        "total"          : round(resumen.totalPagar, 2),
+        "fovial"         : round(fovial, 2),
+        "cotrans"        : round(cotrans, 2),
+        "_origen"        : "json_nativo",
+    }
+
+    from utils.qa_utils import validar_montos_ventas
+    alertas = validar_montos_ventas(resultado)
+    if alertas:
+        resultado["estado"] = "REVISAR"
+        resultado["confianza"] = 60
+        resultado["detalle_confianza"] = "; ".join(alertas)
+    else:
+        resultado["estado"] = "OK"
+        resultado["confianza"] = 100
+        resultado["detalle_confianza"] = "JSON oficial de Hacienda — schema validado, montos cuadran."
+    resultado["campos_faltantes"] = []
+    resultado["validacion_montos"] = "error" if alertas else "ok"
+    return resultado
 
 
 def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
     """
-    Parses a native Hacienda DTE JSON (compras side).
-    Returns the same field schema as extraer_compra_nativo_pro.
-    Any unexpected parsing error returns blank/zero fields instead of crashing.
+    Parsea un JSON firmado por Hacienda (lado compras) contra el schema oficial
+    y retorna el mismo shape de campos que extraer_compra_nativo_pro, con
+    confianza=100 (documento oficial, sin ambigüedad).
     """
-    _BLANK = {
-        "tipo": "", "fecha": "", "num_control": "", "num_control_raw": "",
-        "gen": "", "gen_sin_guiones": "", "sello": "",
-        "nom_prov": "", "nit_prov": "", "dui_prov": "",
-        "gra": 0.0, "exe": 0.0, "no_sujetas": 0.0,
-        "iva": 0.0, "ret": 0.0, "perc": 0.0,
-        "tot": 0.0, "fovial": 0.0, "cotrans": 0.0, "_origen": "json_nativo",
-    }
+    from utils.constants import TIPOS_VALIDOS_COMPRAS
+
     try:
         data = json.loads(file_bytes.decode("utf-8-sig"))
     except Exception as exc:
         return {"error_fatal": f"JSON inválido: {exc}"}
 
-    try:
-        # Los datos del DTE vienen dentro de dteJson; fallback a la raíz por compatibilidad
-        dte = data.get("dteJson") or data
+    dte_raw = data.get("dteJson") or data
 
-        ident   = dte.get("identificacion") or {}
-        resumen = dte.get("resumen") or {}
+    dte = _validar_dte_documento(dte_raw)
+    if isinstance(dte, str):
+        return {"error_fatal": dte}
 
-        # Sello nómada: puede estar en varios niveles del envoltorio o del DTE
-        def _ss(v): return re.sub(r"\s+", "", str(v or "")).strip()
-        sello = (
-            _ss(data.get("selloRecibido"))
-            or _ss(dte.get("selloRecibido"))
-            or _ss((dte.get("respuestaHacienda") or {}).get("selloRecibido"))
-            or _ss((dte.get("responseMH") or {}).get("selloRecibido"))
-            or _ss(ident.get("SelloRecibido"))
-            or _ss(ident.get("selloRecibido"))
-        )
+    ident   = dte.identificacion
+    resumen = dte.resumen
+    tipo_dte = ident.tipoDte
 
-        # Proveedor: emisor por defecto; para DTE-14, usar sujetoExcluido
-        tipo_dte = str(ident.get("tipoDte") or "")
-        if tipo_dte == "14":
-            sujeto   = dte.get("sujetoExcluido") or {}
-            nom_prov = str(sujeto.get("nombre") or "").upper().strip()
-            _raw_suj = str(
-                sujeto.get("documento") or sujeto.get("nit") or sujeto.get("dui") or ""
-            ).replace("-", "").strip()
-            id_prov  = re.sub(r"[^0-9]", "", _raw_suj)
-        else:
-            emisor   = dte.get("emisor") or {}
-            nom_prov = str(emisor.get("nombre") or "").upper().strip()
-            _raw_em  = str(
-                emisor.get("nit") or emisor.get("dui") or emisor.get("numDocumento") or emisor.get("nrc") or ""
-            ).replace("-", "").strip()
-            id_prov  = re.sub(r"[^0-9]", "", _raw_em)
-
-        nit_prov = id_prov if len(id_prov) == 14 else ""
-        dui_prov = id_prov if len(id_prov) == 9  else ""
-
-        # Identificación del receptor (para validación de pertenencia en compras)
-        receptor_c = dte.get("receptor") or {}
-        _raw_rec_c = str(
-            receptor_c.get("nit") or receptor_c.get("dui") or receptor_c.get("numDocumento") or ""
-        ).replace("-", "").strip()
-        nit_receptor_c = re.sub(r"[^0-9]", "", _raw_rec_c)
-
-        fecha_raw = str(ident.get("fecEmi") or "")
-        if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha_raw):
-            y, m, d = fecha_raw.split("-")
-            fecha = f"{d}/{m}/{y}"
-        else:
-            fecha = fecha_raw
-
-        tributos_c = resumen.get("tributos") or []
-        iva_val = fovial = cotrans = 0.0
-        for t in tributos_c:
-            cod  = str(t.get("codigo") or "")
-            desc = str(t.get("descripcion") or "").upper()
-            val  = _safe_float(t.get("valor"))
-            if cod == "20" or "IVA" in desc or "IMPUESTO AL VALOR AGREGADO" in desc:
-                iva_val = val
-            elif cod == "C3" or "FOVIAL" in desc:
-                fovial = val
-            elif cod == "59" or "COTRANS" in desc:
-                cotrans = val
-        if not iva_val:
-            iva_val = _safe_float(resumen.get("totalIva"))
-
-        gen_uuid = str(ident.get("codigoGeneracion") or "")
-        num_ctrl = str(ident.get("numeroControl") or "")
-
+    if tipo_dte not in TIPOS_VALIDOS_COMPRAS:
         return {
-            "tipo"           : tipo_dte,
-            "fecha"          : fecha,
-            "num_control"    : num_ctrl,
-            "num_control_raw": num_ctrl,
-            "gen"            : gen_uuid,
-            "gen_sin_guiones": gen_uuid.replace("-", ""),
-            "sello"          : sello,
-            "_nit_receptor"  : nit_receptor_c,
-            "nom_prov"       : nom_prov,
-            "nit_prov"       : nit_prov,
-            "dui_prov"       : dui_prov,
-            "gra"            : _safe_float(resumen.get("totalGravada")),
-            "exe"            : _safe_float(resumen.get("totalExenta")),
-            "no_sujetas"     : _safe_float(resumen.get("totalNoSuj")),
-            "iva"            : iva_val,
-            "ret"            : 0.0,
-            "perc"           : 0.0,
-            "tot"            : _safe_float(resumen.get("totalPagar")),
-            "fovial"         : fovial,
-            "cotrans"        : cotrans,
-            "_origen"        : "json_nativo",
+            "error_tipo": (
+                f"DTE-{tipo_dte} no admitido en compras. "
+                f"Validos: {', '.join(sorted(TIPOS_VALIDOS_COMPRAS))}."
+            )
         }
-    except Exception as exc:
-        log.error("Error inesperado parseando JSON compras: %s", exc, exc_info=True)
-        return _BLANK
+
+    sello = _extraer_sello_envoltorio(data, dte_raw, dte_raw.get("identificacion") or {})
+
+    # Proveedor: emisor por defecto; para DTE-14, usar sujetoExcluido
+    if tipo_dte == "14" and dte.sujetoExcluido:
+        sujeto   = dte.sujetoExcluido
+        nom_prov = sujeto.nombre.upper().strip()
+        _raw_suj = (sujeto.documento or sujeto.nit or sujeto.dui).replace("-", "").strip()
+        id_prov  = re.sub(r"[^0-9]", "", _raw_suj)
+    else:
+        emisor   = dte.emisor
+        nom_prov = emisor.nombre.upper().strip()
+        _raw_em  = (emisor.nit or emisor.dui or emisor.numDocumento or emisor.nrc).replace("-", "").strip()
+        id_prov  = re.sub(r"[^0-9]", "", _raw_em)
+
+    nit_prov = id_prov if len(id_prov) == 14 else ""
+    dui_prov = id_prov if len(id_prov) == 9  else ""
+
+    receptor_c = dte.receptor
+    _raw_rec_c = (receptor_c.nit or receptor_c.dui or receptor_c.numDocumento).replace("-", "").strip()
+    nit_receptor_c = re.sub(r"[^0-9]", "", _raw_rec_c)
+
+    fecha = _fecha_ddmmyyyy(ident.fecEmi)
+    iva_val, fovial, cotrans = _tributos_iva_fovial_cotrans(resumen)
+
+    gen_uuid = ident.codigoGeneracion
+    num_ctrl = ident.numeroControl
+
+    resultado = {
+        "tipo"           : tipo_dte,
+        "fecha"          : fecha,
+        "num_control"    : num_ctrl,
+        "num_control_raw": num_ctrl,
+        "gen"            : gen_uuid,
+        "gen_sin_guiones": gen_uuid.replace("-", ""),
+        "sello"          : sello,
+        "_nit_receptor"  : nit_receptor_c,
+        "nom_prov"       : nom_prov,
+        "nit_prov"       : nit_prov,
+        "dui_prov"       : dui_prov,
+        "gra"            : round(resumen.totalGravada, 2),
+        "exe"            : round(resumen.totalExenta, 2),
+        "no_sujetas"     : round(resumen.totalNoSuj, 2),
+        "iva"            : round(iva_val, 2),
+        "ret"            : 0.0,
+        "perc"           : 0.0,
+        "tot"            : round(resumen.totalPagar, 2),
+        "fovial"         : round(fovial, 2),
+        "cotrans"        : round(cotrans, 2),
+        "_origen"        : "json_nativo",
+    }
+
+    from utils.qa_utils import validar_montos_ventas
+    alertas = validar_montos_ventas(resultado)
+    if alertas:
+        resultado["estado"] = "REVISAR"
+        resultado["confianza"] = 60
+        resultado["detalle_confianza"] = "; ".join(alertas)
+    else:
+        resultado["estado"] = "OK"
+        resultado["confianza"] = 100
+        resultado["detalle_confianza"] = "JSON oficial de Hacienda — schema validado, montos cuadran."
+    resultado["campos_faltantes"] = []
+    resultado["validacion_montos"] = "error" if alertas else "ok"
+    return resultado
