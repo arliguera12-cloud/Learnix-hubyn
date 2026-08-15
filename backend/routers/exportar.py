@@ -7,11 +7,13 @@ import io
 import re
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-router = APIRouter()
+from utils.auth_dependency import get_current_user
+
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 _TIPOS_VALIDOS = {"ventas", "compras", "retenciones", "sujetos_excluidos"}
 _TIPOS_CONTRIBUYENTES = {"03", "05", "06"}

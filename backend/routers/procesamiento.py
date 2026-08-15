@@ -3,15 +3,20 @@ Endpoints de extracción de DTEs.
 Cada endpoint recibe un PDF (multipart/form-data) y devuelve JSON estructurado
 con los datos extraídos, listos para guardarse en Supabase.
 """
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import ValidationError
 from typing import List
 
 from extractors.ventas import extraer_venta_nativo_pro
 from extractors.compras import extraer_compra_nativo_pro
 from extractors.retenciones import extraer_retencion_nativa
 from extractors.sujetos_excluidos import extraer_sujetos_nativo
+from schemas.procesamiento import DeclaranteFields
+from utils.auth_dependency import get_current_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
+
+_MAX_PDF_SIZE = 10 * 1024 * 1024  # 10MB
 
 
 # ---------------------------------------------------------------------------
@@ -21,18 +26,30 @@ router = APIRouter()
 def _read_pdf_bytes(file: UploadFile) -> bytes:
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
-    return file.file.read()
+    content = file.file.read()
+    if len(content) > _MAX_PDF_SIZE:
+        raise HTTPException(status_code=400, detail="El archivo excede 10MB")
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="El archivo no es un PDF válido")
+    return content
 
 
 def _build_cliente_activo(declarante_id: str, nombre: str = "", nit: str = "",
                            dui: str = "", nrc: str = "") -> dict:
-    """Construye el dict cliente_activo que esperan los extractores."""
+    """Valida los campos del declarante y construye el dict que esperan los extractores."""
+    try:
+        fields = DeclaranteFields(
+            declarante_id=declarante_id, nombre_declarante=nombre, nrc_declarante=nrc,
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors())
+
     return {
-        "id":      declarante_id,
-        "nit":     nit or declarante_id,
-        "nombre":  nombre,
+        "id":      fields.declarante_id,
+        "nit":     nit or fields.declarante_id,
+        "nombre":  fields.nombre_declarante,
         "dui":     dui,
-        "nrc":     nrc,
+        "nrc":     fields.nrc_declarante,
     }
 
 

@@ -32,18 +32,18 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="fixed inset-y-0 left-0 w-56 bg-surface-800 border-r border-surface-600/60 flex flex-col z-30">
+    <aside className="fixed inset-y-0 left-0 w-56 bg-sb-bg border-r border-sb-hair flex flex-col z-30">
       {/* Logo */}
-      <div className="px-5 py-5 border-b border-surface-600/60">
+      <div className="px-5 py-5 border-b border-sb-hair">
         <div className="flex items-center gap-2.5">
           <div className="h-7 w-7 rounded-lg bg-brand-500/20 flex items-center justify-center shrink-0">
             <span className="text-sm">📊</span>
           </div>
           <div>
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest leading-none mb-0.5">
+            <p className="text-[10px] text-sb-txt-mute uppercase tracking-widest leading-none mb-0.5">
               Learnix
             </p>
-            <h1 className="text-sm font-bold text-white leading-none">DTE Hub</h1>
+            <h1 className="text-sm font-display text-sb-txt-hi leading-none">DTE Hub</h1>
           </div>
         </div>
       </div>
@@ -53,7 +53,7 @@ export default function Sidebar() {
         {grupos.map(({ label, items }) => (
           <div key={label || '_root'}>
             {label && (
-              <p className="px-3 mb-1 text-[10px] uppercase tracking-widest text-slate-600 font-semibold">
+              <p className="px-3 mb-1 text-[10px] uppercase tracking-widest text-sb-txt-mute font-semibold">
                 {label}
               </p>
             )}
@@ -66,8 +66,8 @@ export default function Sidebar() {
                   className={({ isActive }) =>
                     `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors duration-100 ` +
                     (isActive
-                      ? 'bg-brand-500/15 text-brand-400 font-medium border-l-2 border-brand-500 pl-[10px]'
-                      : 'text-slate-400 hover:text-slate-100 hover:bg-surface-700')
+                      ? 'bg-gold/10 text-sb-txt-hi font-medium border-l-2 border-gold pl-[10px]'
+                      : 'text-sb-txt hover:text-sb-txt-hi hover:bg-white/5')
                   }
                 >
                   <span className="text-base leading-none w-5 text-center">{icon}</span>
@@ -80,11 +80,11 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-2 py-3 border-t border-surface-600/60">
+      <div className="px-2 py-3 border-t border-sb-hair">
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-500
-                     hover:text-red-400 hover:bg-red-900/20 transition-colors duration-100"
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-sb-txt-mute
+                     hover:text-cinnabar hover:bg-cinnabar/10 transition-colors duration-100"
         >
           <span className="w-5 text-center text-base leading-none">🚪</span>
           <span>Cerrar sesión</span>

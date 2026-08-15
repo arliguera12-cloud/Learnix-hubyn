@@ -34,13 +34,16 @@ Learnix-hubyn/
 
 ```
 backend/
-├── main.py                  ← FastAPI app, CORS, routers
+├── main.py                  ← FastAPI app, CORS, middlewares, routers, healthcheck
 ├── routers/
-│   ├── auth.py              ← POST /auth/login, POST /auth/logout
 │   ├── procesamiento.py     ← POST /procesar/{ventas,compras,retenciones,sujetos-excluidos}
-│   │                           GET  /procesar/declarantes
-│   └── exportar.py          ← GET  /exportar/excel
-├── extractors/              ← Lógica de extracción por tipo de DTE
+│   │                           GET  /procesar/declarantes (todo requiere JWT de Supabase)
+│   └── exportar.py          ← POST /exportar/excel (requiere JWT de Supabase)
+├── middleware/
+│   └── rate_limit.py        ← Rate limiting por IP, en memoria
+├── schemas/
+│   └── procesamiento.py     ← Validación Pydantic de los campos de formulario
+├── extractors/               ← Lógica de extracción por tipo de DTE
 │   ├── ventas.py
 │   ├── compras.py
 │   ├── retenciones.py
@@ -50,7 +53,8 @@ backend/
 │   ├── pdf_utils.py         ← Extracción texto PDF
 │   ├── qa_utils.py          ← Validación fiscal DGII
 │   ├── concurrent_processor.py
-│   ├── supabase_client.py
+│   ├── auth_dependency.py   ← Verificación del JWT de Supabase Auth
+│   ├── supabase_admin.py    ← Cliente Supabase (healthcheck)
 │   ├── export_utils.py
 │   ├── local_db.py          ← Almacenamiento local JSON (clientes/proveedores)
 │   ├── constants.py
@@ -122,14 +126,18 @@ npm run dev
 | Variable | Descripción |
 |----------|-------------|
 | `SUPABASE_URL` | URL del proyecto Supabase |
-| `SUPABASE_KEY` | Service role key de Supabase |
+| `SUPABASE_KEY` | Anon key de Supabase |
+| `SUPABASE_SERVICE_KEY` | Service role key (opcional, healthcheck; nunca en el frontend) |
+| `SUPABASE_JWT_SECRET` | Settings → API → JWT Secret — verifica el JWT emitido por Supabase Auth |
 | `GROQ_API_KEY` | API key de Groq Cloud |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Ruta al JSON de la cuenta de servicio GCP |
 | `GEMINI_API_KEY` | API key alternativa (Gemini Developer API) |
 | `VERTEX_PROJECT` | ID del proyecto en Google Cloud |
 | `VERTEX_LOCATION` | Región de Vertex AI (ej. `us-central1`) |
-| `APP_PASSWORD` | Contraseña de acceso a la app |
-| `EXTRA_CORS_ORIGINS` | Orígenes CORS extra permitidos, separados por coma |
+| `ENVIRONMENT` | `production` \| `development` — controla CORS estricto y HSTS |
+| `ALLOWED_ORIGINS` | Orígenes CORS explícitos permitidos, separados por coma |
+| `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_BURST` | Límites de rate limiting por IP |
+| `BLOCKED_IPS` | IPs bloqueadas manualmente, separadas por coma |
 | `LOCAL_DB_DIR` | Override opcional de la ruta de `data/` (ver nota abajo) |
 
 ### Frontend (`.env`)
@@ -157,7 +165,7 @@ npm run dev
 2. Configurar **Root Directory**: `frontend`
 3. Framework preset: **Vite** (Vercel detecta `frontend/vercel.json` para el rewrite SPA)
 4. Agregar variables de entorno `VITE_*`
-5. Agregar la URL de Vercel a `EXTRA_CORS_ORIGINS` en el backend
+5. Agregar la URL de Vercel a `ALLOWED_ORIGINS` en el backend
 
 ### Base de datos → Supabase
 
@@ -177,6 +185,21 @@ Ver `db/README.md` para el orden de ejecución de los scripts SQL.
 
 ---
 
+## Seguridad
+
+Ver [`docs/SECURITY.md`](docs/SECURITY.md) para el detalle completo: verificación de JWT de Supabase en el backend, RLS en Supabase (auditado, cobertura completa), rate limiting por IP, validación de input (Pydantic + magic bytes en PDFs), headers de seguridad + CORS por entorno, y manejo de secrets.
+
+---
+
 ## Nota sobre almacenamiento local
 
-`backend/utils/local_db.py` guarda clientes y proveedores en `backend/data/*.json`. En Railway este directorio es efímero (se reinicia en cada deploy), así que este almacenamiento es apto para desarrollo local pero no para producción estable. Migrar clientes/proveedores a tablas de Supabase queda como mejora futura.
+`backend/utils/local_db.py` guarda clientes y proveedores en `backend/data/*.json`. En Railway este directorio es efímero (se reinicia en cada deploy), así que este almacenamiento es apto para desarrollo local pero no para producción estable. Migrar clientes/proveedores a tablas de Supabase queda como mejora futura — **blocker antes de depender de esto en producción**.
+
+---
+
+## Pendiente / limpieza futura
+
+- `qa_utils.py`, `export_utils.py`, `gmail_utils.py`, `drive_utils.py`, `gemini_utils.py`, `rag_validator.py`, `nit_validator.py` en `backend/utils/` no están conectados a la cadena viva del backend (`main.py` → `routers` → `extractors` → `utils`). `qa_utils.py` tiene validadores matemáticos reales (`validar_montos_*`) pensados para conectarse a un futuro pipeline de confianza — no eliminar, solo quitar su `import streamlit`. El resto son candidatos a limpieza o a un futuro "Centro de Correos" (Gmail/Drive).
+- Rate limiting en memoria → Redis, si se escala a múltiples instancias de Railway.
+- Sistema de diseño: los tokens de color/tipografía/radios de Certia (ContaSV) ya están aplicados vía `frontend/tailwind.config.js` + `frontend/src/index.css` (heredado por toda la UI). Componentes decorativos del sistema editorial de Certia (sello registral, "stamp" rotado, regla doble de encabezado, símbolo `§`) quedaron fuera de esta fase — son componentes nuevos, no una traducción de tokens existentes.
+- No hay tests ni CI en el repo.
