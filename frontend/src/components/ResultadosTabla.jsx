@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { IconExportar, IconAlerta } from './Icons'
 import { exportarExcel } from '../services/api'
 
 // Campos a mostrar por tipo, con etiquetas amigables
@@ -102,7 +103,7 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
     return (
       <div className="card border-red-800 bg-red-900/20">
         <div className="flex items-start gap-3">
-          <span className="text-red-400 text-lg mt-0.5">⚠️</span>
+          <IconAlerta className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
           <div>
             <p className="text-red-400 font-semibold text-sm">
               {filename && <span className="text-red-300 font-mono text-xs mr-2">{filename}</span>}
@@ -140,7 +141,7 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
               )}
               {tieneIa && (
                 <span className="text-xs text-amber-400">
-                  🤖 {correcciones_ia.length} corrección{correcciones_ia.length > 1 ? 'es' : ''}
+                  IA · {correcciones_ia.length} corrección{correcciones_ia.length > 1 ? 'es' : ''}
                 </span>
               )}
             </div>
@@ -152,7 +153,7 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
             onClick={() => setExpandido(v => !v)}
             className="btn-ghost text-xs px-2 py-1 text-slate-400"
           >
-            {expandido ? '▲ Ocultar' : '▼ Ver campos'}
+            {expandido ? 'Ocultar campos' : 'Ver campos'}
           </button>
           <button
             onClick={handleExportar}
@@ -164,7 +165,7 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
               </svg>
-            ) : '📥'}
+            ) : <IconExportar className="w-3.5 h-3.5" />}
             Excel
           </button>
         </div>
@@ -228,7 +229,7 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
       {tieneIa && expandido && (
         <div className="px-4 py-3 border-t border-surface-600/50 bg-amber-900/10">
           <p className="text-xs text-amber-400 font-semibold mb-2">
-            🤖 Correcciones aplicadas por IA
+            Correcciones aplicadas por IA
           </p>
           <ul className="space-y-1">
             {correcciones_ia.map((c, i) => (

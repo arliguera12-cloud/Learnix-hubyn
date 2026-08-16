@@ -11,6 +11,15 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap"
     />
     <title>Learnix DTE Hub</title>
+    <script>
+      // Aplica el tema guardado antes del primer render, para evitar parpadeo.
+      // Claro es el default — solo se activa .dark si el usuario lo eligió explícitamente.
+      try {
+        if (localStorage.getItem('learnix-theme') === 'dark') {
+          document.documentElement.classList.add('dark')
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

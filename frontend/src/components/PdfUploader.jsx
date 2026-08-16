@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { IconSubir } from './Icons'
 
 export default function PdfUploader({ onUpload, loading, multiple = false }) {
   const inputRef = useRef(null)
@@ -60,16 +61,16 @@ export default function PdfUploader({ onUpload, loading, multiple = false }) {
         onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
-        className={`border-2 border-dashed rounded-xl px-6 py-8 text-center cursor-pointer transition-colors duration-150
-          ${dragging ? 'border-brand-500 bg-brand-500/10' : 'border-surface-500 hover:border-surface-400 bg-surface-800'}`}
+        className={`border border-dashed rounded-xl px-6 py-9 text-center cursor-pointer transition-colors duration-150
+          ${dragging ? 'border-accent bg-accent/5' : 'border-hairline hover:border-fg-4 bg-panel2/40'}`}
       >
-        <p className="text-2xl mb-2">📄</p>
-        <p className="text-sm text-slate-300">
+        <IconSubir className="w-7 h-7 mx-auto mb-3 text-fg-4" />
+        <p className="text-sm text-fg-3">
           {files.length
             ? files.map(f => f.name).join(', ')
-            : 'Arrastra el PDF aquí o haz clic para seleccionar'}
+            : 'Arrastra el archivo aquí o haz clic para seleccionar'}
         </p>
-        <p className="text-xs text-slate-500 mt-1">
+        <p className="text-xs text-fg-4 mt-1">
           PDF o JSON firmado por Hacienda{multiple ? ' — múltiples permitidos' : ''}
         </p>
         <input
