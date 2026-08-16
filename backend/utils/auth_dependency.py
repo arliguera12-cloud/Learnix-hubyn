@@ -25,8 +25,10 @@ el secreto compartido, sin configuración adicional.
 from __future__ import annotations
 
 import os
+import ssl
 from functools import lru_cache
 
+import certifi
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -59,11 +61,19 @@ def _jwks_client() -> jwt.PyJWKClient:
     cuando aparece un `kid` desconocido, que es justo lo que ocurre cuando se
     rota la clave de firma en Supabase. Por eso no hace falta invalidar nada a
     mano al rotar.
+
+    Se le pasa un contexto SSL con el bundle de certificados de `certifi` en
+    vez de dejarlo al del intérprete: PyJWKClient descarga por `urllib`, y en
+    las instalaciones de python.org para macOS el almacén de CA queda vacío
+    hasta que alguien ejecuta "Install Certificates.command", lo que hacía
+    fallar la descarga con CERTIFICATE_VERIFY_FAILED. Fijarlo aquí evita que
+    la autenticación dependa de un paso manual por máquina.
     """
     return jwt.PyJWKClient(
         f"{_supabase_url()}/auth/v1/.well-known/jwks.json",
         cache_keys=True,
         lifespan=600,
+        ssl_context=ssl.create_default_context(cafile=certifi.where()),
     )
 
 
