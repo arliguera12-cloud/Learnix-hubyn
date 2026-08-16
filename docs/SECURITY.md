@@ -6,7 +6,28 @@ Resumen de las medidas de seguridad implementadas en el backend y la base de dat
 
 El frontend inicia sesión directamente contra **Supabase Auth** (`supabase.auth.signInWithPassword`, en `frontend/src/services/auth.js`) y adjunta el `access_token` real en cada llamada al backend (`frontend/src/services/api.js`).
 
-El backend **verifica ese mismo JWT** — no emite ni gestiona sesiones propias. `backend/utils/auth_dependency.py` decodifica el token localmente con `SUPABASE_JWT_SECRET` (HS256, `audience="authenticated"`) y lo aplica como dependencia a nivel de router en `backend/routers/procesamiento.py` y `backend/routers/exportar.py`. `/health` es la única ruta pública.
+El backend **verifica ese mismo JWT** — no emite ni gestiona sesiones propias. `backend/utils/auth_dependency.py` lo valida localmente y se aplica como dependencia a nivel de router en `backend/routers/procesamiento.py` y `backend/routers/exportar.py`. `/health` es la única ruta pública.
+
+### Algoritmo de firma
+
+Supabase migró a **claves de firma asimétricas**: los proyectos actuales firman los `access_token` con ECC (**ES256**) y publican la clave pública en el JWKS del proyecto (`{SUPABASE_URL}/auth/v1/.well-known/jwks.json`). El secreto compartido HS256 queda como *Legacy JWT Secret* y solo verifica tokens emitidos antes de la migración.
+
+La verificación elige la clave según el encabezado del propio token:
+
+| `alg` del token | Clave usada | Variable requerida |
+|---|---|---|
+| `ES256` / `RS256` | Clave pública del JWKS del proyecto | `SUPABASE_URL` |
+| `HS256` | Secreto compartido heredado | `SUPABASE_JWT_SECRET` |
+
+Detalles relevantes:
+
+- El `alg` **no** se toma del token para decidir si confiar: se comprueba contra una lista blanca antes de resolver la clave, de modo que `alg: none` y algoritmos no previstos se rechazan con 401.
+- Se validan además `audience="authenticated"` y el emisor (`iss`), derivado de `SUPABASE_URL`. Un `iss` ajeno devuelve un error específico, porque casi siempre significa que backend y frontend apuntan a proyectos distintos.
+- El JWKS se cachea (10 min) y `PyJWKClient` lo vuelve a pedir solo ante un `kid` desconocido, que es lo que ocurre al **rotar la clave** en Supabase: la rotación no requiere reiniciar ni reconfigurar el backend.
+- Si el JWKS no se puede alcanzar, la respuesta es **503** y no 401: es un fallo de infraestructura, no una credencial inválida.
+- La verificación ES256 necesita `cryptography`; por eso la dependencia se declara como `pyjwt[crypto]` y no como `pyjwt` a secas.
+
+Cubierto por `backend/tests/test_auth_dependency.py`, que levanta un JWKS simulado con una clave ES256 real y comprueba los casos de aceptación y rechazo (token válido, expirado, audiencia/emisor incorrectos, firma ajena, `alg: none`, malformado y cacheo del JWKS).
 
 **Decisión explícita:** se descartó construir un sistema JWT/bcrypt propio (login, refresh, tabla de passwords). El repo ya tenía una autenticación real vía Supabase que el frontend usa; un sistema paralelo habría sido redundante, no habría conectado con el flujo real del frontend, y habría requerido una columna de password que no existe en el schema (Supabase la gestiona en `auth.users`, fuera de nuestro control). Como parte de esta limpieza se eliminaron `backend/routers/auth.py` y `backend/utils/supabase_client.py` — un endpoint `/auth/login` legado de la época Streamlit (contraseña compartida `APP_PASSWORD`) que el frontend nunca llamaba.
 
