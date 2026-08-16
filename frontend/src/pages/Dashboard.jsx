@@ -3,27 +3,31 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../services/auth'
 import api from '../services/api'
+import {
+  IconVentas, IconCompras, IconRetenciones, IconSujetos,
+  IconClientes, IconProveedores,
+} from '../components/Icons'
 
 const MODULOS = [
-  { to: '/ventas',            icon: '📤', label: 'Ventas',
-    desc: 'CCF, NC, ND',  anexo: 'Anexos 1 y 2', color: 'from-blue-500/10 to-transparent' },
-  { to: '/compras',           icon: '📥', label: 'Compras',
-    desc: 'CCF recibidos', anexo: 'Anexo 3',      color: 'from-purple-500/10 to-transparent' },
-  { to: '/retenciones',       icon: '✂️',  label: 'Retenciones',
-    desc: 'DTE-07',        anexo: 'Casilla 162',  color: 'from-amber-500/10 to-transparent' },
-  { to: '/sujetos-excluidos', icon: '📋', label: 'Sujetos Excluidos',
-    desc: 'DTE-14',        anexo: 'Casilla 66',   color: 'from-emerald-500/10 to-transparent' },
-  { to: '/clientes',          icon: '👥', label: 'Clientes',
-    desc: 'Directorio',    anexo: 'Receptores',   color: 'from-sky-500/10 to-transparent' },
-  { to: '/proveedores',       icon: '🏢', label: 'Proveedores',
-    desc: 'Directorio',    anexo: 'Emisores',     color: 'from-rose-500/10 to-transparent' },
+  { to: '/ventas',            Icon: IconVentas,      label: 'Ventas',
+    desc: 'CCF, NC, ND',   anexo: 'Anexos 1 y 2' },
+  { to: '/compras',           Icon: IconCompras,     label: 'Compras',
+    desc: 'CCF recibidos', anexo: 'Anexo 3' },
+  { to: '/retenciones',       Icon: IconRetenciones, label: 'Retenciones',
+    desc: 'DTE-07',        anexo: 'Casilla 162' },
+  { to: '/sujetos-excluidos', Icon: IconSujetos,     label: 'Sujetos Excluidos',
+    desc: 'DTE-14',        anexo: 'Casilla 66' },
+  { to: '/clientes',          Icon: IconClientes,    label: 'Clientes',
+    desc: 'Directorio',    anexo: 'Receptores' },
+  { to: '/proveedores',       Icon: IconProveedores, label: 'Proveedores',
+    desc: 'Directorio',    anexo: 'Emisores' },
 ]
 
 const STATS_CONFIG = [
-  { key: 'ventas',      tabla: 'db_ventas',      label: 'Ventas',           icon: '📤', color: 'text-blue-400',    bg: 'bg-blue-500/10' },
-  { key: 'compras',     tabla: 'db_compras',     label: 'Compras',          icon: '📥', color: 'text-purple-400',  bg: 'bg-purple-500/10' },
-  { key: 'retenciones', tabla: 'db_retenciones', label: 'Retenciones',      icon: '✂️',  color: 'text-amber-400',   bg: 'bg-amber-500/10' },
-  { key: 'sujetos',     tabla: 'db_sujetos',     label: 'Sujetos Excluidos',icon: '📋', color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+  { key: 'ventas',      tabla: 'db_ventas',      label: 'Ventas',            Icon: IconVentas },
+  { key: 'compras',     tabla: 'db_compras',     label: 'Compras',           Icon: IconCompras },
+  { key: 'retenciones', tabla: 'db_retenciones', label: 'Retenciones',       Icon: IconRetenciones },
+  { key: 'sujetos',     tabla: 'db_sujetos',     label: 'Sujetos Excluidos', Icon: IconSujetos },
 ]
 
 export default function Dashboard() {
@@ -33,6 +37,8 @@ export default function Dashboard() {
   const [loading,  setLoading]  = useState(true)
 
   useEffect(() => {
+    let cancelado = false
+
     async function cargar() {
       // Conteos desde Supabase
       try {
@@ -43,7 +49,7 @@ export default function Dashboard() {
             counts[key] = count ?? 0
           })
         )
-        setStats(counts)
+        if (!cancelado) setStats(counts)
       } catch {
         // tablas aún no creadas
       }
@@ -51,14 +57,16 @@ export default function Dashboard() {
       // Health del backend
       try {
         await api.get('/health')
-        setBackend(true)
+        if (!cancelado) setBackend(true)
       } catch {
-        setBackend(false)
+        if (!cancelado) setBackend(false)
       }
 
-      setLoading(false)
+      if (!cancelado) setLoading(false)
     }
+
     cargar()
+    return () => { cancelado = true }
   }, [])
 
   const email    = session?.user?.email ?? 'usuario'
@@ -67,42 +75,48 @@ export default function Dashboard() {
   return (
     <div className="max-w-5xl mx-auto space-y-7">
 
-      {/* Bienvenida */}
-      <div className="flex items-center justify-between">
+      {/* Cabecera editorial */}
+      <div className="flex items-end justify-between border-b border-hairline pb-4">
         <div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">Dashboard</h2>
-          <p className="text-sm text-slate-400 mt-0.5">
+          <p className="text-[0.65rem] uppercase tracking-[0.18em] text-fg-4 font-semibold mb-1">
+            Libro mayor
+          </p>
+          <h2 className="text-3xl text-fg leading-none">Dashboard</h2>
+          <p className="text-sm text-fg-4 mt-2">
             {email} · {new Date().toLocaleDateString('es-SV', { day: '2-digit', month: 'long', year: 'numeric' })}
           </p>
         </div>
         <div className="text-right hidden sm:block">
-          <p className="text-2xl font-bold text-white tabular-nums">
-            {loading ? '—' : totalDTE.toLocaleString()}
+          <p className="text-4xl text-fg tabular-nums font-display leading-none">
+            {loading ? '—' : totalDTE.toLocaleString('es-SV')}
           </p>
-          <p className="text-xs text-slate-500">DTEs procesados</p>
+          <p className="text-[0.65rem] uppercase tracking-[0.14em] text-fg-4 mt-1.5">
+            DTE procesados
+          </p>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {STATS_CONFIG.map(({ key, label, icon, color, bg }) => (
-          <div key={key} className="card flex items-center gap-3">
-            <div className={`${bg} rounded-xl h-10 w-10 flex items-center justify-center shrink-0`}>
-              <span className="text-xl leading-none">{icon}</span>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-hairline border border-hairline rounded-xl overflow-hidden">
+        {STATS_CONFIG.map(({ key, label, Icon }) => (
+          <div key={key} className="bg-panel p-4">
+            <div className="flex items-center justify-between mb-3">
+              <Icon className="w-5 h-5 text-fg-4" />
+              <span className="font-mono text-[0.6rem] text-fg-5 uppercase tracking-wider">
+                {loading ? '' : 'registros'}
+              </span>
             </div>
-            <div>
-              <p className={`text-2xl font-bold tabular-nums ${color}`}>
-                {loading ? <span className="text-slate-600">—</span> : stats[key].toLocaleString()}
-              </p>
-              <p className="text-xs text-slate-500 leading-tight">{label}</p>
-            </div>
+            <p className="text-3xl tabular-nums font-display text-fg leading-none">
+              {loading ? <span className="text-fg-5">—</span> : stats[key].toLocaleString('es-SV')}
+            </p>
+            <p className="text-xs text-fg-4 mt-1.5">{label}</p>
           </div>
         ))}
       </div>
 
       {/* Estado del sistema */}
       <div className="card">
-        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+        <h3 className="text-[0.65rem] font-semibold text-fg-4 uppercase tracking-[0.16em] mb-3">
           Estado del sistema
         </h3>
         <div className="flex flex-wrap gap-4">
@@ -113,13 +127,13 @@ export default function Dashboard() {
             textOff="sin conexión"
           />
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-slate-600"/>
-            <span className="text-xs text-slate-400">Groq llama-3.3-70b</span>
+            <span className="h-1.5 w-1.5 rounded-full bg-fg-5" />
+            <span className="text-xs text-fg-3">Groq llama-3.3-70b</span>
             <span className="badge-warn">configurable</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-slate-600"/>
-            <span className="text-xs text-slate-400">Vertex AI Gemini</span>
+            <span className="h-1.5 w-1.5 rounded-full bg-fg-5" />
+            <span className="text-xs text-fg-3">Vertex AI Gemini</span>
             <span className="badge-warn">configurable</span>
           </div>
         </div>
@@ -127,27 +141,24 @@ export default function Dashboard() {
 
       {/* Módulos */}
       <div>
-        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+        <h3 className="text-[0.65rem] font-semibold text-fg-4 uppercase tracking-[0.16em] mb-3">
           Módulos
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {MODULOS.map(({ to, icon, label, desc, anexo, color }) => (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-px bg-hairline border border-hairline rounded-xl overflow-hidden">
+          {MODULOS.map(({ to, Icon, label, desc, anexo }) => (
             <Link
               key={to}
               to={to}
-              className="card overflow-hidden relative hover:border-brand-500/40 hover:bg-surface-700 transition-all duration-150 group"
+              className="bg-panel p-5 hover:bg-panel2 transition-colors duration-150 group
+                         border-l-2 border-transparent hover:border-accent"
             >
-              <div className={`absolute inset-0 bg-gradient-to-br ${color} pointer-events-none`}/>
-              <div className="relative">
-                <span className="text-2xl block mb-2 leading-none">{icon}</span>
-                <p className="font-semibold text-white group-hover:text-brand-400 transition-colors text-sm">
-                  {label}
-                </p>
-                <p className="text-xs text-slate-500 mt-0.5">{desc}</p>
-                <span className="inline-block mt-2 text-xs text-slate-600 bg-surface-800 px-2 py-0.5 rounded-full">
-                  {anexo}
-                </span>
-              </div>
+              <Icon className="w-6 h-6 text-fg-4 group-hover:text-accent transition-colors mb-3" />
+              <p className="font-medium text-fg text-sm">{label}</p>
+              <p className="text-xs text-fg-4 mt-0.5">{desc}</p>
+              <span className="inline-block mt-3 text-[0.65rem] font-mono uppercase tracking-wider
+                               text-fg-4 border border-hairline px-2 py-0.5 rounded-full">
+                {anexo}
+              </span>
             </Link>
           ))}
         </div>
@@ -161,12 +172,12 @@ function StatusRow({ label, status, textOn, textOff }) {
   return (
     <div className="flex items-center gap-2">
       <span
-        className={`h-2 w-2 rounded-full ${
-          status === null ? 'bg-slate-500' :
-          status ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'
+        className={`h-1.5 w-1.5 rounded-full ${
+          status === null ? 'bg-fg-5' :
+          status ? 'bg-accent2 animate-pulse' : 'bg-accent'
         }`}
       />
-      <span className="text-xs text-slate-400">{label}</span>
+      <span className="text-xs text-fg-3">{label}</span>
       <span className={status === null ? 'badge-warn' : status ? 'badge-ok' : 'badge-err'}>
         {status === null ? 'verificando' : status ? textOn : textOff}
       </span>

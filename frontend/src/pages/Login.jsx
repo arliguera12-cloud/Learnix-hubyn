@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { signIn, useAuth } from '../services/auth'
+import ThemeToggle from '../components/ThemeToggle'
+import { SelloCircular, IconSeccion, IconAlerta } from '../components/Icons'
 
 const MAX_INTENTOS = 5
 const BLOQUEO_MS   = 5 * 60 * 1000 // 5 minutos
@@ -19,7 +21,7 @@ export default function Login() {
   )
 
   useEffect(() => {
-    if (!authLoading && session) navigate('/', { replace: true })
+    if (!authLoading && session) navigate('/dashboard', { replace: true })
   }, [session, authLoading, navigate])
 
   const ahora     = Date.now()
@@ -50,7 +52,7 @@ export default function Login() {
       await signIn(email, password)
       sessionStorage.removeItem('login_intentos')
       sessionStorage.removeItem('login_bloqueado')
-      navigate('/')
+      navigate('/dashboard')
     } catch (err) {
       const nuevos = intentos + 1
       setIntentos(nuevos)
@@ -70,71 +72,110 @@ export default function Login() {
   }
 
   if (authLoading) {
-    return <div className="min-h-screen bg-surface-900 flex items-center justify-center">
+    return <div className="min-h-screen bg-paper flex items-center justify-center">
       <div className="animate-spin h-8 w-8 border-2 border-brand-500 border-t-transparent rounded-full"/>
     </div>
   }
 
   return (
-    <div className="min-h-screen bg-surface-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        {/* Logo / Header */}
-        <div className="text-center mb-8">
-          <div className="registro-seal mx-auto mb-3" data-num="001">L</div>
-          <h1 className="text-2xl font-bold text-white">Learnix DTE Hub</h1>
-          <div className="rule-double max-w-[160px] mx-auto" />
-          <p className="text-sm text-slate-400 mt-1">Sistema de extracción de DTEs — El Salvador</p>
+    <div className="min-h-screen bg-paper flex flex-col paper-grain">
+      {/* Masthead — mismo registro editorial que la portada */}
+      <div className="border-b border-hairline bg-panel shrink-0">
+        <div className="max-w-6xl mx-auto px-5 py-2 flex items-center justify-between text-[0.65rem]
+                        uppercase tracking-[0.16em] text-fg-4 font-mono">
+          <Link to="/" className="flex items-baseline gap-1.5 hover:text-accent transition-colors">
+            <IconSeccion className="text-sm text-accent" />
+            <span>Learnix DTE Hub</span>
+          </Link>
+          <span className="hidden sm:block">Acceso registrado</span>
+          <ThemeToggle className="text-fg-4 -my-1" />
+        </div>
+      </div>
+
+      <div className="flex-1 relative flex items-center justify-center p-4 overflow-hidden ledger-paper">
+        {/* Marca de agua editorial de fondo */}
+        <div className="pointer-events-none select-none absolute inset-0 flex items-center justify-center">
+          <span className="font-display text-[26vw] leading-none text-fg/[0.045] whitespace-nowrap">
+            Learnix
+          </span>
         </div>
 
-        <div className="card">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="form-label">Correo electrónico</label>
-              <input
-                className="input"
-                type="email"
-                autoComplete="email"
-                placeholder="usuario@empresa.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                disabled={bloqueado || loading}
-              />
-            </div>
-            <div>
-              <label className="form-label">Contraseña</label>
-              <input
-                className="input"
-                type="password"
-                autoComplete="current-password"
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                disabled={bloqueado || loading}
-              />
-            </div>
+        <div className="w-full max-w-sm relative animate-rise py-10">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 text-xs text-fg-4 hover:text-accent
+                       transition-colors duration-150 mb-6"
+          >
+            ← Volver al inicio
+          </Link>
 
-            {error && (
-              <div className="badge-err w-full justify-start px-3 py-2 rounded-lg text-xs">
-                ⚠️ {error}
-                {bloqueado && <span className="ml-auto font-mono">{restante}s</span>}
+          {/* Logo / Header */}
+          <div className="text-center mb-8">
+            <div className="w-24 h-24 mx-auto mb-4 text-accent">
+              <SelloCircular />
+            </div>
+            <h1 className="text-3xl text-fg leading-none">Learnix DTE Hub</h1>
+            <div className="rule-double max-w-[160px] mx-auto" />
+            <p className="text-sm text-fg-3 mt-1">Sistema de extracción de DTE — El Salvador</p>
+          </div>
+
+          <div className="card relative">
+            <span className="absolute -top-3 left-5 bg-panel px-2 text-[0.65rem] uppercase
+                              tracking-[0.14em] text-fg-4 font-semibold">
+              Acceso registrado
+            </span>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="form-label" htmlFor="login-email">Correo electrónico</label>
+                <input
+                  id="login-email"
+                  className="input"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="usuario@empresa.com"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  required
+                  disabled={bloqueado || loading}
+                />
               </div>
-            )}
+              <div>
+                <label className="form-label" htmlFor="login-password">Contraseña</label>
+                <input
+                  id="login-password"
+                  className="input"
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                  disabled={bloqueado || loading}
+                />
+              </div>
 
-            <button
-              type="submit"
-              disabled={bloqueado || loading}
-              className="btn-primary w-full py-2.5"
-            >
-              {loading ? 'Ingresando…' : bloqueado ? `Bloqueado (${restante}s)` : 'Ingresar'}
-            </button>
-          </form>
+              {error && (
+                <div className="badge-err w-full justify-start px-3 py-2 rounded-lg text-xs" role="alert">
+                  <IconAlerta className="w-3.5 h-3.5 shrink-0" />
+                  <span>{error}</span>
+                  {bloqueado && <span className="ml-auto font-mono">{restante}s</span>}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={bloqueado || loading}
+                className="btn-primary w-full py-2.5"
+              >
+                {loading ? 'Ingresando…' : bloqueado ? `Bloqueado (${restante}s)` : 'Ingresar'}
+              </button>
+            </form>
+          </div>
+
+          <p className="text-center text-xs text-fg-4 mt-6 tracking-wide">
+            Learnix · El Salvador · {new Date().getFullYear()}
+          </p>
         </div>
-
-        <p className="text-center text-xs text-slate-600 mt-6">
-          Learnix · El Salvador · {new Date().getFullYear()}
-        </p>
       </div>
     </div>
   )

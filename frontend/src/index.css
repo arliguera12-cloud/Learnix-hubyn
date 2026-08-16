@@ -3,30 +3,81 @@
 @tailwind utilities;
 
 /*
- * CSS custom properties — solo para los componentes editoriales de Certia
- * (regla doble, sello registral, stamp) que usan var(--x) directamente en
- * vez de clases Tailwind. El resto del sistema usa los tokens definidos en
- * tailwind.config.js; estos valores son los mismos, solo expuestos como
- * variables CSS para ese puñado de componentes.
+ * Sistema de tema — claro (por defecto) y oscuro (clase .dark en <html>).
+ * La paleta clara es la principal; el modo oscuro es la variante alterna,
+ * activable con el ThemeToggle. Estas variables alimentan tanto los
+ * componentes editoriales de abajo como las clases compartidas (.card,
+ * .btn-primary, .input, etc.) usadas en toda la app.
  */
 :root {
-  --ink: #f2ede1;
-  --ink-4: #746c5c;
-  --rule: #2d2822;
-  --rule-strong: #d8d2c3;
-  --gold: #d4b45c;
-  --cinnabar: #ed8b73;
+  --bg: #ebe6d9;
+  --panel: #f5f2ea;
+  --panel-2: #ded8c7;
+  --border: #c4bca6;
+  --ink: #1a1815;
+  --ink-3: #4a4437;
+  --ink-4: #6f6857;
+  --ink-5: #9a927e;
+  --rule: #c4bca6;
+  --rule-strong: #1a1815;
+  /* Acento primario — bermellón de imprenta (marca, sellos, subrayados) */
+  --gold: #b84a24;
+  /* Acento secundario — verde de tinta contable (cifras conformes) */
+  --cinnabar: #1f4c3f;
   --font-display: 'Fraunces', 'Times New Roman', Georgia, serif;
   --font-ui: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
+
+  /* Mismos valores, como tríos RGB — para los tokens Tailwind con opacidad (bg-paper/80…) */
+  --bg-rgb: 235 230 217;
+  --panel-rgb: 245 242 234;
+  --panel2-rgb: 222 216 199;
+  --border-rgb: 196 188 166;
+  --ink-rgb: 26 24 21;
+  --ink3-rgb: 74 68 55;
+  --ink4-rgb: 111 104 87;
+  --ink5-rgb: 154 146 126;
+  --gold-rgb: 184 74 36;
+  --cinnabar-rgb: 31 76 63;
+  --warn-rgb: 138 101 16;
+}
+
+.dark {
+  --bg: #12110d;
+  --panel: #1a1814;
+  --panel-2: #24211a;
+  --border: #35312a;
+  --ink: #f0ebdd;
+  --ink-3: #b5ad98;
+  --ink-4: #8a8271;
+  --ink-5: #5f594b;
+  --rule: #35312a;
+  --rule-strong: #d8d2c3;
+  --gold: #e0763f;
+  --cinnabar: #6bbd9d;
+
+  --bg-rgb: 18 17 13;
+  --panel-rgb: 26 24 20;
+  --panel2-rgb: 36 33 26;
+  --border-rgb: 53 49 42;
+  --ink-rgb: 240 235 221;
+  --ink3-rgb: 181 173 152;
+  --ink4-rgb: 138 130 113;
+  --ink5-rgb: 95 89 75;
+  --gold-rgb: 224 118 63;
+  --cinnabar-rgb: 107 189 157;
+  --warn-rgb: 217 164 65;
 }
 
 @layer base {
   html {
-    @apply bg-surface-900 text-slate-100 antialiased;
+    @apply antialiased;
+    background: var(--bg);
+    color: var(--ink);
     font-family: theme('fontFamily.ui');
     font-size: 14px;
     line-height: 1.55;
+    transition: background-color 0.15s ease, color 0.15s ease;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: theme('fontFamily.display');
@@ -37,53 +88,83 @@
     @apply w-1.5 h-1.5;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-surface-800;
+    background: var(--panel-2);
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-surface-500 rounded-full;
+    @apply rounded-full;
+    background: var(--ink-5);
   }
 }
 
 @layer components {
   .card {
-    @apply bg-surface-800 border border-surface-600 rounded-xl p-5;
+    @apply rounded-xl p-5;
+    background: var(--panel);
+    border: 1px solid var(--border);
   }
   .btn-primary {
-    @apply bg-ink border border-ink hover:bg-brand-500 hover:border-brand-500
+    @apply hover:bg-brand-500 hover:border-brand-500
            disabled:opacity-40 disabled:cursor-not-allowed
-           text-cream font-medium px-4 py-2 rounded-lg transition-all duration-150
-           hover:-translate-y-px;
+           font-medium px-4 py-2 rounded-lg transition-all duration-150
+           hover:-translate-y-px hover:text-white;
+    background: var(--ink);
+    border: 1px solid var(--ink);
+    color: var(--bg);
   }
   .btn-ghost {
-    @apply bg-transparent hover:bg-surface-600 text-slate-300 hover:text-white
-           px-4 py-2 rounded-lg transition-colors duration-150;
+    @apply bg-transparent px-4 py-2 rounded-lg transition-colors duration-150;
+    color: var(--ink-3);
+  }
+  .btn-ghost:hover {
+    background: var(--panel-2);
+    color: var(--ink);
   }
   .input {
-    @apply bg-surface-700 border border-surface-500 focus:border-brand-500 focus:ring-1
-           focus:ring-brand-500 text-slate-100 placeholder:italic placeholder-ink-5
+    @apply focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:italic
            rounded-lg px-3 py-2 w-full outline-none transition-colors duration-150;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--ink);
+  }
+  .input::placeholder {
+    color: var(--ink-5);
   }
   .form-label {
-    @apply block text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-ink-3 mb-1;
+    @apply block text-[0.72rem] font-semibold uppercase tracking-[0.08em] mb-1;
+    color: var(--ink-3);
+  }
+  /* Insignias de estado — derivadas de los tokens de tema, así que el mismo
+     marcado sirve en claro y oscuro sin variantes dark: dispersas. */
+  .badge-ok,
+  .badge-warn,
+  .badge-err {
+    @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border;
   }
   .badge-ok {
-    @apply inline-flex items-center gap-1 bg-emerald-900/50 text-emerald-400
-           border border-emerald-800 text-xs px-2 py-0.5 rounded-full;
+    color: rgb(var(--cinnabar-rgb));
+    background: rgb(var(--cinnabar-rgb) / 0.1);
+    border-color: rgb(var(--cinnabar-rgb) / 0.35);
   }
   .badge-warn {
-    @apply inline-flex items-center gap-1 bg-amber-900/50 text-amber-400
-           border border-amber-800 text-xs px-2 py-0.5 rounded-full;
+    color: rgb(var(--warn-rgb));
+    background: rgb(var(--warn-rgb) / 0.1);
+    border-color: rgb(var(--warn-rgb) / 0.35);
   }
   .badge-err {
-    @apply inline-flex items-center gap-1 bg-red-900/50 text-red-400
-           border border-red-800 text-xs px-2 py-0.5 rounded-full;
+    color: rgb(var(--gold-rgb));
+    background: rgb(var(--gold-rgb) / 0.1);
+    border-color: rgb(var(--gold-rgb) / 0.35);
   }
   .table-cell {
-    @apply px-3 py-2 text-sm text-slate-300 border-b border-surface-600 whitespace-nowrap;
+    @apply px-3 py-2 text-sm whitespace-nowrap;
+    color: var(--ink-3);
+    border-bottom: 1px solid var(--border);
   }
   .table-head {
-    @apply px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400
-           bg-surface-700 border-b border-surface-600 whitespace-nowrap;
+    @apply px-3 py-2 text-xs font-semibold uppercase tracking-wider whitespace-nowrap;
+    color: var(--ink-4);
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
   }
 
   /* ═══ Reglas editoriales ═══ */
@@ -185,6 +266,18 @@
     bottom: 2px;
   }
 
+  /* ═══ Papel ledger — textura de fondo sutil para pantallas de acceso ═══ */
+  .ledger-paper {
+    background-image:
+      repeating-linear-gradient(
+        to bottom,
+        transparent,
+        transparent 27px,
+        color-mix(in srgb, var(--ink) 6%, transparent) 28px
+      ),
+      radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--gold) 12%, transparent), transparent 55%);
+  }
+
   /* ═══ Stamp rotado (estado borrador / no oficial) ═══ */
   .stamp {
     display: inline-flex;
@@ -200,7 +293,119 @@
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.14em;
-    color: var(--cinnabar);
-    opacity: 0.85;
+    color: var(--gold);
+    opacity: 0.9;
+  }
+
+  /* ═══ Subrayado de imprenta — bloque de tinta detrás de una palabra ═══ */
+  .marker {
+    position: relative;
+    display: inline-block;
+    white-space: nowrap;
+    /* Crea contexto de apilamiento propio para que el bloque de tinta quede
+       detrás del texto pero no detrás del fondo de la sección. */
+    isolation: isolate;
+  }
+  .marker::before {
+    content: '';
+    position: absolute;
+    left: -0.06em;
+    right: -0.06em;
+    bottom: 0.06em;
+    height: 0.3em;
+    background: var(--gold);
+    opacity: 0.9;
+    z-index: -1;
+  }
+
+  /* ═══ Cinta de cotizaciones — siempre oscura, como el pie de un diario ═══ */
+  .ticker-bar {
+    background: #12110d;
+    border-top: 1px solid #35312a;
+    border-bottom: 1px solid #35312a;
+  }
+  .ticker-label {
+    color: #e0763f;
+  }
+  .ticker-value {
+    color: #ded8c7;
+  }
+}
+
+@layer components {
+  /* ═══ Ticker editorial — cinta de códigos DTE en movimiento ═══ */
+  .ticker-track {
+    display: flex;
+    width: max-content;
+    animation: ticker-scroll 32s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ticker-track {
+      animation: none;
+    }
+  }
+  @keyframes ticker-scroll {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+
+  /* ═══ Sello circular — texto rotado sobre trayectoria ═══ */
+  .seal-spin {
+    animation: seal-spin 40s linear infinite;
+    transform-origin: 50% 50%;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .seal-spin {
+      animation: none;
+    }
+  }
+  @keyframes seal-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+
+  /* ═══ Grano de papel — textura sutil sobre superficies oscuras ═══ */
+  .paper-grain {
+    position: relative;
+    isolation: isolate;
+  }
+  .paper-grain::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    opacity: 0.5;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  }
+  .dark .paper-grain::before {
+    opacity: 0.28;
+  }
+}
+
+@layer utilities {
+  /*
+   * `text-white` aparece en las páginas de extractores para el texto de
+   * máximo contraste (totales, encabezados de tabla). Con la paleta clara
+   * como principal, blanco sobre papel es ilegible; se reapunta al color de
+   * tinta del tema. No queda blanco literal en la app: los botones oscuros
+   * definen su propio color vía `btn-primary`.
+   */
+  .text-white {
+    color: rgb(var(--ink-rgb));
+  }
+
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate-rise {
+    animation: rise-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .animate-fade {
+    animation: fade-in 0.8s ease-out both;
   }
 }

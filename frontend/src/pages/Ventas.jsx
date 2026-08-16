@@ -1,26 +1,8 @@
 import { useState, useMemo } from 'react'
 import PdfUploader from '../components/PdfUploader'
 import { procesarVentas, procesarVentasLote, exportarExcelVentas, guardarResultados } from '../services/api'
-
-// ── helpers ────────────────────────────────────────────────────────────────
-
-function fmt(n) {
-  return Number(n || 0).toLocaleString('es-SV', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-function estadoBadge(est) {
-  if (!est) return null
-  if (est.startsWith('🔴')) return <span className="badge-err text-xs">{est}</span>
-  if (est.startsWith('🟡')) return <span className="badge-warn text-xs">{est}</span>
-  return <span className="badge-ok text-xs">{est}</span>
-}
-
-function descargarBlob(blobData, nombre) {
-  const url = URL.createObjectURL(new Blob([blobData]))
-  const a = document.createElement('a')
-  a.href = url; a.download = nombre; a.click()
-  URL.revokeObjectURL(url)
-}
+import { fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado } from '../utils/dte'
+import { IconVentas, IconExportar, IconCheck, IconAlerta } from '../components/Icons'
 
 // Tipos que van al Anexo 1 (Contribuyentes): CCF, NC, ND
 const TIPOS_CONTRIB = new Set(['03', '05', '06'])
@@ -115,11 +97,10 @@ export default function Ventas() {
     return Object.values(map).sort((a, b) => a.fecha.localeCompare(b.fecha))
   }, [consumidor])
 
-  const alertas = useMemo(() =>
-    resultados.filter(r => {
-      const est = r.registro?.estado || ''
-      return est.startsWith('🔴') || est.startsWith('🟡')
-    }), [resultados])
+  const alertas = useMemo(
+    () => resultados.filter(r => esAlerta(r.registro?.estado)),
+    [resultados]
+  )
 
   const resumenTipo = useMemo(() => {
     const map = {}
@@ -153,18 +134,21 @@ export default function Ventas() {
   // ── tabs ──────────────────────────────────────────────────────────────────
 
   const TABS = [
-    `🟢 Anexo 1 — Contribuyentes (${contrib.length})`,
-    `🔵 Anexo 2 — Consumidor Final (${consumidor.length})`,
-    '🔍 Auditoría Completa',
-    '📈 Resumen por Tipo',
-    alertas.length ? `⚠️ Alertas (${alertas.length})` : '✅ Alertas',
+    `Anexo 1 — Contribuyentes (${contrib.length})`,
+    `Anexo 2 — Consumidor Final (${consumidor.length})`,
+    'Auditoría completa',
+    'Resumen por tipo',
+    alertas.length ? `Alertas (${alertas.length})` : 'Alertas',
   ]
 
   return (
     <div className="max-w-6xl mx-auto space-y-5">
       {/* Cabecera */}
       <div>
-        <h2 className="text-xl font-bold text-white">📤 Extractor DTE — Ventas</h2>
+        <h2 className="text-2xl text-fg flex items-center gap-2.5">
+          <IconVentas className="w-6 h-6 text-accent" />
+          Extractor DTE — Ventas
+        </h2>
         <p className="text-sm text-slate-400 mt-0.5">
           Extrae CCF, NC/ND y Facturas CF (DTE-01, 03, 05, 06). Genera Anexos 1 y 2 para F-07.
         </p>
@@ -198,7 +182,9 @@ export default function Ventas() {
       {/* Error */}
       {error && (
         <div className="card border-red-800 bg-red-900/20">
-          <p className="text-red-400 font-semibold text-sm">⚠️ Error</p>
+          <p className="text-red-400 font-semibold text-sm flex items-center gap-1.5">
+            <IconAlerta className="w-4 h-4" /> Error
+          </p>
           <pre className="text-red-300 text-sm mt-1 whitespace-pre-wrap font-sans">{error}</pre>
         </div>
       )}
@@ -272,7 +258,7 @@ export default function Ventas() {
                           <td className="table-cell text-right font-mono text-emerald-400">{r.gravadas != null ? `$${fmt(r.gravadas)}` : '—'}</td>
                           <td className="table-cell text-right font-mono text-amber-400">{r.debito != null ? `$${fmt(r.debito)}` : '—'}</td>
                           <td className="table-cell text-right font-mono text-white">{r.total != null ? `$${fmt(r.total)}` : '—'}</td>
-                          <td className="table-cell">{estadoBadge(r.estado)}</td>
+                          <td className="table-cell"><EstadoBadge estado={r.estado} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -289,7 +275,7 @@ export default function Ventas() {
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                       </svg>
-                    ) : '📥'}
+                    ) : <IconExportar className="w-4 h-4" />}
                     Generar / Descargar Ventas
                   </button>
                 </div>
@@ -367,7 +353,7 @@ export default function Ventas() {
                             <td className="table-cell text-right font-mono">{r.exentas != null ? `$${fmt(r.exentas)}` : '—'}</td>
                             <td className="table-cell text-right font-mono text-emerald-400">{r.gravadas != null ? `$${fmt(r.gravadas)}` : '—'}</td>
                             <td className="table-cell text-right font-mono text-white">{r.total != null ? `$${fmt(r.total)}` : '—'}</td>
-                            <td className="table-cell">{estadoBadge(r.estado)}</td>
+                            <td className="table-cell"><EstadoBadge estado={r.estado} /></td>
                           </tr>
                         ))}
                       </tbody>
@@ -385,7 +371,7 @@ export default function Ventas() {
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                       </svg>
-                    ) : '📥'}
+                    ) : <IconExportar className="w-4 h-4" />}
                     Generar / Descargar Ventas
                   </button>
                 </div>
@@ -425,7 +411,7 @@ export default function Ventas() {
                           <td className="table-cell text-right font-mono text-emerald-400">{d.gravadas != null ? `$${fmt(d.gravadas)}` : '—'}</td>
                           <td className="table-cell text-right font-mono text-amber-400">{d.debito != null ? `$${fmt(d.debito)}` : '—'}</td>
                           <td className="table-cell text-right font-mono text-white">{d.total != null ? `$${fmt(d.total)}` : '—'}</td>
-                          <td className="table-cell">{estadoBadge(d.estado)}</td>
+                          <td className="table-cell"><EstadoBadge estado={d.estado} /></td>
                           <td className="table-cell text-slate-500">{r.filename || '—'}</td>
                         </tr>
                       )
@@ -475,13 +461,19 @@ export default function Ventas() {
             {tab === 4 && (
               <div className="space-y-2">
                 {alertas.length === 0 ? (
-                  <p className="text-center text-emerald-400 py-8 text-sm">✅ Sin alertas — todos los documentos están OK.</p>
+                  <p className="text-center text-emerald-400 py-8 text-sm flex items-center justify-center gap-2">
+                    <IconCheck className="w-4 h-4" /> Sin alertas — todos los documentos están conformes.
+                  </p>
                 ) : (
                   alertas.map((r, i) => {
                     const d = r.registro || {}
                     return (
                       <div key={i} className="bg-surface-700 rounded-lg px-4 py-3 flex items-start gap-3">
-                        <span className="text-base mt-0.5">{d.estado?.startsWith('🔴') ? '🔴' : '🟡'}</span>
+                        <IconAlerta
+                          className={`w-4 h-4 mt-0.5 shrink-0 ${
+                            nivelEstado(d.estado) === 'manual' ? 'text-red-400' : 'text-amber-400'
+                          }`}
+                        />
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-white truncate">
                             {d.nom_cli || d.nit_cli || r.filename || `Doc #${i + 1}`}

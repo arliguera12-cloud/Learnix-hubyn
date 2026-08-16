@@ -2,6 +2,8 @@ import { useState } from 'react'
 import PdfUploader from './PdfUploader'
 import ResultadosTabla from './ResultadosTabla'
 import { exportarExcel, guardarResultados } from '../services/api'
+import { fmt, descargarBlob } from '../utils/dte'
+import { IconExportar, IconAlerta } from './Icons'
 
 // Campos monetarios por tipo para el resumen financiero
 const CAMPOS_FINANCIEROS = {
@@ -23,20 +25,7 @@ function calcularTotales(tipo, resultados) {
   return { gravadas, iva, total }
 }
 
-function fmt(n) {
-  return n.toLocaleString('es-SV', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-function descargarBlob(blobData, nombre) {
-  const url = URL.createObjectURL(new Blob([blobData]))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = nombre
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-export default function ExtractorPage({ titulo, icono, descripcion, tipo, apiFn, loteApiFn }) {
+export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, loteApiFn }) {
   const [resultados,   setResultados]   = useState([])
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState(null)
@@ -121,10 +110,11 @@ export default function ExtractorPage({ titulo, icono, descripcion, tipo, apiFn,
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Cabecera */}
       <div>
-        <h2 className="text-xl font-bold text-white">
-          <span className="mr-2">{icono}</span>{titulo}
+        <h2 className="text-2xl text-fg flex items-center gap-2.5">
+          {Icon && <Icon className="w-6 h-6 text-accent" />}
+          {titulo}
         </h2>
-        <p className="text-sm text-slate-400 mt-0.5">{descripcion}</p>
+        <p className="text-sm text-slate-400 mt-1">{descripcion}</p>
       </div>
 
       {/* Uploader */}
@@ -157,7 +147,9 @@ export default function ExtractorPage({ titulo, icono, descripcion, tipo, apiFn,
       {/* Error */}
       {error && (
         <div className="card border-red-800 bg-red-900/20">
-          <p className="text-red-400 font-semibold text-sm">⚠️ Error</p>
+          <p className="text-red-400 font-semibold text-sm flex items-center gap-1.5">
+            <IconAlerta className="w-4 h-4" /> Error
+          </p>
           <pre className="text-red-300 text-sm mt-1 whitespace-pre-wrap font-sans">{error}</pre>
         </div>
       )}
@@ -184,7 +176,7 @@ export default function ExtractorPage({ titulo, icono, descripcion, tipo, apiFn,
                     Exportando…
                   </>
                 ) : (
-                  <>📥 Exportar todo ({exitosos})</>
+                  <><IconExportar className="w-4 h-4" /> Exportar todo ({exitosos})</>
                 )}
               </button>
               <button

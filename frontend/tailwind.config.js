@@ -1,29 +1,32 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
       colors: {
-        // Superficies (paleta "Ledger Editorial" de Certia, modo oscuro)
+        // Superficies — reapuntadas a los tokens de tema (ver `slate` abajo).
         surface: {
-          50:  '#fbfaf7',
-          100: '#f2ede1',
-          200: '#d8d2c3',
-          300: '#c2bbaa',
-          400: '#746c5c',
-          500: '#4d4638',
-          600: '#2d2822',
-          700: '#1c1917',
-          800: '#131110',
-          900: '#0b0a08',
+          50:  'rgb(var(--panel-rgb) / <alpha-value>)',
+          100: 'rgb(var(--panel-rgb) / <alpha-value>)',
+          200: 'rgb(var(--panel2-rgb) / <alpha-value>)',
+          300: 'rgb(var(--border-rgb) / <alpha-value>)',
+          400: 'rgb(var(--ink5-rgb) / <alpha-value>)',
+          500: 'rgb(var(--border-rgb) / <alpha-value>)',
+          600: 'rgb(var(--border-rgb) / <alpha-value>)',
+          700: 'rgb(var(--panel2-rgb) / <alpha-value>)',
+          800: 'rgb(var(--panel-rgb) / <alpha-value>)',
+          900: 'rgb(var(--bg-rgb) / <alpha-value>)',
         },
-        // Primario / "notarial" — cobalt
+        // Primario — el bermellón de imprenta. Antes era un celeste que no
+        // pertenecía a la paleta editorial; se usa en pestañas activas,
+        // barras de progreso y foco de inputs.
         brand: {
-          50:  '#e4ebf3',
-          100: '#cfe0ee',
-          400: '#a8caea',
-          500: '#7bb3e8',
-          600: '#cfe0ee',
+          50:  'rgb(var(--gold-rgb) / <alpha-value>)',
+          100: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          400: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          500: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          600: 'rgb(var(--gold-rgb) / <alpha-value>)',
         },
         // Acento editorial — dorado
         gold: {
@@ -60,43 +63,69 @@ export default {
           'txt-mute': '#7a7365',
           'txt-hi': '#f6f4ee',
         },
-        // Reemplaza las escalas nativas de Tailwind que ya se usan en el código
-        // por tonos derivados de la paleta Certia, para que toda la UI herede
-        // el mismo lenguaje visual sin reescribir cada página.
+        // Escalas nativas de Tailwind reapuntadas a los tokens de tema. Las
+        // páginas de extractores (Ventas, Compras, …) ya usan `text-slate-400`,
+        // `bg-surface-700`, `text-emerald-400`, etc. en cientos de sitios;
+        // remapearlas aquí hace que toda esa UI siga el tema claro/oscuro sin
+        // reescribir su marcado. Los números conservan su sentido relativo
+        // (más alto = más apagado en texto, más profundo en superficie).
         slate: {
-          50:  '#fbfaf7',
-          100: '#f2ede1',
-          200: '#d8d2c3',
-          300: '#c2bbaa',
-          400: '#a89f8b',
-          500: '#8b8271',
-          600: '#746c5c',
-          700: '#4d4638',
-          800: '#2d2822',
-          900: '#1c1917',
+          50:  'rgb(var(--panel-rgb) / <alpha-value>)',
+          100: 'rgb(var(--ink-rgb) / <alpha-value>)',
+          200: 'rgb(var(--ink-rgb) / <alpha-value>)',
+          300: 'rgb(var(--ink3-rgb) / <alpha-value>)',
+          400: 'rgb(var(--ink3-rgb) / <alpha-value>)',
+          500: 'rgb(var(--ink4-rgb) / <alpha-value>)',
+          600: 'rgb(var(--ink5-rgb) / <alpha-value>)',
+          700: 'rgb(var(--border-rgb) / <alpha-value>)',
+          800: 'rgb(var(--panel2-rgb) / <alpha-value>)',
+          900: 'rgb(var(--panel-rgb) / <alpha-value>)',
         },
+        // Semánticos: pérdida/error → bermellón, ganancia/conforme → verde,
+        // observación → ocre. Los tonos 700–900 se usan casi siempre con
+        // modificador de opacidad (bg-red-900/20), así que apuntan al mismo
+        // color base y el tinte lo da la opacidad.
         red: {
-          300: '#f3ab98',
-          400: '#ed8b73',
-          500: '#e2724f',
-          700: '#4a221c',
-          800: '#3a1a16',
-          900: '#2b1310',
+          300: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          400: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          500: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          700: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          800: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          900: 'rgb(var(--gold-rgb) / <alpha-value>)',
         },
         emerald: {
-          400: '#5fd7be',
-          500: '#3fc7ab',
-          800: '#123832',
-          900: '#0b2620',
+          400: 'rgb(var(--cinnabar-rgb) / <alpha-value>)',
+          500: 'rgb(var(--cinnabar-rgb) / <alpha-value>)',
+          800: 'rgb(var(--cinnabar-rgb) / <alpha-value>)',
+          900: 'rgb(var(--cinnabar-rgb) / <alpha-value>)',
         },
         amber: {
-          300: '#f0c785',
-          400: '#e8b45c',
-          500: '#d99f3e',
-          700: '#7a531c',
-          800: '#4a3313',
-          900: '#2b1e0a',
+          300: 'rgb(var(--warn-rgb) / <alpha-value>)',
+          400: 'rgb(var(--warn-rgb) / <alpha-value>)',
+          500: 'rgb(var(--warn-rgb) / <alpha-value>)',
+          700: 'rgb(var(--warn-rgb) / <alpha-value>)',
+          800: 'rgb(var(--warn-rgb) / <alpha-value>)',
+          900: 'rgb(var(--warn-rgb) / <alpha-value>)',
         },
+        // Azules/rosas sueltos que quedaron de la plantilla original: se
+        // reconducen al acento editorial para que no reaparezca el arcoíris.
+        blue:   { 400: 'rgb(var(--gold-rgb) / <alpha-value>)', 500: 'rgb(var(--gold-rgb) / <alpha-value>)' },
+        sky:    { 400: 'rgb(var(--gold-rgb) / <alpha-value>)', 500: 'rgb(var(--gold-rgb) / <alpha-value>)' },
+        green:  { 400: 'rgb(var(--cinnabar-rgb) / <alpha-value>)' },
+        // Tokens de tema (claro por defecto / oscuro vía .dark) — con soporte
+        // de modificador de opacidad (bg-paper/80, text-fg-3/60, etc.) porque
+        // apuntan a variables RGB, no hex. Usados en landing, login y layout.
+        paper:    'rgb(var(--bg-rgb) / <alpha-value>)',
+        panel:    'rgb(var(--panel-rgb) / <alpha-value>)',
+        panel2:   'rgb(var(--panel2-rgb) / <alpha-value>)',
+        hairline: 'rgb(var(--border-rgb) / <alpha-value>)',
+        fg:       'rgb(var(--ink-rgb) / <alpha-value>)',
+        'fg-3':   'rgb(var(--ink3-rgb) / <alpha-value>)',
+        'fg-4':   'rgb(var(--ink4-rgb) / <alpha-value>)',
+        'fg-5':   'rgb(var(--ink5-rgb) / <alpha-value>)',
+        accent:   'rgb(var(--gold-rgb) / <alpha-value>)',
+        accent2:  'rgb(var(--cinnabar-rgb) / <alpha-value>)',
+        warn:     'rgb(var(--warn-rgb) / <alpha-value>)',
       },
       fontFamily: {
         sans: ["'Instrument Sans'", '-apple-system', 'BlinkMacSystemFont', "'Segoe UI'", 'sans-serif'],

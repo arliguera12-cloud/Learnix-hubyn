@@ -1,26 +1,8 @@
 import { useState, useMemo } from 'react'
 import PdfUploader from '../components/PdfUploader'
 import { procesarCompras, procesarComprasLote, exportarExcelCompras, guardarResultados } from '../services/api'
-
-// ── helpers ────────────────────────────────────────────────────────────────
-
-function fmt(n) {
-  return Number(n || 0).toLocaleString('es-SV', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-function estadoBadge(est) {
-  if (!est) return null
-  if (est.startsWith('🔴')) return <span className="badge-err text-xs">{est}</span>
-  if (est.startsWith('🟡')) return <span className="badge-warn text-xs">{est}</span>
-  return <span className="badge-ok text-xs">{est}</span>
-}
-
-function descargarBlob(blobData, nombre) {
-  const url = URL.createObjectURL(new Blob([blobData]))
-  const a = document.createElement('a')
-  a.href = url; a.download = nombre; a.click()
-  URL.revokeObjectURL(url)
-}
+import { fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado } from '../utils/dte'
+import { IconCompras, IconExportar, IconCheck, IconAlerta } from '../components/Icons'
 
 const TIPOS_PERCEPCION = new Set(['03', '05', '06', '12'])
 
@@ -75,11 +57,10 @@ export default function Compras() {
     return { exe, gra, iva, tot }
   }, [registros])
 
-  const alertas = useMemo(() =>
-    resultados.filter(r => {
-      const est = r.registro?.estado || ''
-      return est.startsWith('🔴') || est.startsWith('🟡')
-    }), [resultados])
+  const alertas = useMemo(
+    () => resultados.filter(r => esAlerta(r.registro?.estado)),
+    [resultados]
+  )
 
   const percepciones = useMemo(() =>
     registros.filter(r => parseFloat(r.perc || 0) > 0 && TIPOS_PERCEPCION.has(String(r.tipo))),
@@ -115,18 +96,21 @@ export default function Compras() {
   // ── tabs ──────────────────────────────────────────────────────────────────
 
   const TABS = [
-    `📊 F-07 Compras (${registros.length})`,
-    '🔍 Auditoría Completa',
-    '📈 Resumen por Proveedor',
-    `📋 Anexo 8 — Percepciones`,
-    alertas.length ? `⚠️ Alertas (${alertas.length})` : '✅ Alertas',
+    `F-07 Compras (${registros.length})`,
+    'Auditoría completa',
+    'Resumen por proveedor',
+    'Anexo 8 — Percepciones',
+    alertas.length ? `Alertas (${alertas.length})` : 'Alertas',
   ]
 
   return (
     <div className="max-w-6xl mx-auto space-y-5">
       {/* Cabecera */}
       <div>
-        <h2 className="text-xl font-bold text-white">📥 Extractor DTE — Compras</h2>
+        <h2 className="text-2xl text-fg flex items-center gap-2.5">
+          <IconCompras className="w-6 h-6 text-accent" />
+          Extractor DTE — Compras
+        </h2>
         <p className="text-sm text-slate-400 mt-0.5">
           Extrae CCF recibidos de proveedores (DTE-03, 05, 06, 11). Genera Anexo 3 para F-07.
         </p>
@@ -160,7 +144,9 @@ export default function Compras() {
       {/* Error */}
       {error && (
         <div className="card border-red-800 bg-red-900/20">
-          <p className="text-red-400 font-semibold text-sm">⚠️ Error</p>
+          <p className="text-red-400 font-semibold text-sm flex items-center gap-1.5">
+            <IconAlerta className="w-4 h-4" /> Error
+          </p>
           <pre className="text-red-300 text-sm mt-1 whitespace-pre-wrap font-sans">{error}</pre>
         </div>
       )}
@@ -236,7 +222,7 @@ export default function Compras() {
                           <td className="table-cell text-right font-mono text-emerald-400">{r.gra != null ? `$${fmt(r.gra)}` : '—'}</td>
                           <td className="table-cell text-right font-mono text-amber-400">{r.iva != null ? `$${fmt(r.iva)}` : '—'}</td>
                           <td className="table-cell text-right font-mono text-white">{r.tot != null ? `$${fmt(r.tot)}` : '—'}</td>
-                          <td className="table-cell">{estadoBadge(r.estado)}</td>
+                          <td className="table-cell"><EstadoBadge estado={r.estado} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -255,7 +241,7 @@ export default function Compras() {
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                       </svg>
-                    ) : '📥'}
+                    ) : <IconExportar className="w-4 h-4" />}
                     Generar / Descargar Compras
                   </button>
                 </div>
@@ -377,13 +363,19 @@ export default function Compras() {
             {tab === 4 && (
               <div className="space-y-2">
                 {alertas.length === 0 ? (
-                  <p className="text-center text-emerald-400 py-8 text-sm">✅ Sin alertas — todos los documentos están OK.</p>
+                  <p className="text-center text-emerald-400 py-8 text-sm flex items-center justify-center gap-2">
+                    <IconCheck className="w-4 h-4" /> Sin alertas — todos los documentos están conformes.
+                  </p>
                 ) : (
                   alertas.map((r, i) => {
                     const d = r.registro || {}
                     return (
                       <div key={i} className="bg-surface-700 rounded-lg px-4 py-3 flex items-start gap-3">
-                        <span className="text-base mt-0.5">{d.estado?.startsWith('🔴') ? '🔴' : '🟡'}</span>
+                        <IconAlerta
+                          className={`w-4 h-4 mt-0.5 shrink-0 ${
+                            nivelEstado(d.estado) === 'manual' ? 'text-red-400' : 'text-amber-400'
+                          }`}
+                        />
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-white truncate">
                             {d.nom_prov || d.nit_prov || r.filename || `Doc #${i + 1}`}
