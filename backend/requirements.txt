@@ -26,8 +26,11 @@ openpyxl>=3.1.2
 # Supabase
 supabase>=2.4.0
 
-# Auth — verificación de JWT de Supabase
-pyjwt>=2.8.0
+# Auth — verificación de JWT de Supabase.
+# El extra [crypto] trae `cryptography`, necesaria para validar las firmas
+# asimétricas (ES256) que emiten los proyectos de Supabase ya migrados. Sin
+# él solo funcionaría el secreto compartido HS256 heredado.
+pyjwt[crypto]>=2.8.0
 
 # Utilidades
 requests>=2.28.0
