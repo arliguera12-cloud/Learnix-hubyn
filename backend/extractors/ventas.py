@@ -20,6 +20,7 @@ from utils.ai_utils import (
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
 from utils.qa_utils import calcular_confianza
+from utils.dte_layout import ids_pareados, identificadores_emisor
 from utils.constants import (
     TIPOS_CONTRIBUYENTES,
     TIPOS_CONSUMIDOR,
@@ -375,6 +376,12 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
         nrc_emisor = re.sub(r'[^0-9]', '', safe_str(cliente_activo.get('nrc', '')))
         excluir_numeros = {nit_emisor, dui_emisor, nrc_emisor} - {""}
 
+        # Los identificadores del emisor tal como los imprime el propio DTE. El
+        # registro del declarante en el directorio puede tener solo su NIT de 14
+        # dígitos mientras el documento muestra su DUI en el campo NIT, y en ese
+        # caso la exclusión por directorio no lo reconoce.
+        excluir_numeros |= identificadores_emisor(texto_completo)
+
         # ── Datos del Receptor ─────────────────────────────────────────────────
         nit_cli     = ""
         dui_cli     = ""
@@ -385,9 +392,12 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             clientes_db = cargar_clientes_json()
 
         # Separar sección del receptor del texto
+        # El encabezado del receptor no siempre lleva dos puntos: los DTE de
+        # Hacienda usan una fila "EMISOR    RECEPTOR" a secas, que con el patrón
+        # anterior (que exigía ":" o "-") no separaba nada.
         partes_doc = re.split(
-            r"(?i)\b(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR\s*[:\-]|"
-            r"DATOS\s+DEL\s+ADQUIRIENTE|ADQUIRIENTE\s*[:\-]|"
+            r"(?i)\b(?:DATOS\s+DEL\s+RECEPTOR|RECEPTOR\s*[:\-]?|"
+            r"DATOS\s+DEL\s+ADQUIRIENTE|ADQUIRIENTE\s*[:\-]?|"
             r"DATOS\s+DEL\s+CLIENTE|CLIENTE\s*:|COMPRADOR\b)\b",
             texto_completo, maxsplit=1
         )
@@ -411,6 +421,12 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             if m_rec_lineal:
                 texto_receptor = texto_lineal[m_rec_lineal.start():][:1500]
                 offset_receptor = texto_completo.find(texto_receptor[:50])
+                if offset_receptor == -1:
+                    # texto_lineal está normalizado, así que su fragmento puede no
+                    # existir literalmente en texto_completo. Sin esta guarda el
+                    # offset quedaba en -1 y la "región del receptor" abarcaba el
+                    # documento entero desde el inicio, incluido el bloque emisor.
+                    offset_receptor = m_rec_lineal.start()
             else:
                 offset_receptor = len(texto_completo) // 2
                 texto_receptor = texto_completo[offset_receptor:][:1500]
@@ -429,12 +445,25 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             if num_limpio not in excluir_numeros and len(num_limpio) in (9, 14):
                 candidatos_validos.append((num_limpio, match.start()))
 
-        cands_en_receptor = [
+        # Camino preferente: el DTE imprime emisor y receptor en dos columnas,
+        # así que una misma línea trae los dos NIT ("NIT: <emisor> NIT: <receptor>").
+        # Leer la columna derecha es exacto y no depende de posiciones dentro del
+        # texto; la búsqueda posicional de más abajo queda como respaldo para
+        # documentos con otra maquetación.
+        pares = ids_pareados(texto_completo)
+        id_receptor = ""
+        if pares:
+            recept = pares["receptor"]
+            id_receptor = recept.get("nit") or recept.get("dui") or ""
+
+        if id_receptor and len(id_receptor) in (9, 14):
+            nit_cli = id_receptor
+            pos = texto_completo.rfind(id_receptor[:8])
+            pos_nit_rec = pos if pos >= 0 else offset_receptor
+        elif cands_en_receptor := [
             c for c in candidatos_validos
             if offset_receptor <= c[1] <= (offset_receptor + len(texto_receptor) + 200)
-        ]
-
-        if cands_en_receptor:
+        ]:
             nit_cli, pos_nit_rec = cands_en_receptor[0]
         elif candidatos_validos:
             nit_cli, pos_nit_rec = candidatos_validos[0]
