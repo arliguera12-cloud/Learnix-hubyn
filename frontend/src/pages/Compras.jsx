@@ -66,11 +66,24 @@ export default function Compras() {
     registros.filter(r => parseFloat(r.perc || 0) > 0 && TIPOS_PERCEPCION.has(String(r.tipo))),
     [registros])
 
+  // Se agrupa por identificador fiscal, no por nombre: un mismo proveedor
+  // aparece escrito de varias formas entre documentos ("GRUPO NSV, LTDA" y
+  // "GRUPO NSV, LTDA DE C.V." comparten NIT) y agrupando por texto salía
+  // repetido, repartiendo sus totales en varias filas.
   const resumenProv = useMemo(() => {
     const map = {}
     for (const r of registros) {
-      const k = r.nom_prov || r.nit_prov || '(sin nombre)'
-      if (!map[k]) map[k] = { nom: k, nit: r.nit_prov || '', dui: r.dui_prov || '', docs: 0, exe: 0, gra: 0, iva: 0, tot: 0 }
+      const k = r.nit_prov || r.dui_prov || r.nom_prov || '(sin identificar)'
+      if (!map[k]) {
+        map[k] = {
+          nom: r.nom_prov || '(sin nombre)',
+          nit: r.nit_prov || '', dui: r.dui_prov || '',
+          docs: 0, exe: 0, gra: 0, iva: 0, tot: 0,
+        }
+      }
+      // Entre las variantes del nombre se conserva la más larga, que suele ser
+      // la razón social completa en vez de la abreviada.
+      if ((r.nom_prov || '').length > map[k].nom.length) map[k].nom = r.nom_prov
       map[k].docs += 1
       map[k].exe += parseFloat(r.exe || 0); map[k].gra += parseFloat(r.gra || 0)
       map[k].iva += parseFloat(r.iva || 0); map[k].tot += parseFloat(r.tot || 0)
