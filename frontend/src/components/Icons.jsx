@@ -155,6 +155,25 @@ export function IconCorreo(props) {
   )
 }
 
+/** Cerrar / quitar — equis. */
+export function IconCerrar(props) {
+  return (
+    <Svg {...props}>
+      <path d="M6 6l12 12M18 6L6 18" />
+    </Svg>
+  )
+}
+
+/** Documento — archivo genérico (PDF/JSON) en una lista. */
+export function IconArchivo(props) {
+  return (
+    <Svg {...props}>
+      <path d="M6 2.75h7.5L18 7.25v14H6z" />
+      <path d="M13.5 2.75v4.5H18" />
+    </Svg>
+  )
+}
+
 /** Cerrar sesión — salida. */
 export function IconSalir(props) {
   return (

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { IconExportar, IconAlerta } from './Icons'
 import { exportarExcel } from '../services/api'
+import { EstadoBadge, esAlerta, nivelEstado } from '../utils/dte'
 
 // Campos a mostrar por tipo, con etiquetas amigables
 const CAMPOS_DISPLAY = {
@@ -139,6 +140,7 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
               {registro.fecha && (
                 <span className="text-xs text-slate-500">{registro.fecha}</span>
               )}
+              <EstadoBadge estado={registro.estado} />
               {tieneIa && (
                 <span className="text-xs text-amber-400">
                   IA · {correcciones_ia.length} corrección{correcciones_ia.length > 1 ? 'es' : ''}
@@ -170,6 +172,19 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
           </button>
         </div>
       </div>
+
+      {/* Por qué necesita revisión (siempre visible, no solo al expandir) */}
+      {esAlerta(registro.estado) && (registro.detalle_confianza || registro.campos_faltantes?.length > 0) && (
+        <div className="px-4 py-2.5 border-b border-surface-600/50 flex items-start gap-2">
+          <IconAlerta
+            className={`w-4 h-4 mt-0.5 shrink-0 ${nivelEstado(registro.estado) === 'manual' ? 'text-red-400' : 'text-amber-400'}`}
+          />
+          <p className="text-xs text-slate-400">
+            {registro.detalle_confianza || `Campos faltantes: ${registro.campos_faltantes.join(', ')}`}
+            {registro.confianza != null && <span className="text-slate-500"> · confianza {registro.confianza}%</span>}
+          </p>
+        </div>
+      )}
 
       {/* Resumen de montos (siempre visible) */}
       {campos.some(([k]) => CAMPOS_NUMERICOS.has(k) && registro[k]) && (

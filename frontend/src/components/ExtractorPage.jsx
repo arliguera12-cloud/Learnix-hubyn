@@ -2,7 +2,10 @@ import { useState } from 'react'
 import PdfUploader from './PdfUploader'
 import ResultadosTabla from './ResultadosTabla'
 import { exportarExcel, guardarResultados } from '../services/api'
-import { fmt, descargarBlob, fusionarSinDuplicados, avisoDuplicados } from '../utils/dte'
+import {
+  fmt, descargarBlob, fusionarSinDuplicados, avisoDuplicados,
+  usePersistenciaExtractor, useProgresoSimulado,
+} from '../utils/dte'
 import { IconExportar, IconAlerta } from './Icons'
 
 // Campos monetarios por tipo para el resumen financiero
@@ -26,19 +29,18 @@ function calcularTotales(tipo, resultados) {
 }
 
 export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, loteApiFn }) {
-  const [resultados,   setResultados]   = useState([])
+  const { resultados, setResultados, declaranteId, setDeclaranteId } = usePersistenciaExtractor(tipo)
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState(null)
-  const [progress,     setProgress]     = useState(null) // { done, total }
-  const [declaranteId, setDeclaranteId] = useState('')
   const [exportando,   setExportando]   = useState(false)
   const [aviso,        setAviso]        = useState(null)
+  const { progress, iniciar: iniciarProgreso, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoSimulado()
 
   async function handleUpload(filesOrFile, dId, nombre) {
     setLoading(true)
     setError(null)
     setAviso(null)
-    setProgress(null)
+    limpiarProgreso()
     setDeclaranteId(dId)
 
     const isMultiple = Array.isArray(filesOrFile)
@@ -47,22 +49,22 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
       let nuevos = []
 
       if (isMultiple && loteApiFn) {
-        // Un solo request con todos los PDFs
-        setProgress({ done: 0, total: filesOrFile.length, fase: 'enviando' })
+        // Un solo request con todos los PDFs, procesados en paralelo en el backend
+        iniciarProgreso(filesOrFile.length)
         const { data } = await loteApiFn(filesOrFile, dId, nombre)
         nuevos = data.resultados ?? []
         if (data.errores?.length) {
           setError(data.errores.map(e => `${e.filename}: ${e.error}`).join('\n'))
         }
-        setProgress({ done: filesOrFile.length, total: filesOrFile.length, fase: 'listo' })
+        terminarProgreso()
       } else if (isMultiple) {
-        // Secuencial como fallback
+        // Secuencial como fallback, si el tipo no tiene endpoint de lote
         for (let i = 0; i < filesOrFile.length; i++) {
-          setProgress({ done: i, total: filesOrFile.length, fase: 'procesando' })
+          iniciarProgreso(filesOrFile.length)
           const { data } = await apiFn(filesOrFile[i], dId, nombre)
           nuevos.push(data)
         }
-        setProgress({ done: filesOrFile.length, total: filesOrFile.length, fase: 'listo' })
+        terminarProgreso()
       } else {
         const { data } = await apiFn(filesOrFile, dId, nombre)
         nuevos = [data]
@@ -80,9 +82,10 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
     } catch (err) {
       const detail = err.response?.data?.detail
       setError(typeof detail === 'string' ? detail : JSON.stringify(detail ?? err.message))
+      limpiarProgreso()
     } finally {
       setLoading(false)
-      setProgress(null)
+      setTimeout(limpiarProgreso, 500)
     }
   }
 
@@ -104,7 +107,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
     setResultados([])
     setError(null)
     setAviso(null)
-    setProgress(null)
+    limpiarProgreso()
   }
 
   const exitosos   = resultados.length
@@ -117,11 +120,14 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Cabecera */}
       <div>
-        <h2 className="text-2xl text-fg flex items-center gap-2.5">
-          {Icon && <Icon className="w-6 h-6 text-accent" />}
-          {titulo}
+        <p className="text-[0.65rem] uppercase tracking-[0.18em] text-fg-4 font-semibold mb-1">
+          Extractor DTE
+        </p>
+        <h2 className="text-3xl text-fg leading-none flex items-center gap-3">
+          {Icon && <Icon className="w-7 h-7 text-accent" />}
+          {titulo.replace(/^Extractor DTE — /, '')}
         </h2>
-        <p className="text-sm text-slate-400 mt-1">{descripcion}</p>
+        <p className="text-sm text-fg-4 mt-2">{descripcion}</p>
       </div>
 
       {/* Uploader */}
@@ -134,18 +140,16 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
         <div className="card space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-slate-300">
-              {progress.fase === 'enviando'
-                ? `Enviando ${progress.total} PDF${progress.total !== 1 ? 's' : ''}…`
-                : `Procesando ${progress.done + 1} de ${progress.total}…`}
+              Procesando {progress.total} PDF{progress.total !== 1 ? 's' : ''}…
             </span>
             <span className="text-slate-400 font-mono text-xs">
-              {Math.round(((progress.done) / progress.total) * 100)}%
+              {Math.round(progress.pct)}%
             </span>
           </div>
           <div className="h-1.5 bg-surface-700 rounded-full overflow-hidden">
             <div
-              className="h-full bg-brand-500 transition-all duration-300"
-              style={{ width: `${(progress.done / progress.total) * 100}%` }}
+              className="h-full bg-brand-500 transition-all duration-300 ease-out"
+              style={{ width: `${progress.pct}%` }}
             />
           </div>
         </div>

@@ -1,8 +1,14 @@
 import { useRef, useState } from 'react'
-import { IconSubir } from './Icons'
+import { IconSubir, IconCerrar, IconArchivo } from './Icons'
 import ImportCenter from './ImportCenter'
 import ClienteSelector from './ClienteSelector'
 import { useClienteActivo } from '../services/clienteActivo'
+
+function tamano(bytes) {
+  if (!bytes) return ''
+  const kb = bytes / 1024
+  return kb < 1024 ? `${kb.toFixed(0)} KB` : `${(kb / 1024).toFixed(1)} MB`
+}
 
 export default function PdfUploader({ onUpload, loading, multiple = false }) {
   const inputRef = useRef(null)
@@ -40,6 +46,10 @@ export default function PdfUploader({ onUpload, loading, multiple = false }) {
     e.preventDefault()
     setDragging(false)
     handleFiles(e.dataTransfer.files)
+  }
+
+  function quitarArchivo(i) {
+    setFiles(prev => prev.filter((_, idx) => idx !== i))
   }
 
   const declaranteId = modoManual ? manualNit.trim() : (clienteActivo?.nit ?? '')
@@ -106,32 +116,57 @@ export default function PdfUploader({ onUpload, loading, multiple = false }) {
         )}
       </div>
 
-      {/* Drop zone */}
-      <div
-        onDragOver={e => { e.preventDefault(); setDragging(true) }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
-        className={`border border-dashed rounded-xl px-6 py-9 text-center cursor-pointer transition-colors duration-150
-          ${dragging ? 'border-accent bg-accent/5' : 'border-hairline hover:border-fg-4 bg-panel2/40'}`}
-      >
-        <IconSubir className="w-7 h-7 mx-auto mb-3 text-fg-4" />
-        <p className="text-sm text-fg-3">
-          {files.length
-            ? files.map(f => f.name).join(', ')
-            : 'Arrastra el archivo aquí o haz clic para seleccionar'}
-        </p>
-        <p className="text-xs text-fg-4 mt-1">
-          PDF o JSON firmado por Hacienda{multiple ? ' — múltiples permitidos' : ''}
-        </p>
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".pdf,.json"
-          multiple={multiple}
-          className="hidden"
-          onChange={e => handleFiles(e.target.files)}
-        />
+      {/* Zona de subida */}
+      <div>
+        <label className="form-label">Documentos *</label>
+        <div
+          onDragOver={e => { e.preventDefault(); setDragging(true) }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+          onClick={() => inputRef.current?.click()}
+          className={`flex items-center gap-3.5 rounded-lg border border-dashed px-4 py-3.5 cursor-pointer transition-colors duration-150
+            ${dragging ? 'border-accent bg-accent/5' : 'border-hairline hover:border-fg-4 bg-panel2/40'}`}
+        >
+          <div className="shrink-0 h-10 w-10 rounded-lg border border-hairline bg-panel flex items-center justify-center">
+            <IconSubir className="w-5 h-5 text-fg-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm text-fg-2 font-medium">
+              Arrastrá el archivo aquí o hacé clic para elegirlo
+            </p>
+            <p className="text-xs text-fg-4 mt-0.5">
+              PDF o JSON firmado por Hacienda{multiple ? ' — se pueden elegir varios' : ''}
+            </p>
+          </div>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".pdf,.json"
+            multiple={multiple}
+            className="hidden"
+            onChange={e => handleFiles(e.target.files)}
+          />
+        </div>
+
+        {files.length > 0 && (
+          <ul className="mt-2 rounded-lg border border-hairline divide-y divide-hairline overflow-hidden">
+            {files.map((f, i) => (
+              <li key={`${f.name}:${f.size}:${i}`} className="flex items-center gap-2.5 px-3 py-2 bg-panel/60">
+                <IconArchivo className="w-4 h-4 text-fg-4 shrink-0" />
+                <span className="text-sm text-fg-2 truncate flex-1">{f.name}</span>
+                <span className="text-xs text-fg-5 font-mono shrink-0">{tamano(f.size)}</span>
+                <button
+                  type="button"
+                  onClick={() => quitarArchivo(i)}
+                  className="shrink-0 text-fg-4 hover:text-red-400 transition-colors"
+                  aria-label={`Quitar ${f.name}`}
+                >
+                  <IconCerrar className="w-3.5 h-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <ImportCenter onImportar={handleImportados} />

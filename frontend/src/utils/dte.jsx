@@ -6,7 +6,110 @@
  * `estado` habría que hacerla dos veces (y ExtractorPage tenía una tercera
  * copia de `fmt`/`descargarBlob`).
  */
+import { useEffect, useRef, useState } from 'react'
 import { IconCheck, IconAlerta } from '../components/Icons'
+
+/**
+ * Mantiene `resultados` y `declaranteId` de un extractor en sessionStorage.
+ *
+ * Cada página de extractor guardaba estos dos en `useState` local: al
+ * navegar de Ventas a Compras y volver, React desmontaba Ventas y todo lo
+ * ya extraído desaparecía de la pantalla, aunque siguiera guardado en
+ * Supabase — obligaba a resubir los mismos PDF para volver a verlos. Se usa
+ * sessionStorage (no localStorage) porque son resultados de trabajo en
+ * curso: tiene sentido que sobrevivan a navegar entre módulos, no que
+ * persistan para siempre entre sesiones distintas del navegador.
+ */
+export function usePersistenciaExtractor(tipo) {
+  const key = `learnix_extractor_${tipo}`
+
+  const [resultados, setResultadosState] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem(key)
+      return raw ? JSON.parse(raw).resultados ?? [] : []
+    } catch {
+      return []
+    }
+  })
+  const [declaranteId, setDeclaranteIdState] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem(key)
+      return raw ? JSON.parse(raw).declaranteId ?? '' : ''
+    } catch {
+      return ''
+    }
+  })
+
+  function guardar(nuevosResultados, nuevoDeclaranteId) {
+    try {
+      sessionStorage.setItem(key, JSON.stringify({ resultados: nuevosResultados, declaranteId: nuevoDeclaranteId }))
+    } catch {
+      // Lote muy grande para la cuota de sessionStorage: se sigue viendo en
+      // pantalla, solo no sobrevive a cambiar de módulo. No es crítico.
+    }
+  }
+
+  function setResultados(actualizarOArray) {
+    setResultadosState(prev => {
+      const next = typeof actualizarOArray === 'function' ? actualizarOArray(prev) : actualizarOArray
+      guardar(next, declaranteId)
+      return next
+    })
+  }
+
+  function setDeclaranteId(nuevo) {
+    setDeclaranteIdState(nuevo)
+    guardar(resultados, nuevo)
+  }
+
+  return { resultados, setResultados, declaranteId, setDeclaranteId }
+}
+
+/**
+ * Progreso simulado para la subida por lote.
+ *
+ * El endpoint /lote procesa todos los PDF en paralelo en el backend
+ * (ThreadPoolExecutor) y responde una sola vez al terminar — no hay forma
+ * de saber "cuál" documento va a mitad de camino. La barra anterior fijaba
+ * `done=0` mientras esperaba la respuesta y saltaba a 100% de golpe: quedaba
+ * congelada en 0% todo el tiempo que tardaba el lote, y parecía trabada.
+ * Esta avanza sola hacia ~92% mientras se espera (sin prometer un progreso
+ * que no se puede medir) y solo llega a 100% cuando la respuesta llega de
+ * verdad.
+ */
+export function useProgresoSimulado() {
+  const [progress, setProgress] = useState(null)
+  const intervaloRef = useRef(null)
+
+  function limpiarIntervalo() {
+    if (intervaloRef.current) {
+      clearInterval(intervaloRef.current)
+      intervaloRef.current = null
+    }
+  }
+
+  function iniciar(total) {
+    limpiarIntervalo()
+    setProgress({ pct: 3, total, fase: 'procesando' })
+    intervaloRef.current = setInterval(() => {
+      setProgress(p => (p ? { ...p, pct: p.pct + (92 - p.pct) * 0.06 } : p))
+    }, 350)
+  }
+
+  function terminar() {
+    limpiarIntervalo()
+    setProgress(p => (p ? { ...p, pct: 100, fase: 'listo' } : p))
+  }
+
+  function limpiar() {
+    limpiarIntervalo()
+    setProgress(null)
+  }
+
+  useEffect(() => limpiarIntervalo, [])
+
+  return { progress, iniciar, terminar, limpiar }
+}
 
 /** Formato monetario salvadoreño, sin el símbolo (lo pone quien llama). */
 export function fmt(n) {
