@@ -1,13 +1,18 @@
 import { useRef, useState } from 'react'
 import { IconSubir } from './Icons'
 import ImportCenter from './ImportCenter'
+import ClienteSelector from './ClienteSelector'
+import { useClienteActivo } from '../services/clienteActivo'
 
 export default function PdfUploader({ onUpload, loading, multiple = false }) {
   const inputRef = useRef(null)
   const [files, setFiles] = useState([])
-  const [declaranteId, setDeclaranteId] = useState('')
-  const [nombreDeclarante, setNombreDeclarante] = useState('')
   const [dragging, setDragging] = useState(false)
+
+  const { clienteActivo, setClienteActivo } = useClienteActivo()
+  const [modoManual, setModoManual] = useState(false)
+  const [manualNit, setManualNit] = useState('')
+  const [manualNombre, setManualNombre] = useState('')
 
   function handleFiles(selected) {
     const validos = Array.from(selected).filter(f => {
@@ -37,37 +42,68 @@ export default function PdfUploader({ onUpload, loading, multiple = false }) {
     handleFiles(e.dataTransfer.files)
   }
 
+  const declaranteId = modoManual ? manualNit.trim() : (clienteActivo?.nit ?? '')
+  const nombreDeclarante = modoManual ? manualNombre.trim() : (clienteActivo?.nombre_comercial ?? '')
+
   function handleSubmit(e) {
     e.preventDefault()
-    if (!files.length || !declaranteId.trim()) return
-    onUpload(multiple ? files : files[0], declaranteId.trim(), nombreDeclarante.trim())
+    if (!files.length || !declaranteId) return
+    onUpload(multiple ? files : files[0], declaranteId, nombreDeclarante)
   }
 
-  const canSubmit = files.length > 0 && declaranteId.trim() && !loading
+  const canSubmit = files.length > 0 && !!declaranteId && !loading
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid sm:grid-cols-2 gap-3">
-        <div>
-          <label className="form-label">NIT del declarante *</label>
-          <input
-            className="input"
-            placeholder="06141503071023"
-            value={declaranteId}
-            onChange={e => setDeclaranteId(e.target.value)}
-            maxLength={14}
-            required
-          />
-        </div>
-        <div>
-          <label className="form-label">Nombre / Razón social</label>
-          <input
-            className="input"
-            placeholder="EMPRESA S.A. DE C.V."
-            value={nombreDeclarante}
-            onChange={e => setNombreDeclarante(e.target.value)}
-          />
-        </div>
+      {/* Cliente */}
+      <div>
+        <label className="form-label">Cliente *</label>
+
+        {modoManual ? (
+          <div className="space-y-2">
+            <div className="grid sm:grid-cols-2 gap-3">
+              <input
+                className="input"
+                placeholder="NIT — 06141503071023"
+                value={manualNit}
+                onChange={e => setManualNit(e.target.value)}
+                maxLength={14}
+              />
+              <input
+                className="input"
+                placeholder="Nombre / Razón social"
+                value={manualNombre}
+                onChange={e => setManualNombre(e.target.value)}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => { setModoManual(false); setManualNit(''); setManualNombre('') }}
+              className="text-xs text-fg-4 hover:text-fg-2 underline"
+            >
+              Elegir del directorio en vez de escribir
+            </button>
+          </div>
+        ) : clienteActivo ? (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-hairline bg-panel2/40 px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-sm text-fg truncate">{clienteActivo.nombre_comercial}</p>
+              <p className="text-xs text-fg-4 font-mono">{clienteActivo.nit}</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button type="button" onClick={() => setClienteActivo(null)} className="btn-ghost text-xs">
+                Cambiar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <ClienteSelector onSeleccionar={setClienteActivo} />
+            <button type="button" onClick={() => setModoManual(true)} className="text-xs text-fg-4 hover:text-fg-2 underline">
+              Cliente nuevo (no está en el directorio)
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Drop zone */}
