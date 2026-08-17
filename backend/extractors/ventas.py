@@ -20,7 +20,7 @@ from utils.ai_utils import (
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
 from utils.qa_utils import calcular_confianza
-from utils.dte_layout import ids_pareados, identificadores_emisor
+from utils.dte_layout import ids_pareados, identificadores_emisor, buscar_numero_control
 from utils.constants import (
     TIPOS_CONTRIBUYENTES,
     TIPOS_CONSUMIDOR,
@@ -279,23 +279,13 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
         ctrl        = ""
         num_control = ""
 
-        m_ctrl = re.search(
-            r"\b(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})\b",
-            t_clean, re.I
-        )
-        if not m_ctrl:
-            m_ctrl = re.search(
-                r"(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})(?=[^0-9]|$)",
-                t_no_sp
-            )
+        # Reconoce también el número partido por un salto de línea del PDF
+        # (prefijo al final de una línea, correlativo más adelante).
+        ctrl, tipo = buscar_numero_control(t_clean)
+        if not ctrl:
+            ctrl, tipo = buscar_numero_control(t_no_sp)
 
-        if m_ctrl:
-            ctrl        = m_ctrl.group(1).upper()
-            tipo        = m_ctrl.group(2) if m_ctrl.lastindex >= 2 else ""
-            # Si el match fue en t_no_sp, grupo 2 no existe, extraer del ctrl
-            if not tipo:
-                m_tipo_aux = re.search(r"DTE-(\d{2})", ctrl)
-                tipo = m_tipo_aux.group(1) if m_tipo_aux else ""
+        if ctrl:
             # Número de control sin guiones (para columna D del anexo)
             num_control = ctrl.replace("-", "")
 
