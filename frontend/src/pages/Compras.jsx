@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import PdfUploader from '../components/PdfUploader'
 import { procesarCompras, procesarComprasLote, exportarExcelCompras, guardarResultados } from '../services/api'
-import { fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado } from '../utils/dte'
+import { fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados } from '../utils/dte'
 import { IconCompras, IconExportar, IconCheck, IconAlerta } from '../components/Icons'
 
 const TIPOS_PERCEPCION = new Set(['03', '05', '06', '12'])
@@ -16,11 +16,12 @@ export default function Compras() {
   const [declaranteId, setDeclaranteId] = useState('')
   const [exportando,   setExportando]   = useState(false)
   const [tab,          setTab]          = useState(0)
+  const [aviso,        setAviso]        = useState(null)
 
   // ── upload ───────────────────────────────────────────────────────────────
 
   async function handleUpload(filesOrFile, dId) {
-    setLoading(true); setError(null); setProgress(null); setDeclaranteId(dId)
+    setLoading(true); setError(null); setAviso(null); setProgress(null); setDeclaranteId(dId)
     const isMultiple = Array.isArray(filesOrFile)
     try {
       let nuevos = []
@@ -34,8 +35,12 @@ export default function Compras() {
         const { data } = await procesarCompras(filesOrFile, dId)
         nuevos = [data]
       }
-      setResultados(prev => [...prev, ...nuevos])
-      guardarResultados('compras', dId, nuevos)
+      // Descarta lo que ya estaba: subir el mismo DTE dos veces (su PDF y su
+      // JSON, o lotes que se solapan) duplicaba la fila y el crédito fiscal.
+      const { lista, agregados, duplicados } = fusionarSinDuplicados(resultados, nuevos)
+      setResultados(lista)
+      setAviso(avisoDuplicados(duplicados))
+      guardarResultados('compras', dId, agregados)
     } catch (err) {
       const detail = err.response?.data?.detail
       setError(typeof detail === 'string' ? detail : JSON.stringify(detail ?? err.message))
@@ -161,6 +166,16 @@ export default function Compras() {
             <IconAlerta className="w-4 h-4" /> Error
           </p>
           <pre className="text-red-300 text-sm mt-1 whitespace-pre-wrap font-sans">{error}</pre>
+        </div>
+      )}
+
+      {/* Documentos repetidos omitidos */}
+      {aviso && (
+        <div className="card border-amber-800 bg-amber-900/15">
+          <p className="text-amber-400 text-sm flex items-start gap-2">
+            <IconAlerta className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{aviso}</span>
+          </p>
         </div>
       )}
 

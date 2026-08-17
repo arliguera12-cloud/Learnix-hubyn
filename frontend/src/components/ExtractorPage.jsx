@@ -2,7 +2,7 @@ import { useState } from 'react'
 import PdfUploader from './PdfUploader'
 import ResultadosTabla from './ResultadosTabla'
 import { exportarExcel, guardarResultados } from '../services/api'
-import { fmt, descargarBlob } from '../utils/dte'
+import { fmt, descargarBlob, fusionarSinDuplicados, avisoDuplicados } from '../utils/dte'
 import { IconExportar, IconAlerta } from './Icons'
 
 // Campos monetarios por tipo para el resumen financiero
@@ -32,10 +32,12 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
   const [progress,     setProgress]     = useState(null) // { done, total }
   const [declaranteId, setDeclaranteId] = useState('')
   const [exportando,   setExportando]   = useState(false)
+  const [aviso,        setAviso]        = useState(null)
 
   async function handleUpload(filesOrFile, dId, nombre) {
     setLoading(true)
     setError(null)
+    setAviso(null)
     setProgress(null)
     setDeclaranteId(dId)
 
@@ -66,10 +68,14 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
         nuevos = [data]
       }
 
-      setResultados(prev => [...prev, ...nuevos])
+      // Descarta lo que ya estaba: subir el mismo DTE dos veces (su PDF y su
+      // JSON, o lotes que se solapan) duplicaba la fila y el crédito fiscal.
+      const { lista, agregados, duplicados } = fusionarSinDuplicados(resultados, nuevos)
+      setResultados(lista)
+      setAviso(avisoDuplicados(duplicados))
 
-      // Guardar en Supabase en segundo plano
-      guardarResultados(tipo, dId, nuevos)
+      // Guardar en Supabase en segundo plano (solo lo realmente agregado)
+      guardarResultados(tipo, dId, agregados)
 
     } catch (err) {
       const detail = err.response?.data?.detail
@@ -97,6 +103,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
   function handleLimpiar() {
     setResultados([])
     setError(null)
+    setAviso(null)
     setProgress(null)
   }
 
@@ -151,6 +158,16 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
             <IconAlerta className="w-4 h-4" /> Error
           </p>
           <pre className="text-red-300 text-sm mt-1 whitespace-pre-wrap font-sans">{error}</pre>
+        </div>
+      )}
+
+      {/* Documentos repetidos omitidos */}
+      {aviso && (
+        <div className="card border-amber-800 bg-amber-900/15">
+          <p className="text-amber-400 text-sm flex items-start gap-2">
+            <IconAlerta className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{aviso}</span>
+          </p>
         </div>
       )}
 

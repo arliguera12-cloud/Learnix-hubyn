@@ -26,6 +26,62 @@ export function descargarBlob(blobData, nombre) {
 }
 
 /**
+ * Clave que identifica un DTE de forma única.
+ *
+ * El código de generación (UUID que asigna Hacienda) es único por documento:
+ * el mismo DTE subido como PDF y como JSON trae el mismo código. Si falta, se
+ * recurre al número de control, que también es irrepetible por emisor.
+ */
+function claveDocumento(registro) {
+  const r = registro || {}
+  const gen = String(r.gen || r.gen_sin_guiones || '').replace(/-/g, '').toUpperCase()
+  if (gen) return `gen:${gen}`
+  const ctrl = String(r.num_control || r.num_control_raw || '').replace(/-/g, '').toUpperCase()
+  if (ctrl) return `ctrl:${ctrl}`
+  return '' // Sin identificador no se puede afirmar que sea repetido.
+}
+
+/**
+ * Añade `nuevos` a `previos` descartando los que ya estaban.
+ *
+ * Es habitual subir el mismo DTE dos veces —el PDF y el JSON del mismo
+ * documento, o un lote que se solapa con otro anterior— y cada copia sumaba
+ * otra fila: los totales del anexo salían inflados y el crédito fiscal se
+ * contaba doble. Un documento sin código de generación ni número de control no
+ * se descarta, porque ahí no hay forma de afirmar que sea el mismo.
+ *
+ * Devuelve `{ lista, agregados, duplicados }`: la lista fusionada, los
+ * documentos realmente incorporados —que son los que deben persistirse— y los
+ * nombres de archivo omitidos, para avisar en vez de descartar en silencio.
+ */
+export function fusionarSinDuplicados(previos, nuevos) {
+  const vistos = new Set(previos.map(r => claveDocumento(r.registro)).filter(Boolean))
+  const agregados = []
+  const duplicados = []
+
+  for (const doc of nuevos) {
+    const clave = claveDocumento(doc.registro)
+    if (clave && vistos.has(clave)) {
+      duplicados.push(doc.filename || 'documento sin nombre')
+      continue
+    }
+    if (clave) vistos.add(clave)
+    agregados.push(doc)
+  }
+
+  return { lista: [...previos, ...agregados], agregados, duplicados }
+}
+
+/** Redacta el aviso de documentos repetidos, o null si no hubo ninguno. */
+export function avisoDuplicados(duplicados) {
+  if (!duplicados.length) return null
+  const n = duplicados.length
+  return n === 1
+    ? `«${duplicados[0]}» ya estaba en la lista: es el mismo DTE y no se agregó.`
+    : `${n} documentos ya estaban en la lista y no se agregaron: ${duplicados.join(', ')}`
+}
+
+/**
  * Normaliza el `estado` que devuelve el backend a 'ok' | 'revisar' | 'manual'.
  *
  * Los extractores emiten "OK" / "REVISAR" / "REVISION_MANUAL" según el score
