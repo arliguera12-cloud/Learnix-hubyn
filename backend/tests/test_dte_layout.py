@@ -15,7 +15,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from utils.dte_layout import ids_pareados, identificadores_emisor  # noqa: E402
+from utils.dte_layout import (  # noqa: E402
+    ids_pareados, identificadores_emisor, buscar_numero_control,
+)
 
 # Fragmento con el formato exacto que emite Hacienda (dos columnas).
 DTE_DOS_COLUMNAS = """\
@@ -68,6 +70,30 @@ caso("texto vacío → sin pares",
      ids_pareados(""), {})
 caso("emisor sin formato reconocido → exclusión vacía",
      identificadores_emisor("NIT: 0614-150307-102-3"), set())
+
+# ── Número de control partido por el salto de línea del PDF ────────────────
+# Caso real: el prefijo cierra la línea y el correlativo aparece más adelante,
+# detrás del texto de la columna vecina. Buscarlo solo contiguo descartaba el
+# documento con "No se detectó Número de Control válido".
+DTE_CONTROL_PARTIDO = """\
+OD EL SALVADOR LTDA, DE C.V. Código de Generación: A1CD945D-D065-4402-
+NIT: 06140711071030 ACCB-16F30B2027EA
+NRC: 1832035 Número de control: DTE-03-S001P005-
+OD EL SALVADOR LTDA, DE C.V. 000000000008829
+"""
+
+caso("control partido en dos líneas",
+     buscar_numero_control(DTE_CONTROL_PARTIDO),
+     ("DTE-03-S001P005-000000000008829", "03"))
+caso("control contiguo (caso habitual)",
+     buscar_numero_control("Número de Control : DTE-03-M001P001-000000000000097"),
+     ("DTE-03-M001P001-000000000000097", "03"))
+caso("sin número de control",
+     buscar_numero_control("TIQUETE: ODSACA481786\nNIT 06140711071030"),
+     ("", ""))
+caso("prefijo sin correlativo cerca",
+     buscar_numero_control("DTE-03-S001P005-" + "x" * 400 + "000000000008829"),
+     ("", ""))
 
 print()
 print("TODOS LOS CASOS PASAN" if not fallos else "FALLOS:\n  " + "\n  ".join(fallos))

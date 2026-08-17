@@ -21,6 +21,7 @@ from utils.ai_utils import (
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
 from utils.qa_utils import calcular_confianza
+from utils.dte_layout import buscar_numero_control
 from utils.constants import TIPOS_VALIDOS_COMPRAS, MAX_VALORES_LOOP_COMPRAS
 
 MAX_VALORES_LOOP = MAX_VALORES_LOOP_COMPRAS
@@ -427,16 +428,13 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
         ctrl        = ""
         num_control = ""
 
-        m_ctrl = re.search(r'(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})', t_clean, re.I)
-        if not m_ctrl:
-            m_ctrl = re.search(r'(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})', t_no_sp)
+        # Reconoce también el número partido por un salto de línea del PDF
+        # (prefijo al final de una línea, correlativo más adelante).
+        ctrl, tipo = buscar_numero_control(t_clean)
+        if not ctrl:
+            ctrl, tipo = buscar_numero_control(t_no_sp)
 
-        if m_ctrl:
-            ctrl = m_ctrl.group(1).upper()
-            tipo = m_ctrl.group(2) if m_ctrl.lastindex and m_ctrl.lastindex >= 2 else ""
-            if not tipo:
-                m_tipo = re.search(r'DTE-(\d{2})', ctrl)
-                tipo   = m_tipo.group(1) if m_tipo else ""
+        if ctrl:
             num_control = ctrl.replace("-", "")
 
         if not ctrl:

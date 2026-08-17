@@ -62,6 +62,49 @@ def ids_pareados(texto: str) -> dict[str, dict[str, str]]:
     return {"emisor": emisor, "receptor": receptor}
 
 
+# Número de control completo en una sola pieza: DTE-03-M001P001-000000000000097
+_CONTROL_COMPLETO = re.compile(r"(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})", re.I)
+
+# Solo el prefijo, cuando el correlativo quedó en otra línea:
+#   "Número de control: DTE-03-S001P005-"
+#   "OD EL SALVADOR LTDA, DE C.V.  000000000008829"
+_CONTROL_PREFIJO = re.compile(r"DTE-(\d{2})-([A-Z0-9]{1,20})-", re.I)
+
+# Correlativo suelto: 12 a 18 dígitos como palabra completa.
+_CORRELATIVO = re.compile(r"\b(\d{12,18})\b")
+
+# Margen para buscar el correlativo tras el prefijo. Cubre el texto de la
+# columna contigua que se cuela entre ambos al extraer un PDF a dos columnas,
+# sin llegar tan lejos como para capturar un número de otra sección.
+_VENTANA_CORRELATIVO = 240
+
+
+def buscar_numero_control(texto: str) -> tuple[str, str]:
+    """
+    Devuelve ``(numero_control, tipo_dte)`` o ``("", "")`` si no aparece.
+
+    Además del número completo reconoce el caso en que el salto de línea del
+    PDF parte el número en dos: el prefijo termina en guion al final de una
+    línea y el correlativo aparece más adelante, a menudo detrás del texto de
+    la columna vecina. Buscar solo la forma contigua descartaba esos DTE con
+    "No se detectó Número de Control válido".
+    """
+    texto = texto or ""
+
+    m = _CONTROL_COMPLETO.search(texto)
+    if m:
+        return m.group(1).upper(), m.group(2)
+
+    for m_pref in _CONTROL_PREFIJO.finditer(texto):
+        cola = texto[m_pref.end():m_pref.end() + _VENTANA_CORRELATIVO]
+        m_corr = _CORRELATIVO.search(cola)
+        if m_corr:
+            control = f"DTE-{m_pref.group(1)}-{m_pref.group(2).upper()}-{m_corr.group(1)}"
+            return control, m_pref.group(1)
+
+    return "", ""
+
+
 def identificadores_emisor(texto: str) -> set[str]:
     """
     Identificadores del emisor tal como aparecen en el documento.
