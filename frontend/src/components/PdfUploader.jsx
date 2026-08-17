@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { IconSubir } from './Icons'
+import ImportCenter from './ImportCenter'
 
 export default function PdfUploader({ onUpload, loading, multiple = false }) {
   const inputRef = useRef(null)
@@ -14,6 +15,20 @@ export default function PdfUploader({ onUpload, loading, multiple = false }) {
       return name.endsWith('.pdf') || name.endsWith('.json')
     })
     setFiles(validos)
+  }
+
+  /** Archivos traídos del Centro de importación (Drive/Gmail): se suman a los ya elegidos. */
+  function handleImportados(nuevos) {
+    setFiles(prev => {
+      const combinados = multiple ? [...prev, ...nuevos] : nuevos.slice(-1)
+      const vistos = new Set()
+      return combinados.filter(f => {
+        const clave = `${f.name}:${f.size}`
+        if (vistos.has(clave)) return false
+        vistos.add(clave)
+        return true
+      })
+    })
   }
 
   function handleDrop(e) {
@@ -82,6 +97,8 @@ export default function PdfUploader({ onUpload, loading, multiple = false }) {
           onChange={e => handleFiles(e.target.files)}
         />
       </div>
+
+      <ImportCenter onImportar={handleImportados} />
 
       <button type="submit" disabled={!canSubmit} className="btn-primary w-full py-2.5">
         {loading ? (

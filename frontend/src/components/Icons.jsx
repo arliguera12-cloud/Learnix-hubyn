@@ -135,6 +135,26 @@ export function IconSubir(props) {
   )
 }
 
+/** Nube — importación desde Google Drive. */
+export function IconNube(props) {
+  return (
+    <Svg {...props}>
+      <path d="M7.5 17.5a4 4 0 01-.5-7.97 5 5 0 019.62-1.68A3.75 3.75 0 0116.25 17.5H7.5z" />
+      <path d="M12 10.5v6M9.5 14l2.5-2.5 2.5 2.5" />
+    </Svg>
+  )
+}
+
+/** Correo — importación desde Gmail. */
+export function IconCorreo(props) {
+  return (
+    <Svg {...props}>
+      <path d="M3.75 5.75h16.5v12.5H3.75z" />
+      <path d="M3.75 6.5L12 13l8.25-6.5" />
+    </Svg>
+  )
+}
+
 /** Cerrar sesión — salida. */
 export function IconSalir(props) {
   return (

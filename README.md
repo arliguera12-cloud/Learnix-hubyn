@@ -38,7 +38,9 @@ backend/
 ├── routers/
 │   ├── procesamiento.py     ← POST /procesar/{ventas,compras,retenciones,sujetos-excluidos}
 │   │                           GET  /procesar/declarantes (todo requiere JWT de Supabase)
-│   └── exportar.py          ← POST /exportar/excel (requiere JWT de Supabase)
+│   ├── exportar.py          ← POST /exportar/excel (requiere JWT de Supabase)
+│   └── importar.py          ← POST /importar/drive/{listar,descargar}, /importar/gmail/buscar
+│                               (Centro de importación: trae PDF/JSON de Drive o Gmail; JWT de Supabase)
 ├── middleware/
 │   └── rate_limit.py        ← Rate limiting por IP, en memoria
 ├── schemas/
@@ -56,6 +58,8 @@ backend/
 │   ├── auth_dependency.py   ← Verificación del JWT de Supabase Auth
 │   ├── supabase_admin.py    ← Cliente Supabase (service role)
 │   ├── export_utils.py
+│   ├── drive_utils.py       ← Lectura de carpetas Drive públicas (Centro de importación)
+│   ├── gmail_utils.py       ← Búsqueda de adjuntos por IMAP (Centro de importación)
 │   ├── local_db.py          ← Directorio clientes/proveedores (tablas Supabase)
 │   ├── constants.py
 │   └── anexos_schema/       ← Definición de campos por anexo DGII
@@ -201,7 +205,8 @@ Si venías de una instalación con datos en `backend/data/*.json`, corre `script
 
 ## Pendiente / limpieza futura
 
-- `qa_utils.py`, `export_utils.py`, `gmail_utils.py`, `drive_utils.py`, `gemini_utils.py`, `rag_validator.py`, `nit_validator.py` en `backend/utils/` no están conectados a la cadena viva del backend (`main.py` → `routers` → `extractors` → `utils`). `qa_utils.py` tiene validadores matemáticos reales (`validar_montos_*`) pensados para conectarse a un futuro pipeline de confianza — no eliminar, solo quitar su `import streamlit`. El resto son candidatos a limpieza o a un futuro "Centro de Correos" (Gmail/Drive).
+- `export_utils.py`, `gemini_utils.py`, `rag_validator.py`, `nit_validator.py` en `backend/utils/` no están conectados a la cadena viva del backend (`main.py` → `routers` → `extractors` → `utils`). Candidatos a limpieza o a una futura conexión, según se decida caso por caso.
+- `qa_utils.py` (validadores matemáticos + `calcular_confianza`) y `gmail_utils.py`/`drive_utils.py` (Centro de importación) ya están conectados: el primero calcula el `estado`/`confianza` de cada extractor, los segundos alimentan `routers/importar.py` y el panel "Importar desde Drive o Gmail" de `PdfUploader.jsx`.
 - Rate limiting en memoria → Redis, si se escala a múltiples instancias de Railway.
 - Unificar `clientes_directorio`/`proveedores_directorio` con las tablas `clientes`/`proveedores` que ya usa el frontend (ver nota de arquitectura arriba) — requiere enhebrar `organizacion_id` por los extractors.
 - Sistema de diseño: los tokens de color/tipografía/radios de Certia (ContaSV) ya están aplicados vía `frontend/tailwind.config.js` + `frontend/src/index.css` (heredado por toda la UI), incluyendo los componentes editoriales (`.registro-seal`, `.rule-double`, `.stamp`).

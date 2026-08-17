@@ -151,4 +151,32 @@ export function getDeclarantes() {
   return api.get('/procesar/declarantes')
 }
 
+// ─── Centro de importación (Drive / Gmail) ─────────────────────────────────
+// Las credenciales solo viajan en el cuerpo del request; el backend no las
+// guarda, se usan una vez para hablar con Google y se descartan.
+
+export function importarDriveListar(apiKey, url, opts = {}) {
+  return api.post('/importar/drive/listar', {
+    api_key: apiKey,
+    url,
+    recursivo: opts.recursivo ?? true,
+    max_archivos: opts.maxArchivos ?? 200,
+  })
+}
+
+export function importarDriveDescargar(apiKey, archivos) {
+  return api.post('/importar/drive/descargar', { api_key: apiKey, archivos })
+}
+
+export function importarGmailBuscar(email, appPassword, opts = {}) {
+  return api.post('/importar/gmail/buscar', {
+    email,
+    app_password: appPassword,
+    remitente: opts.remitente ?? '',
+    texto: opts.texto ?? '',
+    dias: opts.dias ?? 30,
+    max_correos: opts.maxCorreos ?? 50,
+  })
+}
+
 export default api
