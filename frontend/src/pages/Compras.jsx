@@ -1,7 +1,10 @@
 import { useState, useMemo } from 'react'
 import PdfUploader from '../components/PdfUploader'
 import { procesarCompras, procesarComprasLote, exportarExcelCompras, guardarResultados } from '../services/api'
-import { fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados } from '../utils/dte'
+import {
+  fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados,
+  usePersistenciaExtractor, useProgresoSimulado,
+} from '../utils/dte'
 import { IconCompras, IconExportar, IconCheck, IconAlerta } from '../components/Icons'
 
 const TIPOS_PERCEPCION = new Set(['03', '05', '06', '12'])
@@ -9,28 +12,27 @@ const TIPOS_PERCEPCION = new Set(['03', '05', '06', '12'])
 // ── componente principal ───────────────────────────────────────────────────
 
 export default function Compras() {
-  const [resultados,   setResultados]   = useState([])
+  const { resultados, setResultados, declaranteId, setDeclaranteId } = usePersistenciaExtractor('compras')
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState(null)
-  const [progress,     setProgress]     = useState(null)
-  const [declaranteId, setDeclaranteId] = useState('')
   const [exportando,   setExportando]   = useState(false)
   const [tab,          setTab]          = useState(0)
   const [aviso,        setAviso]        = useState(null)
+  const { progress, iniciar: iniciarProgreso, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoSimulado()
 
   // ── upload ───────────────────────────────────────────────────────────────
 
   async function handleUpload(filesOrFile, dId) {
-    setLoading(true); setError(null); setAviso(null); setProgress(null); setDeclaranteId(dId)
+    setLoading(true); setError(null); setAviso(null); limpiarProgreso(); setDeclaranteId(dId)
     const isMultiple = Array.isArray(filesOrFile)
     try {
       let nuevos = []
       if (isMultiple) {
-        setProgress({ done: 0, total: filesOrFile.length, fase: 'enviando' })
+        iniciarProgreso(filesOrFile.length)
         const { data } = await procesarComprasLote(filesOrFile, dId)
         nuevos = data.resultados ?? []
         if (data.errores?.length) setError(data.errores.map(e => `${e.filename}: ${e.error}`).join('\n'))
-        setProgress({ done: filesOrFile.length, total: filesOrFile.length, fase: 'listo' })
+        terminarProgreso()
       } else {
         const { data } = await procesarCompras(filesOrFile, dId)
         nuevos = [data]
@@ -44,8 +46,10 @@ export default function Compras() {
     } catch (err) {
       const detail = err.response?.data?.detail
       setError(typeof detail === 'string' ? detail : JSON.stringify(detail ?? err.message))
+      limpiarProgreso()
     } finally {
-      setLoading(false); setProgress(null)
+      setLoading(false)
+      setTimeout(limpiarProgreso, 500)
     }
   }
 
@@ -125,11 +129,14 @@ export default function Compras() {
     <div className="max-w-6xl mx-auto space-y-5">
       {/* Cabecera */}
       <div>
-        <h2 className="text-2xl text-fg flex items-center gap-2.5">
-          <IconCompras className="w-6 h-6 text-accent" />
-          Extractor DTE — Compras
+        <p className="text-[0.65rem] uppercase tracking-[0.18em] text-fg-4 font-semibold mb-1">
+          Extractor DTE
+        </p>
+        <h2 className="text-3xl text-fg leading-none flex items-center gap-3">
+          <IconCompras className="w-7 h-7 text-accent" />
+          Compras
         </h2>
-        <p className="text-sm text-slate-400 mt-0.5">
+        <p className="text-sm text-fg-4 mt-2">
           Extrae CCF recibidos de proveedores (DTE-03, 05, 06, 11). Genera Anexo 3 para F-07.
         </p>
       </div>
@@ -144,17 +151,15 @@ export default function Compras() {
         <div className="card space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-slate-300">
-              {progress.fase === 'enviando'
-                ? `Enviando ${progress.total} PDF${progress.total !== 1 ? 's' : ''}…`
-                : `Procesando ${progress.done + 1} de ${progress.total}…`}
+              Procesando {progress.total} PDF{progress.total !== 1 ? 's' : ''} en paralelo…
             </span>
             <span className="text-slate-400 font-mono text-xs">
-              {Math.round((progress.done / progress.total) * 100)}%
+              {Math.round(progress.pct)}%
             </span>
           </div>
           <div className="h-1.5 bg-surface-700 rounded-full overflow-hidden">
-            <div className="h-full bg-brand-500 transition-all duration-300"
-              style={{ width: `${(progress.done / progress.total) * 100}%` }} />
+            <div className="h-full bg-brand-500 transition-all duration-300 ease-out"
+              style={{ width: `${progress.pct}%` }} />
           </div>
         </div>
       )}
@@ -408,11 +413,11 @@ export default function Compras() {
                           <p className="text-sm font-medium text-white truncate">
                             {d.nom_prov || d.nit_prov || r.filename || `Doc #${i + 1}`}
                           </p>
-                          <p className="text-xs text-slate-400 mt-0.5">{d.estado}</p>
-                          {d.motivos && (
-                            <p className="text-xs text-slate-500 mt-1">{
-                              Array.isArray(d.motivos) ? d.motivos.join(' · ') : d.motivos
-                            }</p>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {d.estado}{d.confianza != null && ` · confianza ${d.confianza}%`}
+                          </p>
+                          {d.detalle_confianza && (
+                            <p className="text-xs text-slate-500 mt-1">{d.detalle_confianza}</p>
                           )}
                         </div>
                         <div className="text-right shrink-0">
