@@ -28,6 +28,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
+from utils.dte_json import cargar_json
+
 try:
     import streamlit as st
 except ImportError:
@@ -299,7 +301,7 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
     ambigüedad de OCR/regex).
     """
     try:
-        data = json.loads(file_bytes.decode("utf-8-sig"))
+        data = cargar_json(file_bytes)
     except Exception as exc:
         return {"error_fatal": f"JSON inválido: {exc}"}
 
@@ -377,7 +379,7 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
     from utils.constants import TIPOS_VALIDOS_COMPRAS
 
     try:
-        data = json.loads(file_bytes.decode("utf-8-sig"))
+        data = cargar_json(file_bytes)
     except Exception as exc:
         return {"error_fatal": f"JSON inválido: {exc}"}
 
