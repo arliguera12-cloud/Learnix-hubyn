@@ -4,8 +4,6 @@ Cada endpoint recibe un PDF o (ventas/compras) un JSON firmado por Hacienda
 (multipart/form-data) y devuelve JSON estructurado con los datos extraídos,
 listos para guardarse en Supabase.
 """
-import json as _json
-
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
 from typing import List
@@ -17,6 +15,7 @@ from extractors.sujetos_excluidos import extraer_sujetos_nativo
 from schemas.procesamiento import DeclaranteFields
 from utils.auth_dependency import get_current_user
 from utils.concurrent_processor import procesar_json_nativo_ventas, procesar_json_nativo_compras
+from utils.dte_json import cargar_json as _cargar_json_dte
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -57,7 +56,9 @@ def _read_upload_bytes(file: UploadFile, permitir_json: bool = False) -> tuple[b
         if len(content) > _MAX_JSON_SIZE:
             raise HTTPException(status_code=400, detail="El archivo JSON excede 2MB")
         try:
-            _json.loads(content)
+            # Decodificación tolerante: hay emisores que entregan el DTE en
+            # Latin-1, y json.loads sobre bytes asume UTF-8.
+            _cargar_json_dte(content)
         except Exception:
             raise HTTPException(status_code=400, detail="El archivo no es un JSON válido")
         return content, "json"
@@ -93,6 +94,15 @@ def _handle_extractor_result(result: dict, tipo: str, filename: str, declarante_
         raise HTTPException(status_code=422, detail=result["error_tipo"])
     if "error" in result:
         raise HTTPException(status_code=422, detail=result["error"])
+    if "error_extraccion" in result:
+        # Excepción inesperada dentro del extractor. Sin esta comprobación el
+        # registro seguía adelante sin ningún campo y aparecía como una fila en
+        # blanco contada entre los documentos procesados, con el riesgo de
+        # llegar así al anexo exportado.
+        raise HTTPException(
+            status_code=422,
+            detail=f"No se pudo extraer el documento: {result['error_extraccion']}",
+        )
 
     # Separar campos internos de la respuesta al cliente
     campos_internos = {"_vision_campos", "_vision_alertas", "_vision_audit"}

@@ -7,10 +7,30 @@ oficial de Hacienda que el resto del pipeline no usa.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
-class DTEIdentificacion(BaseModel):
+class _ModeloDTE(BaseModel):
+    """
+    Base que trata un campo con valor `null` como ausente.
+
+    Hacienda no omite las claves opcionales: las envía con `null` (por ejemplo
+    `receptor.nrc` en un consumidor final). Declarar `nrc: str = ""` solo cubre
+    la clave ausente — con la clave presente y en `null`, Pydantic rechazaba el
+    documento entero con "Input should be a valid string". Al descartar los
+    nulos antes de validar, cada campo cae en su valor por defecto y los
+    obligatorios siguen fallando si de verdad faltan.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _descartar_nulos(cls, datos):
+        if isinstance(datos, dict):
+            return {k: v for k, v in datos.items() if v is not None}
+        return datos
+
+
+class DTEIdentificacion(_ModeloDTE):
     tipoDte: str
     numeroControl: str
     codigoGeneracion: str = ""
@@ -18,7 +38,7 @@ class DTEIdentificacion(BaseModel):
     horEmi: str = ""
 
 
-class DTEEmisor(BaseModel):
+class DTEEmisor(_ModeloDTE):
     nit: str = ""
     nrc: str = ""
     dui: str = ""
@@ -26,7 +46,7 @@ class DTEEmisor(BaseModel):
     nombre: str = ""
 
 
-class DTEReceptor(BaseModel):
+class DTEReceptor(_ModeloDTE):
     nit: str = ""
     nrc: str = ""
     dui: str = ""
@@ -34,13 +54,13 @@ class DTEReceptor(BaseModel):
     nombre: str = ""
 
 
-class DTETributo(BaseModel):
+class DTETributo(_ModeloDTE):
     codigo: str = ""
     descripcion: str = ""
     valor: float = 0.0
 
 
-class DTEResumen(BaseModel):
+class DTEResumen(_ModeloDTE):
     totalGravada: float = 0.0
     totalExenta: float = 0.0
     totalNoSuj: float = 0.0
@@ -49,14 +69,14 @@ class DTEResumen(BaseModel):
     tributos: list[DTETributo] = Field(default_factory=list)
 
 
-class DTESujetoExcluido(BaseModel):
+class DTESujetoExcluido(_ModeloDTE):
     nombre: str = ""
     documento: str = ""
     nit: str = ""
     dui: str = ""
 
 
-class DTEDocumento(BaseModel):
+class DTEDocumento(_ModeloDTE):
     """Modelo raíz — corresponde al contenido de `dteJson` en el JSON firmado por Hacienda."""
     identificacion: DTEIdentificacion
     emisor: DTEEmisor = Field(default_factory=DTEEmisor)

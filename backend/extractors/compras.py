@@ -45,6 +45,21 @@ PALABRAS_BASURA_NOMBRE = [
 
 BASURA_ESTRICTA = {"@", "EMAIL", "CORREO", ".COM", "WWW.", "HTTP", "FACTURA.GOB"}
 
+# Formas jurídicas que delatan una razón social. Se usan como pista para
+# aceptar una línea corta del bloque emisor; una línea sin ellas necesita
+# longitud suficiente para no confundirse con una etiqueta.
+#
+# Deliberadamente NO incluye palabras genéricas como "COMERCIAL" o "SERVICIOS":
+# aparecen en las etiquetas del propio formulario ("Nombre comercial:",
+# "Actividad económica: Servicios…") y harían pasar la etiqueta por un nombre.
+# Las formas jurídicas con puntuación ya las cubre `_SUFIJO_LEGAL`; esta lista
+# es solo un refuerzo para las escritas sin puntos.
+PALABRAS_COMERCIALES = (
+    "S.A.", "SA DE CV", "S.A. DE C.V.", "SA DE C.V.",
+    "LTDA", "S. EN C.", "S.A.S.", "DE C.V.", "DE CV", "Y CIA", "CIA.",
+    "ASOCIACION", "ASOCIACIÓN", "FUNDACION", "FUNDACIÓN", "COOPERATIVA",
+)
+
 PREFIJOS_DIRECCION = (
     "KM ", "KM.", "AV.", "AV ", "AVENIDA", "CALLE ", "PASAJE",
     "COLONIA", "COL.", "URB.", "URB ", "URBANIZACION", "URBANIZACIÓN",
@@ -127,10 +142,14 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
         partes = re.split(r'\s+[Nn]ombre\s+[Oo]\s+[Rr]az', s, maxsplit=1)
         s = partes[0]
         # Quitar etiquetas de campo al inicio
+        # El orden importa: la alternancia se resuelve con la primera que encaja,
+        # así que las etiquetas largas van antes que las cortas. Con "NOMBRE"
+        # delante, "Nombre comercial: CLIDENTE" perdía solo "Nombre" y el nombre
+        # del proveedor quedaba como "COMERCIAL: CLIDENTE".
         s = re.sub(
-            r'^[\s\-:]*(?:RAZ[OÓ]N\s*SOCIAL|NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|'
-            r'NOMBRE\s+COMERCIAL|EMISOR|DATOS\s+DEL\s+EMISOR)[\s:]*',
-            "", s, flags=re.I,           # ← CORREGIDO: reemplazo es "", no s
+            r'^[\s\-:]*(?:DATOS\s+DEL\s+EMISOR|NOMBRE\s+O\s+RAZ[OÓ]N\s+SOCIAL|'
+            r'NOMBRE\s+COMERCIAL|RAZ[OÓ]N\s*SOCIAL|NOMBRE|EMISOR)[\s:]*',
+            "", s, flags=re.I,
         ).strip()
         # CORTE_NOMBRE: quitar todo desde keywords contables en adelante
         s = CORTE_NOMBRE.sub("", s).strip()   # ← CORREGIDO: .sub("", s)

@@ -111,12 +111,15 @@ def extraer_nombre_receptor(texto_completo: str, pos_nit: int, cliente_activo: d
             if nombre_emisor and len(nombre_emisor) > 3:
                 s = re.compile(re.escape(nombre_emisor), re.I).sub("", s)
             s = re.split(r"(?i)(?:NOMBRE\s+O\s+RAZ[OÓ]N\s+SOCIAL|RAZ[OÓ]N\s+SOCIAL|CLIENTE)\s*[:\-]*\s*", s)[-1]
+            # Alternancia ordenada de más específica a más general: con "NOMBRE"
+            # delante, "Nombre comercial: X" perdía solo "Nombre" y dejaba
+            # "COMERCIAL: X" como nombre del receptor.
             s = re.sub(
-                r"^[\s\-:]*(?:NOMBRE(?:\s+O\s+RAZ[OÓ]N\s+SOCIAL)?|"
-                r"NOMBRE\s+COMERCIAL|RECEPTOR|ADQUIRIENTE|DATOS\s+DEL\s+RECEPTOR|"
-                r"DATOS\s+DEL\s+ADQUIRIENTE|NOMBRE\s+DEL\s+CLIENTE|"
-                r"CONTRIBUYENTE\s+RECEPTOR)[\s:]*",
-                s, flags=re.I
+                r"^[\s\-:]*(?:DATOS\s+DEL\s+RECEPTOR|DATOS\s+DEL\s+ADQUIRIENTE|"
+                r"NOMBRE\s+O\s+RAZ[OÓ]N\s+SOCIAL|NOMBRE\s+DEL\s+CLIENTE|"
+                r"NOMBRE\s+COMERCIAL|CONTRIBUYENTE\s+RECEPTOR|"
+                r"NOMBRE|RECEPTOR|ADQUIRIENTE)[\s:]*",
+                "", s, flags=re.I
             ).strip()
             s = CORTE_NOMBRE.sub("", s).strip()
             s = re.sub(r"^[-_.,;:\s]+|[-_.,;:\s]+$", "", s)
