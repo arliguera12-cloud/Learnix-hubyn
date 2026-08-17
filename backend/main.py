@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from middleware.rate_limit import rate_limit_middleware
-from routers import procesamiento, exportar
+from routers import procesamiento, exportar, importar
 
 app = FastAPI(
     title="Learnix DTE Hub API",
@@ -70,6 +70,7 @@ async def security_headers(request: Request, call_next):
 
 app.include_router(procesamiento.router, prefix="/procesar", tags=["Procesamiento DTEs"])
 app.include_router(exportar.router, prefix="/exportar", tags=["Exportación"])
+app.include_router(importar.router, prefix="/importar", tags=["Importación"])
 
 
 @app.get("/health", tags=["Sistema"])
