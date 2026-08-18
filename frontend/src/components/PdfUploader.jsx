@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { IconSubir, IconCerrar, IconArchivo } from './Icons'
 import ImportCenter from './ImportCenter'
 import ClienteSelector from './ClienteSelector'
@@ -10,7 +10,7 @@ function tamano(bytes) {
   return kb < 1024 ? `${kb.toFixed(0)} KB` : `${(kb / 1024).toFixed(1)} MB`
 }
 
-export default function PdfUploader({ onUpload, loading, multiple = false }) {
+export default function PdfUploader({ onUpload, loading, multiple = false, onClienteChange }) {
   const inputRef = useRef(null)
   const [files, setFiles] = useState([])
   const [dragging, setDragging] = useState(false)
@@ -19,6 +19,14 @@ export default function PdfUploader({ onUpload, loading, multiple = false }) {
   const [modoManual, setModoManual] = useState(false)
   const [manualNit, setManualNit] = useState('')
   const [manualNombre, setManualNombre] = useState('')
+
+  // Avisa al extractor que cambió de cliente para que vacíe la tabla que
+  // tenía en pantalla — si no, los documentos del cliente nuevo se sumaban
+  // a los del anterior en la misma tabla.
+  useEffect(() => {
+    onClienteChange?.(clienteActivo?.nit ?? null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteActivo?.nit])
 
   function handleFiles(selected) {
     const validos = Array.from(selected).filter(f => {
