@@ -72,7 +72,7 @@ export default function LandingPage() {
     <div className="min-h-screen bg-paper text-fg-3 paper-grain">
       {/* ═══ Masthead ═══ */}
       <div className="border-b border-hairline bg-panel">
-        <div className="max-w-6xl mx-auto px-5 py-2 flex items-center justify-between text-[0.65rem]
+        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-2 flex items-center justify-between text-[0.65rem]
                         uppercase tracking-[0.16em] text-fg-4 font-mono">
           <span className="shrink-0">№ 001 · Edición del sistema</span>
           <span className="hidden sm:block shrink-0">Publicado en El Salvador</span>
@@ -82,7 +82,7 @@ export default function LandingPage() {
 
       {/* ═══ Nav ═══ */}
       <header className="sticky top-0 z-30 border-b border-hairline bg-paper/95 backdrop-blur-sm">
-        <div className="max-w-6xl mx-auto px-5 py-3.5 flex items-center justify-between gap-4">
+        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-3.5 flex items-center justify-between gap-4">
           <div className="flex items-baseline gap-2 shrink-0">
             <IconSeccion className="text-2xl text-accent" />
             <span className="font-display text-xl text-fg leading-none">Learnix</span>
@@ -105,11 +105,11 @@ export default function LandingPage() {
       </header>
 
       {/* ═══ Hero ═══ */}
-      <section className="max-w-6xl mx-auto px-5 pt-16 pb-16 md:pt-24 md:pb-24">
+      <section className="max-w-[100rem] mx-auto px-5 lg:px-12 pt-16 pb-16 md:pt-24 md:pb-24">
         <div className="grid md:grid-cols-[1.15fr_1fr] gap-12 md:gap-16 items-center">
           {/* Titular */}
-          <h1 className="animate-rise text-[3rem] leading-[0.98] sm:text-[4.25rem] sm:leading-[0.94]
-                         md:text-[5.5rem] md:leading-[0.92] text-fg tracking-[-0.02em]">
+          <h1 className="animate-rise text-[3.25rem] leading-[0.96] sm:text-[5rem] sm:leading-[0.92]
+                         md:text-[6.5rem] lg:text-[7.5rem] md:leading-[0.9] text-fg tracking-[-0.02em]">
             Tus DTE,
             <span className="block font-display italic font-medium text-accent2">
               por fin,
@@ -164,7 +164,7 @@ export default function LandingPage() {
       </section>
 
       {/* ═══ Módulos ═══ */}
-      <section id="modulos" className="max-w-6xl mx-auto px-5 py-20 md:py-24 scroll-mt-16">
+      <section id="modulos" className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 md:py-24 scroll-mt-16">
         <div className="mb-10 animate-fade grid md:grid-cols-[auto_1fr] md:items-end gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.16em] text-accent font-semibold mb-2">
@@ -229,7 +229,7 @@ export default function LandingPage() {
 
       {/* ═══ Cómo funciona ═══ */}
       <section id="procedimiento" className="border-t border-hairline scroll-mt-16">
-        <div className="max-w-6xl mx-auto px-5 py-20 md:py-24">
+        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 md:py-24">
           <div className="mb-14 animate-fade">
             <p className="text-xs uppercase tracking-[0.16em] text-accent font-semibold mb-2">
               Procedimiento
@@ -258,7 +258,7 @@ export default function LandingPage() {
 
       {/* ═══ CTA final ═══ */}
       <section className="border-t border-hairline bg-panel2/50">
-        <div className="max-w-6xl mx-auto px-5 py-20 text-center animate-fade">
+        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 text-center animate-fade">
           <div className="w-24 h-24 mx-auto mb-6 text-accent">
             <SelloCircular />
           </div>
@@ -274,7 +274,7 @@ export default function LandingPage() {
 
       {/* ═══ Footer ═══ */}
       <footer className="border-t border-hairline">
-        <div className="max-w-6xl mx-auto px-5 py-6 flex flex-wrap items-center justify-between gap-2
+        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-6 flex flex-wrap items-center justify-between gap-2
                         text-xs text-fg-4">
           <span>Learnix DTE Hub · El Salvador · {new Date().getFullYear()}</span>
           <span className="font-mono uppercase tracking-[0.12em]">Sistema de extracción de DTE</span>

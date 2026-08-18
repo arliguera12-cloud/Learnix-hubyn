@@ -7,6 +7,12 @@ import { SelloCircular, IconSeccion, IconAlerta } from '../components/Icons'
 const MAX_INTENTOS = 5
 const BLOQUEO_MS   = 5 * 60 * 1000 // 5 minutos
 
+const ESTADISTICAS = [
+  ['13%', 'IVA El Salvador'],
+  ['4', 'Módulos DTE'],
+  ['USD', 'Dólar americano'],
+]
+
 export default function Login() {
   const navigate = useNavigate()
   const { session, loading: authLoading } = useAuth()
@@ -78,52 +84,90 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-paper flex flex-col paper-grain">
-      {/* Masthead — mismo registro editorial que la portada */}
-      <div className="border-b border-hairline bg-panel shrink-0">
-        <div className="max-w-6xl mx-auto px-5 py-2 flex items-center justify-between text-[0.65rem]
-                        uppercase tracking-[0.16em] text-fg-4 font-mono">
-          <Link to="/" className="flex items-baseline gap-1.5 hover:text-accent transition-colors">
-            <IconSeccion className="text-sm text-accent" />
-            <span>Learnix DTE Hub</span>
-          </Link>
-          <span className="hidden sm:block">Acceso registrado</span>
-          <ThemeToggle className="text-fg-4 -my-1" />
+    <div className="min-h-screen flex flex-col lg:flex-row">
+      {/* Panel izquierdo — editorial, siempre oscuro (mismo registro que el sidebar) */}
+      <div className="hidden lg:flex lg:w-1/2 xl:w-[55%] bg-sb-bg text-sb-txt flex-col justify-between p-14 relative overflow-hidden shrink-0">
+        <Link to="/" className="flex items-baseline gap-1.5 text-sb-txt-hi hover:text-accent transition-colors w-fit">
+          <IconSeccion className="text-xl text-accent" />
+          <span className="font-display text-lg">Learnix DTE Hub</span>
+        </Link>
+
+        <div>
+          <p className="text-[0.65rem] uppercase tracking-[0.2em] text-sb-txt-mute font-semibold mb-4">
+            Bienvenido de vuelta
+          </p>
+          <h2 className="font-display text-5xl xl:text-6xl leading-[1.05] text-sb-txt-hi">
+            Tus DTE,<br />
+            <span className="italic text-accent">por fin,</span><br />
+            en orden.
+          </h2>
+          <p className="text-sb-txt mt-6 max-w-sm leading-relaxed">
+            Continuá donde lo dejaste. Tus clientes, tus extracciones y tus
+            anexos — todo tal como los dejaste.
+          </p>
+        </div>
+
+        <div className="border-t border-sb-hair pt-6 grid grid-cols-3 gap-4">
+          {ESTADISTICAS.map(([valor, label]) => (
+            <div key={label}>
+              <p className="text-2xl font-display text-sb-txt-hi leading-none">{valor}</p>
+              <p className="text-[0.6rem] uppercase tracking-wider text-sb-txt-mute mt-1.5">{label}</p>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="flex-1 relative flex items-center justify-center p-4 overflow-hidden ledger-paper">
-        {/* Marca de agua editorial de fondo */}
-        <div className="pointer-events-none select-none absolute inset-0 flex items-center justify-center">
-          <span className="font-display text-[26vw] leading-none text-fg/[0.045] whitespace-nowrap">
-            Learnix
-          </span>
+      {/* Panel derecho — formulario */}
+      <div className="flex-1 bg-paper paper-grain flex flex-col min-h-screen">
+        {/* Masthead compacto — solo en mobile/tablet, el panel izquierdo ya trae la marca en desktop */}
+        <div className="border-b border-hairline bg-panel shrink-0 lg:hidden">
+          <div className="px-5 py-2 flex items-center justify-between text-[0.65rem]
+                          uppercase tracking-[0.16em] text-fg-4 font-mono">
+            <Link to="/" className="flex items-baseline gap-1.5 hover:text-accent transition-colors">
+              <IconSeccion className="text-sm text-accent" />
+              <span>Learnix DTE Hub</span>
+            </Link>
+            <ThemeToggle className="text-fg-4 -my-1" />
+          </div>
         </div>
 
-        <div className="w-full max-w-sm relative animate-rise py-10">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-1.5 text-xs text-fg-4 hover:text-accent
-                       transition-colors duration-150 mb-6"
-          >
-            ← Volver al inicio
-          </Link>
-
-          {/* Logo / Header */}
-          <div className="text-center mb-8">
-            <div className="w-24 h-24 mx-auto mb-4 text-accent">
-              <SelloCircular />
-            </div>
-            <h1 className="text-3xl text-fg leading-none">Learnix DTE Hub</h1>
-            <div className="rule-double max-w-[160px] mx-auto" />
-            <p className="text-sm text-fg-3 mt-1">Sistema de extracción de DTE — El Salvador</p>
+        <div className="flex-1 relative flex items-center justify-center p-6 sm:p-10 overflow-hidden ledger-paper">
+          {/* Marca de agua editorial de fondo */}
+          <div className="pointer-events-none select-none absolute inset-0 flex items-center justify-center">
+            <span className="font-display text-[26vw] lg:text-[16vw] leading-none text-fg/[0.045] whitespace-nowrap">
+              Learnix
+            </span>
           </div>
 
-          <div className="card relative">
-            <span className="absolute -top-3 left-5 bg-panel px-2 text-[0.65rem] uppercase
-                              tracking-[0.14em] text-fg-4 font-semibold">
-              Acceso registrado
-            </span>
+          <div className="w-full max-w-sm relative animate-rise py-8">
+            <div className="hidden lg:flex justify-end mb-10">
+              <ThemeToggle className="text-fg-4" />
+            </div>
+            <Link
+              to="/"
+              className="lg:hidden inline-flex items-center gap-1.5 text-xs text-fg-4 hover:text-accent
+                         transition-colors duration-150 mb-6"
+            >
+              ← Volver al inicio
+            </Link>
+
+            <div className="lg:hidden text-center mb-8">
+              <div className="w-24 h-24 mx-auto mb-4 text-accent">
+                <SelloCircular />
+              </div>
+              <h1 className="text-3xl text-fg leading-none">Learnix DTE Hub</h1>
+              <div className="rule-double max-w-[160px] mx-auto" />
+            </div>
+
+            <p className="text-[0.65rem] uppercase tracking-[0.2em] text-fg-4 font-semibold mb-3">
+              Acceso · Autenticación
+            </p>
+            <h1 className="hidden lg:block text-4xl text-fg leading-[1.05] mb-3">
+              Iniciar<br />
+              <span className="italic text-accent2">sesión.</span>
+            </h1>
+            <p className="text-sm text-fg-3 mb-8">Ingresá tus credenciales para continuar.</p>
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="form-label" htmlFor="login-email">Correo electrónico</label>
@@ -167,14 +211,14 @@ export default function Login() {
                 disabled={bloqueado || loading}
                 className="btn-primary w-full py-2.5"
               >
-                {loading ? 'Ingresando…' : bloqueado ? `Bloqueado (${restante}s)` : 'Ingresar'}
+                {loading ? 'Ingresando…' : bloqueado ? `Bloqueado (${restante}s)` : 'Entrar al sistema →'}
               </button>
             </form>
-          </div>
 
-          <p className="text-center text-xs text-fg-4 mt-6 tracking-wide">
-            Learnix · El Salvador · {new Date().getFullYear()}
-          </p>
+            <p className="text-center text-xs text-fg-4 mt-8 tracking-wide">
+              Learnix · El Salvador · {new Date().getFullYear()}
+            </p>
+          </div>
         </div>
       </div>
     </div>
