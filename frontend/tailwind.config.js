@@ -134,6 +134,13 @@ export default {
         mono: ["'JetBrains Mono'", "'Menlo'", "'Consolas'", 'monospace'],
       },
       borderRadius: {
+        // Radio casi recto en toda la app — "botones que parecen boletos
+        // impresos, no burbujas de app" (motivo de marca documentado en el
+        // sistema de diseño de ContaSV). rounded-full queda intacto: el
+        // círculo se reserva para el sello y los íconos de feature.
+        DEFAULT: '2px',
+        sm: '2px',
+        md: '2px',
         lg: '2px',
         xl: '3px',
       },
