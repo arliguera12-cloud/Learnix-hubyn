@@ -109,7 +109,7 @@ export default function LandingPage() {
         <div className="grid md:grid-cols-[1.15fr_1fr] gap-12 md:gap-16 items-center">
           {/* Titular */}
           <h1 className="animate-rise text-[3.25rem] leading-[0.96] sm:text-[5rem] sm:leading-[0.92]
-                         md:text-[6.5rem] lg:text-[7.5rem] md:leading-[0.9] text-fg tracking-[-0.02em]">
+                         md:text-[7rem] lg:text-[8.75rem] md:leading-[0.9] text-fg tracking-[-0.045em]">
             Tus DTE,
             <span className="block font-display italic font-medium text-accent2">
               por fin,
