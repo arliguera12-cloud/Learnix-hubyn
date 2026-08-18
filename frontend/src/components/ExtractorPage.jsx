@@ -36,6 +36,14 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
   const [aviso,        setAviso]        = useState(null)
   const { progress, iniciar: iniciarProgreso, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoSimulado()
 
+  // Cambiar de cliente en el selector vacía la tabla de inmediato — antes
+  // quedaba la del cliente anterior en pantalla hasta la próxima extracción,
+  // y esa extracción terminaba sumando los documentos de ambos clientes.
+  function handleClienteChange(nuevoNit) {
+    if (nuevoNit === declaranteId) return
+    setResultados([]); setError(null); setAviso(null)
+  }
+
   async function handleUpload(filesOrFile, dId, nombre) {
     setLoading(true)
     setError(null)
@@ -72,7 +80,10 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
 
       // Descarta lo que ya estaba: subir el mismo DTE dos veces (su PDF y su
       // JSON, o lotes que se solapan) duplicaba la fila y el crédito fiscal.
-      const { lista, agregados, duplicados } = fusionarSinDuplicados(resultados, nuevos)
+      // Si el declarante cambió desde la última subida, arranca de cero en
+      // vez de mezclar documentos de dos clientes distintos en una tabla.
+      const base = dId === declaranteId ? resultados : []
+      const { lista, agregados, duplicados } = fusionarSinDuplicados(base, nuevos)
       setResultados(lista)
       setAviso(avisoDuplicados(duplicados))
 
@@ -132,7 +143,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
 
       {/* Uploader */}
       <div className="card">
-        <PdfUploader onUpload={handleUpload} loading={loading} multiple={!!loteApiFn} />
+        <PdfUploader onUpload={handleUpload} onClienteChange={handleClienteChange} loading={loading} multiple={!!loteApiFn} />
       </div>
 
       {/* Barra de progreso */}
