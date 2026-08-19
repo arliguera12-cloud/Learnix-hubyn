@@ -261,7 +261,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         }
         _confianza_pre = calcular_confianza(_campos_pre_ia, "retenciones")
         if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
-            _campos_act = {"fecha": fecha, "nit_prov": nit_prov}
+            _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "base": base, "ret": ret}
             _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
             _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
                 _texto_ia,
@@ -273,6 +273,16 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 fecha    = _corr_dict["fecha"]
             if _corr_dict.get("nit_prov"):
                 nit_prov = _corr_dict["nit_prov"]
+            if _corr_dict.get("base"):
+                base = _corr_dict["base"]
+            if _corr_dict.get("ret"):
+                ret = _corr_dict["ret"]
+            # Si la IA corrigió un solo lado del par base/1%, recalcula el otro
+            # en vez de dejarlos inconsistentes entre sí.
+            if _corr_dict.get("base") and not _corr_dict.get("ret") and ret == 0:
+                ret = round(base * 0.01, 2)
+            elif _corr_dict.get("ret") and not _corr_dict.get("base") and base == 0:
+                base = round(ret * 100, 2)
 
         # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
         try:

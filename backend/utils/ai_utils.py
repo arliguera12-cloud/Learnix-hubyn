@@ -399,10 +399,12 @@ AGENTE RETENEDOR:
   NIT   : {nit_cliente}
   Nombre: {nom_cliente}
 
-CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores):
-  fecha_emision  : "{campos.get('fecha', '')}"
-  nit_proveedor  : "{campos.get('nit_prov', '')}"
-  nombre_sujeto  : "{campos.get('nom_prov', '')}"
+CAMPOS EXTRAÍDOS POR REGEX (pueden tener errores, 0 = no encontrado):
+  fecha_emision      : "{campos.get('fecha', '')}"
+  nit_proveedor      : "{campos.get('nit_prov', '')}"
+  nombre_sujeto      : "{campos.get('nom_prov', '')}"
+  base (monto sujeto): {campos.get('base', 0)}
+  ret (1% retenido)  : {campos.get('ret', 0)}
 
 TEXTO DEL PDF:
 {texto_pdf[:6000]}
@@ -410,10 +412,16 @@ TEXTO DEL PDF:
 {_ejemplos}
 {_INSTRUCCIONES_COT}
 
-CAMPOS A VERIFICAR:
+CAMPOS A VERIFICAR (usa null si ya está correcto o no aparece):
   • fecha   : Fecha de EMISIÓN en formato DD/MM/YYYY
   • nit_prov: NIT del SUJETO RETENIDO (14 dígitos); NO puede ser {nit_cliente}
   • nom_prov: Razón social del SUJETO RETENIDO; NO puede ser "{nom_cliente}" ni metadata
+  • base    : Monto sujeto a retención — base imponible ANTES de aplicar el 1% (número); null si el regex ya lo obtuvo
+  • ret     : IVA retenido — el 1% ya calculado (número); null si el regex ya lo obtuvo
+  IMPORTANTE: extrae montos solo si el valor del campo en "CAMPOS EXTRAÍDOS" es 0 o vacío.
+  Verifica siempre: ret ≈ base × 0.01 (tolerancia ±$0.02). Si el documento trae varios montos en
+  dólares, "base" y "ret" son un PAR que cumple esa proporción — no confundas "base" con el total
+  de la factura original ni con otros montos que aparezcan cerca.
 {_FORMATO_JSON_BASE}
 Estructura requerida:
 {{
@@ -421,6 +429,8 @@ Estructura requerida:
   "fecha": "DD/MM/YYYY o null",
   "nit_prov": "14 dígitos o null",
   "nom_prov": "nombre del sujeto retenido o null",
+  "base": 0.0,
+  "ret": 0.0,
   "correcciones": ["descripción de cada campo modificado"],
   "auditoria_ia": {{"modelo_utilizado": "llama-3.3-70b-versatile", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
 }}"""
@@ -939,6 +949,11 @@ def _extraer_campos_corregidos(resultado: dict, campos_actuales: dict, tipo_dte:
         nit = _validar_nit(resultado.get("nit_prov"), campos_actuales.get("nit_prov", ""), excluir)
         if nit and len(nit) == 14:
             campos_corr["nit_prov"] = nit
+        # Montos: aplicar solo cuando el regex devolvió 0 (mismo criterio que compras)
+        for campo_monto in ("base", "ret"):
+            val_ia = normalizar_monto_ia(resultado.get(campo_monto))
+            if val_ia is not None and val_ia > 0 and float(campos_actuales.get(campo_monto, 0) or 0) == 0:
+                campos_corr[campo_monto] = round(val_ia, 2)
 
     elif tipo_dte == "sujetos_excluidos":
         nom = _validar_nombre(resultado.get("nom_sujeto"), campos_actuales.get("nom_sujeto", ""))
