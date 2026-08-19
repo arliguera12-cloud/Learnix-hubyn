@@ -10,9 +10,10 @@ function tamano(bytes) {
   return kb < 1024 ? `${kb.toFixed(0)} KB` : `${(kb / 1024).toFixed(1)} MB`
 }
 
-// Mismo tope que el backend (routers/procesamiento.py): con lotes más
-// grandes la conexión se corta antes de terminar de procesar.
-const MAX_LOTE = 40
+// A partir de este tamaño el lote se sube en varias tandas (ver
+// subirLoteEnTandas en utils/dte.jsx) — solo para avisarle al usuario que va
+// a tardar más, no para bloquear el envío.
+const TANDA_AVISO = 40
 
 export default function PdfUploader({ onUpload, loading, multiple = false, onClienteChange }) {
   const inputRef = useRef(null)
@@ -73,8 +74,8 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
     onUpload(multiple ? files : files[0], declaranteId, nombreDeclarante)
   }
 
-  const loteExcedido = multiple && files.length > MAX_LOTE
-  const canSubmit = files.length > 0 && !!declaranteId && !loading && !loteExcedido
+  const loteGrande = multiple && files.length > TANDA_AVISO
+  const canSubmit = files.length > 0 && !!declaranteId && !loading
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -161,10 +162,10 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
           />
         </div>
 
-        {loteExcedido && (
-          <p className="mt-2 text-xs text-red-400">
-            Máximo {MAX_LOTE} archivos por lote (elegiste {files.length}). Subí en tandas más
-            chicas — con lotes muy grandes la conexión se corta antes de terminar.
+        {loteGrande && (
+          <p className="mt-2 text-xs text-fg-4">
+            {files.length} archivos — se van a subir en tandas de {TANDA_AVISO} para no saturar
+            la conexión. Puede tardar varios minutos, no cierres esta pestaña.
           </p>
         )}
 

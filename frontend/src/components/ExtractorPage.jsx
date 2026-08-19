@@ -4,7 +4,7 @@ import ResultadosTabla from './ResultadosTabla'
 import { exportarExcel, guardarResultados } from '../services/api'
 import {
   fmt, descargarBlob, fusionarSinDuplicados, avisoDuplicados,
-  usePersistenciaExtractor, useProgresoSimulado,
+  usePersistenciaExtractor, useProgresoSimulado, subirLoteEnTandas,
 } from '../utils/dte'
 import { IconExportar, IconAlerta } from './Icons'
 
@@ -34,7 +34,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
   const [error,        setError]        = useState(null)
   const [exportando,   setExportando]   = useState(false)
   const [aviso,        setAviso]        = useState(null)
-  const { progress, iniciar: iniciarProgreso, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoSimulado()
+  const { progress, iniciar: iniciarProgreso, avanzarA, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoSimulado()
 
   // Cambiar de cliente en el selector vacía la tabla de inmediato — antes
   // quedaba la del cliente anterior en pantalla hasta la próxima extracción,
@@ -57,12 +57,17 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
       let nuevos = []
 
       if (isMultiple && loteApiFn) {
-        // Un solo request con todos los PDFs, procesados en paralelo en el backend
+        // Se sube en tandas de a lo sumo TAMANO_TANDA (el backend las procesa
+        // en paralelo internamente) — así un lote de cientos de PDFs no choca
+        // con el límite por request ni con el timeout del proxy.
         iniciarProgreso(filesOrFile.length)
-        const { data } = await loteApiFn(filesOrFile, dId, nombre)
-        nuevos = data.resultados ?? []
-        if (data.errores?.length) {
-          setError(data.errores.map(e => `${e.filename}: ${e.error}`).join('\n'))
+        const { resultados: res, errores } = await subirLoteEnTandas(
+          filesOrFile, loteApiFn, dId, nombre,
+          (procesados, total) => avanzarA(Math.round((procesados / total) * 92)),
+        )
+        nuevos = res
+        if (errores.length) {
+          setError(errores.map(e => `${e.filename}: ${e.error}`).join('\n'))
         }
         terminarProgreso()
       } else if (isMultiple) {
