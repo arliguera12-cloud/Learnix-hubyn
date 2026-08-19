@@ -81,7 +81,7 @@
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: theme('fontFamily.display');
-    font-weight: 400;
+    font-weight: 500;
     letter-spacing: -0.015em;
   }
   ::-webkit-scrollbar {
