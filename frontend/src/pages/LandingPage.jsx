@@ -30,21 +30,21 @@ const MODULOS = [
     num: '02',
     Icon: IconCompras,
     titulo: 'Compras',
-    detalle: 'CCF recibidos de proveedores.',
+    detalle: 'CCF recibidos de proveedores, con crédito fiscal calculado automáticamente.',
     ref: 'Anexo 3',
   },
   {
     num: '03',
     Icon: IconRetenciones,
     titulo: 'Retenciones',
-    detalle: 'Comprobantes de retención.',
+    detalle: 'Comprobantes de retención listos para la casilla exacta del formulario.',
     ref: 'DTE-07 — Casilla 162',
   },
   {
     num: '04',
     Icon: IconSujetos,
     titulo: 'Sujetos Excluidos',
-    detalle: 'Compras a sujetos excluidos de IVA.',
+    detalle: 'Compras a sujetos excluidos de IVA, clasificadas sin revisión manual.',
     ref: 'DTE-14 — Casilla 66',
   },
 ]
@@ -58,12 +58,12 @@ const PASOS = [
   {
     num: 'II',
     titulo: 'La IA extrae y verifica',
-    detalle: 'Lectura nativa del DTE más verificación con IA y un puntaje de confianza por documento.',
+    detalle: 'Lectura nativa del DTE más verificación con IA y un puntaje de confianza por documento, así sabés qué revisar antes de declarar.',
   },
   {
     num: 'III',
     titulo: 'Exporta tus anexos',
-    detalle: 'Anexos y formularios listos para tu declaración, sin captura manual.',
+    detalle: 'Anexos y formularios listos para tu declaración en un clic, sin abrir Excel ni tipear un solo número.',
   },
 ]
 
@@ -109,9 +109,9 @@ export default function LandingPage() {
         <div className="grid md:grid-cols-[1.15fr_1fr] gap-12 md:gap-16 items-center">
           {/* Titular */}
           <h1 className="animate-rise text-[3.25rem] leading-[0.96] sm:text-[5rem] sm:leading-[0.92]
-                         md:text-[7rem] lg:text-[8.75rem] md:leading-[0.9] text-fg tracking-[-0.045em]">
+                         md:text-[7rem] lg:text-[8.75rem] md:leading-[0.9] text-fg font-black tracking-[-0.045em]">
             Tus DTE,
-            <span className="block font-display italic font-medium text-accent2">
+            <span className="block font-display italic font-bold text-accent2">
               por fin,
             </span>
             <span className="marker">en orden.</span>
@@ -128,12 +128,28 @@ export default function LandingPage() {
             </p>
             <p className="text-lg md:text-xl text-fg-3 leading-relaxed font-display">
               Un extractor de DTE pensado desde{' '}
-              <strong className="text-accent2 font-semibold">El Salvador</strong> — lee el
-              documento firmado por Hacienda, no una plantilla genérica. Ventas, compras,
-              retenciones y sujetos excluidos, con{' '}
-              <strong className="text-accent2 font-semibold">anexos listos</strong> para
-              declarar. Nada de captura manual.
+              <strong className="text-accent2 font-semibold">El Salvador</strong>: lee el
+              documento firmado por Hacienda campo por campo, no adivina con una plantilla
+              genérica. Subís el PDF o el JSON y en segundos tenés{' '}
+              <strong className="text-accent2 font-semibold">tus anexos de IVA listos</strong>{' '}
+              para declarar — ventas, compras, retenciones y sujetos excluidos, sin tipear un
+              solo número.
             </p>
+
+            <div className="mt-6 grid grid-cols-3 gap-4 max-w-sm">
+              {[
+                ['4', 'Anexos cubiertos'],
+                ['0', 'Captura manual'],
+                ['seg.', 'Por documento'],
+              ].map(([valor, label]) => (
+                <div key={label}>
+                  <p className="font-display text-2xl text-fg leading-none">{valor}</p>
+                  <p className="text-[0.65rem] uppercase tracking-[0.1em] text-fg-4 mt-1 leading-tight">
+                    {label}
+                  </p>
+                </div>
+              ))}
+            </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link to="/login" className="btn-primary py-2.5 px-6">
@@ -264,7 +280,8 @@ export default function LandingPage() {
           </div>
           <h2 className="text-3xl md:text-4xl text-fg mb-2">Abre tu registro</h2>
           <p className="text-sm text-fg-3 mb-8 max-w-md mx-auto">
-            Ingresa con tu cuenta para empezar a extraer y declarar tus DTE.
+            Sin plantillas ni captura manual. Ingresá con tu cuenta y tené tus DTE
+            ordenados y listos para declarar en minutos.
           </p>
           <Link to="/login" className="btn-primary py-2.5 px-7 inline-block">
             Ingresar al sistema →
