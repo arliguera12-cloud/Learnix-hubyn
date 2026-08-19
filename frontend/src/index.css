@@ -321,14 +321,36 @@
   /* ═══ Cinta de cotizaciones — siempre oscura, como el pie de un diario ═══ */
   .ticker-bar {
     background: #12110d;
-    border-top: 1px solid #35312a;
-    border-bottom: 1px solid #35312a;
+    border-top: 3px double #35312a;
+    border-bottom: 3px double #35312a;
   }
   .ticker-label {
     color: #e0763f;
   }
   .ticker-value {
     color: #ded8c7;
+  }
+
+  /* ═══ Bloques siempre-oscuros — franja de cifras y pie de página, como el
+     verde de tinta contable de un libro mayor. Fijos (no theme-dependent),
+     mismo criterio que .ticker-bar: leen igual en claro y oscuro. ═══ */
+  .forest-block {
+    background: #16332b;
+    color: #e8e4d6;
+  }
+  .forest-block-deep {
+    background: #0f2620;
+    color: #cddad2;
+    border-top: 3px double #d8d2c3;
+  }
+
+  /* ═══ Ficha de precio — badge flotante sobre el borde ═══ */
+  .price-badge {
+    position: absolute;
+    top: -0.8rem;
+    left: 1.75rem;
+    background: var(--bg);
+    padding: 0.15rem 0.75rem;
   }
 }
 
@@ -407,5 +429,26 @@
   }
   .animate-fade {
     animation: fade-in 0.8s ease-out both;
+  }
+
+  /* ═══ Reveal en cascada — activado por IntersectionObserver (ver
+     useReveal en LandingPage.jsx). El delay escalonado se fija inline
+     por elemento (transitionDelay), no acá. ═══ */
+  .reveal {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .reveal.on {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
   }
 }
