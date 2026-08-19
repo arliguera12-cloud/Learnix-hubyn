@@ -96,6 +96,16 @@ export function useProgresoSimulado() {
     }, 350)
   }
 
+  /**
+   * Sube el piso del progreso a `piso` (nunca lo baja) sin reiniciar la
+   * animación — la usan los lotes grandes al terminar cada tanda de 40, para
+   * que la barra avance de verdad entre tandas en vez de solo simular dentro
+   * de una.
+   */
+  function avanzarA(piso) {
+    setProgress(p => (p ? { ...p, pct: Math.max(p.pct, piso) } : p))
+  }
+
   function terminar() {
     limpiarIntervalo()
     setProgress(p => (p ? { ...p, pct: 100, fase: 'listo' } : p))
@@ -108,7 +118,34 @@ export function useProgresoSimulado() {
 
   useEffect(() => limpiarIntervalo, [])
 
-  return { progress, iniciar, terminar, limpiar }
+  return { progress, iniciar, avanzarA, terminar, limpiar }
+}
+
+// Mismo tope que el backend (routers/procesamiento.py: _MAX_LOTE_ARCHIVOS) —
+// con más archivos por request el proxy corta la conexión antes de terminar.
+export const TAMANO_TANDA = 40
+
+/**
+ * Sube `files` en tandas de `TAMANO_TANDA`, una tras otra, y junta los
+ * resultados y errores de todas. Así el usuario puede soltar 200+ PDF de una
+ * sola vez sin toparse con el límite por request — el troceo pasa
+ * desapercibido, solo se nota en que la barra de progreso avanza por tandas.
+ */
+export async function subirLoteEnTandas(files, loteApiFn, declaranteId, nombre, onProgreso) {
+  const resultados = []
+  const errores = []
+  let procesados = 0
+
+  for (let i = 0; i < files.length; i += TAMANO_TANDA) {
+    const tanda = files.slice(i, i + TAMANO_TANDA)
+    const { data } = await loteApiFn(tanda, declaranteId, nombre)
+    resultados.push(...(data.resultados ?? []))
+    errores.push(...(data.errores ?? []))
+    procesados += tanda.length
+    onProgreso?.(procesados, files.length)
+  }
+
+  return { resultados, errores }
 }
 
 /** Formato monetario salvadoreño, sin el símbolo (lo pone quien llama). */

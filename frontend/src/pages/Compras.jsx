@@ -3,7 +3,7 @@ import PdfUploader from '../components/PdfUploader'
 import { procesarCompras, procesarComprasLote, exportarExcelCompras, guardarResultados } from '../services/api'
 import {
   fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados,
-  usePersistenciaExtractor, useProgresoSimulado,
+  usePersistenciaExtractor, useProgresoSimulado, subirLoteEnTandas,
 } from '../utils/dte'
 import { IconCompras, IconExportar, IconCheck, IconAlerta } from '../components/Icons'
 
@@ -18,7 +18,7 @@ export default function Compras() {
   const [exportando,   setExportando]   = useState(false)
   const [tab,          setTab]          = useState(0)
   const [aviso,        setAviso]        = useState(null)
-  const { progress, iniciar: iniciarProgreso, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoSimulado()
+  const { progress, iniciar: iniciarProgreso, avanzarA, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoSimulado()
 
   // Cambiar de cliente en el selector vacía la tabla de inmediato — antes
   // quedaba la del cliente anterior en pantalla hasta la próxima extracción,
@@ -36,10 +36,16 @@ export default function Compras() {
     try {
       let nuevos = []
       if (isMultiple) {
+        // Se sube en tandas de a lo sumo TAMANO_TANDA (el backend las procesa
+        // en paralelo internamente) — así un lote de cientos de PDFs no choca
+        // con el límite por request ni con el timeout del proxy.
         iniciarProgreso(filesOrFile.length)
-        const { data } = await procesarComprasLote(filesOrFile, dId)
-        nuevos = data.resultados ?? []
-        if (data.errores?.length) setError(data.errores.map(e => `${e.filename}: ${e.error}`).join('\n'))
+        const { resultados: res, errores } = await subirLoteEnTandas(
+          filesOrFile, procesarComprasLote, dId, undefined,
+          (procesados, total) => avanzarA(Math.round((procesados / total) * 92)),
+        )
+        nuevos = res
+        if (errores.length) setError(errores.map(e => `${e.filename}: ${e.error}`).join('\n'))
         terminarProgreso()
       } else {
         const { data } = await procesarCompras(filesOrFile, dId)
