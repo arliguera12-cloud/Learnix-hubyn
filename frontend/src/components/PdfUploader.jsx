@@ -10,6 +10,10 @@ function tamano(bytes) {
   return kb < 1024 ? `${kb.toFixed(0)} KB` : `${(kb / 1024).toFixed(1)} MB`
 }
 
+// Mismo tope que el backend (routers/procesamiento.py): con lotes más
+// grandes la conexión se corta antes de terminar de procesar.
+const MAX_LOTE = 40
+
 export default function PdfUploader({ onUpload, loading, multiple = false, onClienteChange }) {
   const inputRef = useRef(null)
   const [files, setFiles] = useState([])
@@ -69,7 +73,8 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
     onUpload(multiple ? files : files[0], declaranteId, nombreDeclarante)
   }
 
-  const canSubmit = files.length > 0 && !!declaranteId && !loading
+  const loteExcedido = multiple && files.length > MAX_LOTE
+  const canSubmit = files.length > 0 && !!declaranteId && !loading && !loteExcedido
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -155,6 +160,13 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
             onChange={e => handleFiles(e.target.files)}
           />
         </div>
+
+        {loteExcedido && (
+          <p className="mt-2 text-xs text-red-400">
+            Máximo {MAX_LOTE} archivos por lote (elegiste {files.length}). Subí en tandas más
+            chicas — con lotes muy grandes la conexión se corta antes de terminar.
+          </p>
+        )}
 
         {files.length > 0 && (
           <ul className="mt-2 rounded-lg border border-hairline divide-y divide-hairline overflow-hidden">
