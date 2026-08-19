@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import ThemeToggle from '../components/ThemeToggle'
 import {
@@ -16,6 +17,47 @@ const TASAS = [
   ['DTE-07', 'RETENCIÓN'],
   ['DTE-14', 'EXCLUIDOS'],
   ['ANEXOS', '1 · 2 · 3'],
+]
+
+/** Índice de características — el "por qué Learnix" frente a hacerlo a mano. */
+const CARACTERISTICAS = [
+  {
+    num: 'i',
+    titulo: 'Lectura nativa del DTE',
+    detalle: <>Lee el <b>JSON firmado</b> por Hacienda campo por campo — o el PDF si no lo tenés — sin regex frágil ni plantillas que se rompen con el próximo formato.</>,
+  },
+  {
+    num: 'ii',
+    titulo: 'Verificación con IA',
+    detalle: <>Vision y un segundo modelo revisan lo que el documento no dejó claro, con un <b>puntaje de confianza</b> por documento para saber qué mirar antes de declarar.</>,
+  },
+  {
+    num: 'iii',
+    titulo: 'Multi-cliente real',
+    detalle: <>Directorio de clientes con cambio instantáneo — cada extracción queda <b>separada</b>, sin mezclar el trabajo de dos empresas en la misma tabla.</>,
+  },
+  {
+    num: 'iv',
+    titulo: 'Anexos listos para declarar',
+    detalle: <>Exportá a Excel con los campos exactos del anexo — 1, 2 o 3 — en un clic, <b>sin reordenar columnas</b> a mano.</>,
+  },
+  {
+    num: 'v',
+    titulo: 'Importación desde Drive y Gmail',
+    detalle: <>Traé los DTE directo desde tu Drive o tu correo, <b>sin descargar y volver a subir</b> cada archivo uno por uno.</>,
+  },
+  {
+    num: 'vi',
+    titulo: 'Seguridad de tus datos',
+    detalle: <>Autenticación con Supabase, <b>aislamiento por usuario</b> a nivel de base de datos y auditoría de acceso en cada sesión.</>,
+  },
+]
+
+const STATS = [
+  ['4', 'Anexos de Hacienda cubiertos: Ventas, Compras, Retenciones y Sujetos Excluidos.', true],
+  ['2', 'Motores de IA verificando cada documento — lectura Vision y verificación textual.', false],
+  ['100%', 'Campos leídos del documento firmado por Hacienda, no de una plantilla genérica.', false],
+  ['0', 'Captura manual. Todo desde el navegador, sin instalar nada.', true],
 ]
 
 const MODULOS = [
@@ -67,12 +109,52 @@ const PASOS = [
   },
 ]
 
+const PRECIO_ITEMS = [
+  'Extracción ilimitada de DTE — PDF y JSON firmado',
+  'Los 4 anexos: Ventas, Compras, Retenciones, Sujetos Excluidos',
+  'Verificación con IA y puntaje de confianza por documento',
+  'Directorio de clientes ilimitado, con historial separado',
+  'Importación directa desde Google Drive y Gmail',
+  'Exportación a Excel sin límite de documentos',
+  'Soporte por correo',
+]
+
+/**
+ * Revela en cascada los elementos `.reveal` de un contenedor al entrar en viewport.
+ */
+function useReveal() {
+  const ref = useRef(null)
+  useEffect(() => {
+    const nodos = ref.current?.querySelectorAll('.reveal') ?? []
+    const obs = new IntersectionObserver(
+      entries => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return
+          const i = Number(entry.target.dataset.revealIndex || 0)
+          entry.target.style.transitionDelay = `${(i % 6) * 60}ms`
+          entry.target.classList.add('on')
+          obs.unobserve(entry.target)
+        })
+      },
+      { threshold: 0.12 }
+    )
+    nodos.forEach((el, i) => {
+      el.dataset.revealIndex = i
+      obs.observe(el)
+    })
+    return () => obs.disconnect()
+  }, [])
+  return ref
+}
+
 export default function LandingPage() {
+  const ref = useReveal()
+
   return (
-    <div className="min-h-screen bg-paper text-fg-3 paper-grain">
+    <div ref={ref} className="min-h-screen bg-paper text-fg-3 paper-grain">
       {/* ═══ Masthead ═══ */}
       <div className="border-b border-hairline bg-panel">
-        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-2 flex items-center justify-between text-[0.65rem]
+        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-2 flex items-center justify-between text-[11px]
                         uppercase tracking-[0.16em] text-fg-4 font-mono">
           <span className="shrink-0">№ 001 · Edición del sistema</span>
           <span className="hidden sm:block shrink-0">Publicado en El Salvador</span>
@@ -82,22 +164,23 @@ export default function LandingPage() {
 
       {/* ═══ Nav ═══ */}
       <header className="sticky top-0 z-30 border-b border-hairline bg-paper/95 backdrop-blur-sm">
-        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-3.5 flex items-center justify-between gap-4">
+        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-4 flex items-center justify-between gap-4">
           <div className="flex items-baseline gap-2 shrink-0">
-            <IconSeccion className="text-2xl text-accent" />
-            <span className="font-display text-xl text-fg leading-none">Learnix</span>
-            <span className="hidden sm:inline text-[9px] text-fg-4 uppercase tracking-[0.2em] leading-none">
+            <IconSeccion className="text-[30px] text-accent" />
+            <span className="font-display italic font-black text-[30px] text-fg leading-none">Learnix</span>
+            <span className="hidden sm:inline text-[10px] text-fg-4 uppercase tracking-[0.2em] leading-none">
               DTE Hub
             </span>
           </div>
-          <nav className="hidden md:flex items-center gap-7 text-sm text-fg-3">
-            <a href="#modulos" className="hover:text-accent transition-colors">Módulos</a>
+          <nav className="hidden md:flex items-center gap-8 text-[15px] text-fg-3">
+            <a href="#producto" className="hover:text-accent transition-colors">Producto</a>
             <a href="#procedimiento" className="hover:text-accent transition-colors">Cómo funciona</a>
+            <a href="#precio" className="hover:text-accent transition-colors">Precio</a>
             <Link to="/login" className="hover:text-accent transition-colors">Iniciar sesión</Link>
           </nav>
           <div className="flex items-center gap-3 shrink-0">
             <ThemeToggle className="text-fg-3" />
-            <Link to="/login" className="btn-primary text-sm py-2 px-4">
+            <Link to="/login" className="btn-primary text-[15px] py-2 px-4">
               Ingresar
             </Link>
           </div>
@@ -106,12 +189,12 @@ export default function LandingPage() {
 
       {/* ═══ Hero ═══ */}
       <section className="max-w-[100rem] mx-auto px-5 lg:px-12 pt-16 pb-16 md:pt-24 md:pb-24">
-        <div className="grid md:grid-cols-[1.15fr_1fr] gap-12 md:gap-16 items-center">
+        <div className="grid md:grid-cols-[1.15fr_1fr] gap-12 md:gap-16 items-end">
           {/* Titular */}
-          <h1 className="animate-rise text-[3.25rem] leading-[0.96] sm:text-[5rem] sm:leading-[0.92]
-                         md:text-[7rem] lg:text-[8.75rem] md:leading-[0.9] text-fg font-black tracking-[-0.045em]">
+          <h1 className="animate-rise font-light text-fg tracking-[-0.045em] leading-[0.92]"
+              style={{ fontSize: 'clamp(52px, 9vw, 140px)' }}>
             Tus DTE,
-            <span className="block font-display italic font-bold text-accent2">
+            <span className="block font-display italic font-black text-accent2">
               por fin,
             </span>
             <span className="marker">en orden.</span>
@@ -123,10 +206,10 @@ export default function LandingPage() {
               <SelloCircular />
             </div>
 
-            <p className="text-[0.65rem] uppercase tracking-[0.2em] text-fg-4 font-semibold mb-4 md:mt-24">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-fg-4 font-semibold mb-4 md:mt-24">
               Manifiesto
             </p>
-            <p className="text-lg md:text-xl text-fg-3 leading-relaxed font-display">
+            <p className="text-[22px] text-fg-3 leading-relaxed font-display">
               Un extractor de DTE pensado desde{' '}
               <strong className="text-accent2 font-semibold">El Salvador</strong>: lee el
               documento firmado por Hacienda campo por campo, no adivina con una plantilla
@@ -143,8 +226,8 @@ export default function LandingPage() {
                 ['seg.', 'Por documento'],
               ].map(([valor, label]) => (
                 <div key={label}>
-                  <p className="font-display text-2xl text-fg leading-none">{valor}</p>
-                  <p className="text-[0.65rem] uppercase tracking-[0.1em] text-fg-4 mt-1 leading-tight">
+                  <p className="font-display text-[28px] text-fg leading-none">{valor}</p>
+                  <p className="text-[11px] uppercase tracking-[0.1em] text-fg-4 mt-1 leading-tight">
                     {label}
                   </p>
                 </div>
@@ -152,11 +235,11 @@ export default function LandingPage() {
             </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link to="/login" className="btn-primary py-2.5 px-6">
+              <Link to="/login" className="btn-primary py-2.5 px-6 text-[16px]">
                 Ingresar al sistema →
               </Link>
-              <a href="#modulos" className="btn-ghost py-2.5 px-6 border border-hairline">
-                Ver módulos
+              <a href="#producto" className="btn-ghost py-2.5 px-6 border border-hairline text-[16px]">
+                Ver características
               </a>
             </div>
           </div>
@@ -169,7 +252,7 @@ export default function LandingPage() {
           {[...TASAS, ...TASAS].map(([label, valor], i) => (
             <span
               key={i}
-              className="flex items-baseline gap-2.5 shrink-0 px-7 text-[0.7rem] font-mono
+              className="flex items-baseline gap-2.5 shrink-0 px-7 text-[12px] font-mono
                          uppercase tracking-[0.12em]"
             >
               <span className="ticker-label">{label}</span>
@@ -179,63 +262,112 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ═══ Producto — índice de características ═══ */}
+      <section id="producto" className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 md:py-24 scroll-mt-16">
+        <div className="reveal grid md:grid-cols-[220px_1fr] gap-6 items-end pb-10 border-b border-hairline">
+          <span className="font-display italic text-[42px] md:text-[56px] text-accent leading-none">§ 01</span>
+          <div>
+            <p className="text-[13px] uppercase tracking-[0.16em] text-accent font-semibold mb-2">
+              Índice de características
+            </p>
+            <h2 className="text-[30px] md:text-[44px] leading-[1.05] text-fg">
+              Lo que le falta<br className="hidden md:block" />{' '}
+              <span className="font-display italic text-accent2">a la hoja de cálculo.</span>
+            </h2>
+            <p className="text-[16px] text-fg-4 mt-3 max-w-xl">
+              No es una plantilla con fórmulas. Es un sistema que lee el documento oficial y
+              hace el trabajo de captura por vos.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-3 border border-hairline divide-x-0 md:divide-x divide-y divide-hairline">
+          {CARACTERISTICAS.map(({ num, titulo, detalle }) => (
+            <div
+              key={num}
+              className="reveal p-7 hover:bg-panel2/40 transition-colors duration-150 border-t border-hairline md:border-t-0 first:border-t-0"
+            >
+              <div className="flex items-center justify-center w-10 h-10 rounded-full border border-hairline
+                              font-display italic text-[16px] text-accent mb-5">
+                {num}
+              </div>
+              <h3 className="font-display text-[24px] text-fg mb-2 leading-tight">{titulo}</h3>
+              <p className="text-[15px] text-fg-3 leading-relaxed">{detalle}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ═══ Cifras destacadas ═══ */}
+      <section className="forest-block">
+        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 grid grid-cols-2 md:grid-cols-4 gap-8">
+          {STATS.map(([valor, detalle, enfasis]) => (
+            <div key={detalle} className="reveal pt-4 border-t border-sb-hair">
+              <p className={`font-display text-[64px] md:text-[72px] leading-none mb-3 ${enfasis ? 'italic font-black text-accent' : 'text-sb-txt-hi'}`}>
+                {valor}
+              </p>
+              <p className="text-[15px] leading-relaxed text-sb-txt max-w-[22ch]">{detalle}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* ═══ Módulos ═══ */}
       <section id="modulos" className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 md:py-24 scroll-mt-16">
-        <div className="mb-10 animate-fade grid md:grid-cols-[auto_1fr] md:items-end gap-4">
+        <div className="mb-10 reveal grid md:grid-cols-[auto_1fr] md:items-end gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.16em] text-accent font-semibold mb-2">
+            <p className="text-[13px] uppercase tracking-[0.16em] text-accent font-semibold mb-2">
               Índice · Extractores
             </p>
-            <h2 className="text-3xl md:text-[2.75rem] leading-[1.05] text-fg">
+            <h2 className="text-[30px] md:text-[44px] leading-[1.05] text-fg">
               Cuatro registros,<br className="hidden md:block" /> un mismo libro
             </h2>
           </div>
-          <p className="text-sm text-fg-4 max-w-xs md:justify-self-end md:text-right">
+          <p className="text-[15px] text-fg-4 max-w-xs md:justify-self-end md:text-right">
             Cada módulo aplica las reglas de Hacienda de su propio anexo, sin mezclarlas.
           </p>
         </div>
 
         <div
-          className="grid md:grid-cols-[1.4fr_1fr] gap-px bg-hairline border border-hairline
+          className="reveal grid md:grid-cols-[1.4fr_1fr] gap-px bg-hairline border border-hairline
                      rounded-xl overflow-hidden"
         >
           {/* Ficha destacada */}
           <div
-            className="bg-panel p-8 animate-fade flex flex-col justify-between gap-8
+            className="bg-panel p-8 flex flex-col justify-between gap-8
                        border-l-2 border-accent md:row-span-3"
           >
             <div>
               <div className="flex items-start justify-between mb-7">
                 <IconVentas className="w-12 h-12 text-accent" />
-                <span className="font-mono text-xs text-fg-4">№ {MODULOS[0].num}</span>
+                <span className="font-mono text-[12px] text-fg-4">№ {MODULOS[0].num}</span>
               </div>
-              <h3 className="text-4xl text-fg mb-3 leading-none">{MODULOS[0].titulo}</h3>
-              <p className="text-base text-fg-3 max-w-sm leading-relaxed">{MODULOS[0].detalle}</p>
+              <h3 className="text-[40px] text-fg mb-3 leading-none">{MODULOS[0].titulo}</h3>
+              <p className="text-[17px] text-fg-3 max-w-sm leading-relaxed">{MODULOS[0].detalle}</p>
             </div>
 
             <div>
               <div className="rule-hair !mt-0" />
-              <p className="text-[0.7rem] uppercase tracking-wider text-fg-4 font-mono">
+              <p className="text-[12px] uppercase tracking-wider text-fg-4 font-mono">
                 {MODULOS[0].ref}
               </p>
             </div>
           </div>
 
           {/* Fichas secundarias */}
-          {MODULOS.slice(1).map(({ num, Icon, titulo, detalle, ref }, i) => (
+          {MODULOS.slice(1).map(({ num, Icon, titulo, detalle, ref }) => (
             <div
               key={num}
-              className="bg-panel p-6 animate-fade flex flex-col justify-center"
-              style={{ animationDelay: `${(i + 1) * 90}ms` }}
+              className="bg-panel p-6 flex flex-col justify-center"
             >
               <div className="flex items-start justify-between mb-4">
                 <Icon className="w-6 h-6 text-fg-3" />
-                <span className="font-mono text-xs text-fg-4">№ {num}</span>
+                <span className="font-mono text-[12px] text-fg-4">№ {num}</span>
               </div>
-              <h3 className="text-xl text-fg mb-1.5">{titulo}</h3>
-              <p className="text-sm text-fg-3 mb-3">{detalle}</p>
+              <h3 className="text-[22px] text-fg mb-1.5">{titulo}</h3>
+              <p className="text-[15px] text-fg-3 mb-3">{detalle}</p>
               <div className="rule-hair" />
-              <p className="text-[0.7rem] uppercase tracking-wider text-fg-4 font-mono mt-3">
+              <p className="text-[12px] uppercase tracking-wider text-fg-4 font-mono mt-3">
                 {ref}
               </p>
             </div>
@@ -246,55 +378,107 @@ export default function LandingPage() {
       {/* ═══ Cómo funciona ═══ */}
       <section id="procedimiento" className="border-t border-hairline scroll-mt-16">
         <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 md:py-24">
-          <div className="mb-14 animate-fade">
-            <p className="text-xs uppercase tracking-[0.16em] text-accent font-semibold mb-2">
-              Procedimiento
-            </p>
-            <h2 className="text-3xl md:text-[2.75rem] text-fg">Tres pasos, sin captura manual</h2>
+          <div className="mb-14 reveal grid md:grid-cols-[220px_1fr] gap-6 items-end">
+            <span className="font-display italic text-[42px] md:text-[56px] text-accent leading-none">§ 02</span>
+            <div>
+              <p className="text-[13px] uppercase tracking-[0.16em] text-accent font-semibold mb-2">
+                Procedimiento
+              </p>
+              <h2 className="text-[30px] md:text-[44px] text-fg">Tres pasos, sin captura manual</h2>
+            </div>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-10 md:gap-6 relative">
-            <div className="hidden md:block absolute top-[1.4rem] left-0 right-0 h-px bg-hairline" />
-            {PASOS.map((p, i) => (
-              <div
-                key={p.num}
-                className="animate-fade relative"
-                style={{ animationDelay: `${i * 120}ms` }}
-              >
-                <span className="font-display italic text-5xl text-accent block mb-2 bg-paper pr-5 w-fit leading-none">
+          <div className="grid md:grid-cols-3 md:divide-x divide-hairline">
+            {PASOS.map((p) => (
+              <div key={p.num} className="reveal px-0 md:px-8 first:pl-0 py-2">
+                <span className="font-display italic text-[36px] text-accent block mb-3 leading-none">
                   {p.num}
                 </span>
-                <h3 className="text-lg text-fg mt-4 mb-1.5">{p.titulo}</h3>
-                <p className="text-sm text-fg-3 leading-relaxed max-w-xs">{p.detalle}</p>
+                <h3 className="font-display italic text-[28px] text-fg mb-2">{p.titulo}</h3>
+                <p className="text-[15px] text-fg-3 leading-relaxed">{p.detalle}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
+      {/* ═══ Precio ═══ */}
+      <section id="precio" className="border-t border-hairline scroll-mt-16">
+        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 md:py-24">
+          <div className="mb-14 reveal grid md:grid-cols-[220px_1fr] gap-6 items-end">
+            <span className="font-display italic text-[42px] md:text-[56px] text-accent leading-none">§ 03</span>
+            <div>
+              <p className="text-[13px] uppercase tracking-[0.16em] text-accent font-semibold mb-2">
+                Precio
+              </p>
+              <h2 className="text-[30px] md:text-[44px] text-fg">Un plan, sin letra chica</h2>
+            </div>
+          </div>
+
+          <div className="reveal relative max-w-[1000px] border border-hairline bg-panel2/40 p-8 md:p-10">
+            <span className="price-badge border border-hairline text-[11px] uppercase tracking-[0.18em] text-accent font-semibold">
+              Plan único
+            </span>
+            <div className="grid md:grid-cols-[1.2fr_1fr] gap-10 md:gap-12">
+              <div>
+                <h3 className="font-display text-[26px] text-fg mb-5">Suscripción Learnix</h3>
+                <ul className="space-y-0">
+                  {PRECIO_ITEMS.map(item => (
+                    <li
+                      key={item}
+                      className="flex items-start gap-2.5 py-2.5 border-b border-dashed border-hairline text-[15px] text-fg-3"
+                    >
+                      <IconSeccion className="text-accent text-[17px] shrink-0 leading-none mt-0.5" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="md:text-right flex flex-col md:items-end justify-center">
+                <p className="font-display text-[64px] md:text-[96px] text-accent2 leading-none">
+                  $<strong className="font-black italic">15</strong>
+                </p>
+                <p className="text-[13px] text-fg-4 mt-2 mb-6">por mes · USD</p>
+                <Link to="/login" className="btn-primary py-2.5 px-6 w-full md:w-auto text-center text-[16px]">
+                  Ingresar al sistema →
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ═══ CTA final ═══ */}
-      <section className="border-t border-hairline bg-panel2/50">
-        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 text-center animate-fade">
-          <div className="w-24 h-24 mx-auto mb-6 text-accent">
+      <section className="forest-block">
+        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-24 md:py-32 text-center reveal">
+          <div className="w-24 h-24 mx-auto mb-6 text-sb-txt-mute">
             <SelloCircular />
           </div>
-          <h2 className="text-3xl md:text-4xl text-fg mb-2">Abre tu registro</h2>
-          <p className="text-sm text-fg-3 mb-8 max-w-md mx-auto">
-            Sin plantillas ni captura manual. Ingresá con tu cuenta y tené tus DTE
-            ordenados y listos para declarar en minutos.
+          <h2 className="font-display text-[34px] md:text-[54px] text-sb-txt-hi mb-4 leading-tight max-w-2xl mx-auto">
+            Deja de tipear DTE <span className="italic text-accent">a mano.</span>
+          </h2>
+          <p className="text-[16px] md:text-[18px] text-sb-txt mb-9 max-w-md mx-auto">
+            Subí tus documentos, dejá que la IA los lea y exportá los anexos de Hacienda con
+            tranquilidad.
           </p>
-          <Link to="/login" className="btn-primary py-2.5 px-7 inline-block">
+          <Link
+            to="/login"
+            className="inline-block py-2.5 px-7 bg-paper text-fg font-medium text-[16px] rounded-lg
+                       transition-all duration-150 hover:-translate-y-px hover:bg-accent hover:text-sb-txt-hi"
+          >
             Ingresar al sistema →
           </Link>
         </div>
       </section>
 
       {/* ═══ Footer ═══ */}
-      <footer className="border-t border-hairline">
-        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-6 flex flex-wrap items-center justify-between gap-2
-                        text-xs text-fg-4">
-          <span>Learnix DTE Hub · El Salvador · {new Date().getFullYear()}</span>
-          <span className="font-mono uppercase tracking-[0.12em]">Sistema de extracción de DTE</span>
+      <footer className="forest-block-deep">
+        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-6 flex flex-wrap items-center justify-between gap-2 text-[13px]">
+          <span className="font-display italic text-[18px]">§ Learnix</span>
+          <span className="uppercase tracking-[0.12em] opacity-80">
+            El Salvador · {new Date().getFullYear()} · Todos los derechos reservados
+          </span>
+          <Link to="/login" className="hover:opacity-70 transition-opacity">Iniciar sesión</Link>
         </div>
       </footer>
     </div>
