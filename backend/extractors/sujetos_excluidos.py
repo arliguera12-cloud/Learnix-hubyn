@@ -3,6 +3,8 @@ Extractor de DTEs de Sujetos Excluidos (DTE-14 — casilla 66 / retención renta
 Lógica portada de pages/4_Extractor_DTE_Sujetos_Excluidos.py sin dependencias de Streamlit.
 """
 import re
+from concurrent.futures import ThreadPoolExecutor
+
 import pdfplumber
 
 from utils.pdf_utils import (
@@ -130,115 +132,132 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
     _vision_alertas: list = []
     _vision_audit: dict   = {}
 
-    if vision_disponible():
-        _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
-            file_bytes,
-            "sujetos_excluidos",
-            {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
-        )
-        gemini_correcciones = [
-            f"Visión: {a}" for a in _vision_alertas
-        ] if _vision_alertas else (
-            [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
-            if _vision_campos else []
+    # Visión no depende del texto/regex del PDF (ni al revés) — se lanza en
+    # un hilo aparte para correr en paralelo con el parseo de texto de abajo
+    # en vez de bloquear antes de que ese parseo (rápido) siquiera empiece.
+    with ThreadPoolExecutor(max_workers=1) as _pool:
+        _vision_future = (
+            _pool.submit(
+                extraer_dte_con_vision,
+                file_bytes,
+                "sujetos_excluidos",
+                {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
+            )
+            if vision_disponible() else None
         )
 
-    try:
-        texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
-        texto_completo = texto_lineal + "\n" + texto_visual
+        try:
+            texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
+            texto_completo = texto_lineal + "\n" + texto_visual
+
+            t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
+            t_no_sp = re.sub(r'\s+', '', t_clean).upper()
+
+            # ── Tipo DTE ──
+            m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]{1,20}-\d{9,18})", t_no_sp)
+            tipo   = "14"
+            if m_ctrl:
+                ctrl   = m_ctrl.group(1).replace("O", "0")
+                m_tipo = re.search(r"DTE-(\d{2})", ctrl)
+                if m_tipo:
+                    tipo = m_tipo.group(1)
+
+            nit_cliente = limpiar_nit(cliente_activo.get('nit', ''))
+
+            # ── UUID / Código de Generación ──
+            gen = ""
+            m_uuid = re.search(
+                r"([A-Fa-f0-9]{8}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{12})",
+                t_no_sp
+            )
+            if m_uuid:
+                raw = m_uuid.group(1).replace("-", "")
+                if len(raw) == 32:
+                    gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}".upper()
+
+            # ── Número de Control ──
+            num_control = ""
+            m_nc = re.search(r"(DTE-14-[A-Z0-9]+-\d+)", t_no_sp)
+            if m_nc:
+                num_control = m_nc.group(1)
+
+            # ── Sello de Recepción ──
+            sello = extraer_sello_dte14(t_clean)
+
+            fecha = extraer_y_formatear_fecha(t_clean)
+
+            # ── Nombre del receptor ──
+            nom_sujeto = extraer_nombre_receptor(t_clean)
+
+            # ── NIT/DUI del receptor ──
+            id_sujeto = extraer_nit_receptor(t_clean, nit_cliente)
+
+            # ── Montos: Base (Sumatoria ventas / Sub-Total) y Retención Renta 10% ──
+            base = 0.0
+            ret  = 0.0
+
+            # Retención Renta — etiqueta explícita
+            m_ret_renta = re.search(
+                r"[Rr]etenci[oó]n\s+[Rr]enta\s*[:\-]?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)",
+                t_clean
+            )
+            if m_ret_renta:
+                ret = limpiar_monto(m_ret_renta.group(1))
+
+            # Sub-Total o Sumatoria de ventas
+            m_base = re.search(
+                r"(?:[Ss]umatoria\s+de\s+[Vv]entas|[Ss]ub[-\s]?[Tt]otal)\s*[:\-]?\s*"
+                r"(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)",
+                t_clean
+            )
+            if m_base:
+                base = limpiar_monto(m_base.group(1))
+
+            # Fallback: relación matemática 10%
+            if base == 0.0 and ret > 0:
+                base = round(ret * 10, 2)
+
+            if base == 0.0:
+                montos_raw = re.findall(
+                    r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
+                    t_clean
+                )
+                valores = sorted(
+                    list({limpiar_monto(m) for m in montos_raw if limpiar_monto(m) > 0}),
+                    reverse=True
+                )
+                for v in valores:
+                    ret_calc = round(v * 0.10, 2)
+                    if any(abs(r - ret_calc) <= 0.05 for r in valores if r < v):
+                        base = v
+                        if ret == 0:
+                            ret = ret_calc
+                        break
+
+            if base > 0 and ret == 0:
+                ret = round(base * 0.10, 2)
+        except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
+            return {"error": "PDF inválido o corrupto."}
+        except Exception as err:
+            return {"error": str(err)}
+
+        # A este punto el parseo de texto+regex ya terminó — recién ahora hace
+        # falta el resultado de Visión, así que esperarlo aquí no paga nada
+        # extra que no se estuviera pagando ya (corrió en paralelo arriba).
+        if _vision_future is not None:
+            _vision_campos, _vision_alertas, _vision_audit = _vision_future.result()
+            gemini_correcciones = [
+                f"Visión: {a}" for a in _vision_alertas
+            ] if _vision_alertas else (
+                [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
+                if _vision_campos else []
+            )
 
         if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
             return {"error": "PDF de imagen — sin texto extraíble."}
 
-        t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
-        t_no_sp = re.sub(r'\s+', '', t_clean).upper()
-
-        # ── Tipo DTE ──
-        m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]{1,20}-\d{9,18})", t_no_sp)
-        tipo   = "14"
-        if m_ctrl:
-            ctrl   = m_ctrl.group(1).replace("O", "0")
-            m_tipo = re.search(r"DTE-(\d{2})", ctrl)
-            if m_tipo:
-                tipo = m_tipo.group(1)
-
         if tipo != "14":
             return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten DTE-14 (Sujetos Excluidos)."}
-
-        nit_cliente = limpiar_nit(cliente_activo.get('nit', ''))
-
-        # ── UUID / Código de Generación ──
-        gen = ""
-        m_uuid = re.search(
-            r"([A-Fa-f0-9]{8}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{12})",
-            t_no_sp
-        )
-        if m_uuid:
-            raw = m_uuid.group(1).replace("-", "")
-            if len(raw) == 32:
-                gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}".upper()
-
-        # ── Número de Control ──
-        num_control = ""
-        m_nc = re.search(r"(DTE-14-[A-Z0-9]+-\d+)", t_no_sp)
-        if m_nc:
-            num_control = m_nc.group(1)
-
-        # ── Sello de Recepción ──
-        sello = extraer_sello_dte14(t_clean)
-
-        fecha = extraer_y_formatear_fecha(t_clean)
-
-        # ── Nombre del receptor ──
-        nom_sujeto = extraer_nombre_receptor(t_clean)
-
-        # ── NIT/DUI del receptor ──
-        id_sujeto = extraer_nit_receptor(t_clean, nit_cliente)
-
-        # ── Montos: Base (Sumatoria ventas / Sub-Total) y Retención Renta 10% ──
-        base = 0.0
-        ret  = 0.0
-
-        # Retención Renta — etiqueta explícita
-        m_ret_renta = re.search(
-            r"[Rr]etenci[oó]n\s+[Rr]enta\s*[:\-]?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)",
-            t_clean
-        )
-        if m_ret_renta:
-            ret = limpiar_monto(m_ret_renta.group(1))
-
-        # Sub-Total o Sumatoria de ventas
-        m_base = re.search(
-            r"(?:[Ss]umatoria\s+de\s+[Vv]entas|[Ss]ub[-\s]?[Tt]otal)\s*[:\-]?\s*"
-            r"(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)",
-            t_clean
-        )
-        if m_base:
-            base = limpiar_monto(m_base.group(1))
-
-        # Fallback: relación matemática 10%
-        if base == 0.0 and ret > 0:
-            base = round(ret * 10, 2)
-
-        if base == 0.0:
-            montos_raw = re.findall(
-                r"(?:US\$?|\$)?\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
-                t_clean
-            )
-            valores = sorted(
-                list({limpiar_monto(m) for m in montos_raw if limpiar_monto(m) > 0}),
-                reverse=True
-            )
-            for v in valores:
-                ret_calc = round(v * 0.10, 2)
-                if any(abs(r - ret_calc) <= 0.05 for r in valores if r < v):
-                    base = v
-                    if ret == 0:
-                        ret = ret_calc
-                    break
-
-        if base > 0 and ret == 0:
-            ret = round(base * 0.10, 2)
 
         # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
         if _vision_campos.get("fecha"):
@@ -340,8 +359,3 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             "_vision_alertas"     : _vision_alertas,
             "_vision_audit"       : _vision_audit,
         }
-
-    except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
-        return {"error": "PDF inválido o corrupto."}
-    except Exception as err:
-        return {"error": str(err)}
