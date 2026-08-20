@@ -57,6 +57,7 @@ def consultar_dte_publico(codigo_generacion: str, fecha_emi_iso: str, ambiente: 
     cod = re.sub(r'[^0-9A-Fa-f-]', '', str(codigo_generacion or '')).upper()
     fecha = str(fecha_emi_iso or '').strip()
     if not _UUID_RE.match(cod) or not _FECHA_RE.match(fecha):
+        log.info("Consulta pública MH: codigo_generacion/fecha con formato inválido (cod=%r, fecha=%r) — se omite", cod, fecha)
         return None
 
     try:
@@ -68,8 +69,10 @@ def consultar_dte_publico(codigo_generacion: str, fecha_emi_iso: str, ambiente: 
         resp.raise_for_status()
         data = resp.json()
         if data.get("action") == "OK" and isinstance(data.get("documento"), dict):
+            log.info("Consulta pública MH OK para %s (estado=%s)", cod, data.get("estadoDoc"))
             return data
+        log.info("Consulta pública MH: %s respondió sin documento válido (action=%r)", cod, data.get("action"))
         return None
     except Exception as exc:
-        log.debug("Consulta pública MH falló para %s: %s", cod, exc)
+        log.info("Consulta pública MH falló para %s: %s", cod, exc)
         return None
