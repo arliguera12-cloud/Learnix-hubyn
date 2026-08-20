@@ -3,6 +3,8 @@ Extractor de DTEs de Retenciones (DTE-07 — casilla 162 / IVA 1%).
 Lógica portada de pages/3_Extractor_DTE_retenciones.py sin dependencias de Streamlit.
 """
 import re
+from concurrent.futures import ThreadPoolExecutor
+
 import pdfplumber
 
 from utils.pdf_utils import (
@@ -116,6 +118,24 @@ def extraer_sello(texto_original: str) -> str:
     return ""
 
 
+def _leer_qr_y_consultar_mh(file_bytes: bytes) -> tuple[dict, dict | None]:
+    """
+    Lee el QR y, si trae código de generación, consulta el DTE completo en
+    Hacienda — todo en un solo paso pensado para correr en un hilo aparte,
+    en paralelo con la llamada a Visión (la más lenta del pipeline). Ninguna
+    de las dos depende del resultado de la otra, así que no tiene sentido
+    pagar sus tiempos de espera en serie.
+    """
+    try:
+        qr = _extraer_qr(file_bytes)
+    except Exception:
+        qr = {}
+    gen = str(qr.get("codigo_generacion") or "").upper()
+    fecha_qr_iso = str(qr.get("fecha_qr") or "").strip()
+    consulta_mh = consultar_dte_publico(gen, fecha_qr_iso) if gen and fecha_qr_iso else None
+    return qr, consulta_mh
+
+
 def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
     if not file_bytes or len(file_bytes) < 512:
         return {"error": "Archivo vacío o corrupto."}
@@ -129,19 +149,29 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
     _vision_alertas: list = []
     _vision_audit: dict   = {}
 
-    if vision_disponible():
-        _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
-            file_bytes,
-            "retenciones",
-            {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
-        )
-        gemini_correcciones = [
-            f"Vision: {a}" for a in _vision_alertas
-        ] if _vision_alertas else (
-            [f"Vision extrajo {len(_vision_campos)} campo(s)"]
-            if _vision_campos else []
-        )
+    # El QR + la consulta a Hacienda no dependen de Visión (ni al revés) —
+    # se lanzan en un hilo aparte para que corran en paralelo con la llamada
+    # a Visión (la más lenta del pipeline) en vez de esperar sus tiempos de
+    # red en serie.
+    with ThreadPoolExecutor(max_workers=1) as _pool:
+        _qr_future = _pool.submit(_leer_qr_y_consultar_mh, file_bytes)
 
+        if vision_disponible():
+            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+                file_bytes,
+                "retenciones",
+                {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
+            )
+            gemini_correcciones = [
+                f"Vision: {a}" for a in _vision_alertas
+            ] if _vision_alertas else (
+                [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+                if _vision_campos else []
+            )
+
+    # Salir del `with` espera a que el hilo del QR/Hacienda termine (el
+    # __exit__ del pool hace shutdown(wait=True)) — para este punto
+    # _qr_future ya está resuelto, así que .result() no bloquea nada extra.
     try:
         texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
         texto_completo = texto_lineal + "\n" + texto_visual
@@ -257,9 +287,11 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             sello = v_sello
 
         # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
+        # (leído en paralelo con Visión más arriba — aquí solo se recoge el
+        # resultado, ya listo, sin volver a leer el QR ni consultar Hacienda).
+        _qr, _consulta_mh = _qr_future.result()
         _fecha_qr_iso = ""
         try:
-            _qr = _extraer_qr(file_bytes)
             if _qr.get("codigo_generacion"):
                 gen = _qr["codigo_generacion"].upper()
             # NIT del emisor del QR como respaldo
@@ -287,19 +319,17 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         # abajo ya no tiene nada que corregir en base/ret, ahorrando la
         # llamada. Hacienda no expone el NIT del sujeto retenido (privacidad),
         # así que ese campo sigue dependiendo de regex/Vision/IA.
-        if gen and _fecha_qr_iso:
-            _consulta_mh = consultar_dte_publico(gen, _fecha_qr_iso)
-            if _consulta_mh:
-                _resumen_mh = (_consulta_mh.get("documento") or {}).get("resumen") or {}
-                _base_mh = _resumen_mh.get("totalSujetoRetencion")
-                _ret_mh  = _resumen_mh.get("totalIVAretenido")
-                if _base_mh is not None:
-                    base = float(_base_mh)
-                if _ret_mh is not None:
-                    ret = float(_ret_mh)
-                if _consulta_mh.get("selloVal"):
-                    sello = str(_consulta_mh["selloVal"]).upper()
-                gemini_correcciones.append("Montos verificados con la consulta pública de Hacienda")
+        if _consulta_mh:
+            _resumen_mh = (_consulta_mh.get("documento") or {}).get("resumen") or {}
+            _base_mh = _resumen_mh.get("totalSujetoRetencion")
+            _ret_mh  = _resumen_mh.get("totalIVAretenido")
+            if _base_mh is not None:
+                base = float(_base_mh)
+            if _ret_mh is not None:
+                ret = float(_ret_mh)
+            if _consulta_mh.get("selloVal"):
+                sello = str(_consulta_mh["selloVal"]).upper()
+            gemini_correcciones.append("Montos verificados con la consulta pública de Hacienda")
 
         _campos_pre_ia = {
             "nit_prov": nit_prov, "fecha": fecha, "sello": sello, "gen": gen,
