@@ -14,6 +14,7 @@ from utils.pdf_utils import (
 from utils.ai_utils import gemini_disponible, procesar_dte_con_gemini
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
+from utils.mh_consulta import consultar_dte_publico
 from utils.qa_utils import calcular_confianza
 from utils.local_db import cargar_proveedores_combinados
 
@@ -285,6 +286,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 base = round(ret * 100, 2)
 
         # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
+        _fecha_qr_iso = ""
         try:
             _qr = _extraer_qr(file_bytes)
             if _qr.get("codigo_generacion"):
@@ -295,13 +297,34 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if len(_nq) == 14 and _nq != nit_cliente:
                     nit_prov = _nq
             # Fecha del QR como respaldo
-            if not fecha and _qr.get("fecha_qr"):
-                _fq = str(_qr["fecha_qr"]).strip()
-                _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fq)
-                if _mf:
-                    fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
+            if _qr.get("fecha_qr"):
+                _fecha_qr_iso = str(_qr["fecha_qr"]).strip()
+                if not fecha:
+                    _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fecha_qr_iso)
+                    if _mf:
+                        fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
         except Exception:
             pass
+
+        # ── Consulta pública de Hacienda: fuente más confiable que existe ────────
+        # Con el código de generación del QR se puede pedir el DTE oficial
+        # completo al MH — el mismo dato que muestra la página de
+        # "consultaPublica" al escanear el QR con el celular. Si responde,
+        # sus montos pisan lo que haya (regex o IA) porque vienen directo de
+        # la base de datos de Hacienda, no de una inferencia sobre el PDF.
+        if gen and _fecha_qr_iso:
+            _consulta_mh = consultar_dte_publico(gen, _fecha_qr_iso)
+            if _consulta_mh:
+                _resumen_mh = (_consulta_mh.get("documento") or {}).get("resumen") or {}
+                _base_mh = _resumen_mh.get("totalSujetoRetencion")
+                _ret_mh  = _resumen_mh.get("totalIVAretenido")
+                if _base_mh is not None:
+                    base = float(_base_mh)
+                if _ret_mh is not None:
+                    ret = float(_ret_mh)
+                if _consulta_mh.get("selloVal"):
+                    sello = str(_consulta_mh["selloVal"]).upper()
+                gemini_correcciones.append("Montos verificados con la consulta pública de Hacienda")
 
         _campos_finales = {
             "nit_prov": nit_prov, "fecha": fecha, "sello": sello, "gen": gen,
