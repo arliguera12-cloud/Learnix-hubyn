@@ -114,9 +114,15 @@ export function useProgresoLote() {
   return { progress, iniciar, avanzar, terminar, limpiar }
 }
 
-// Mismo tope que el backend (routers/procesamiento.py: _MAX_LOTE_ARCHIVOS) —
-// con más archivos por request el proxy corta la conexión antes de terminar.
-export const TAMANO_TANDA = 40
+// Mismo tope que el backend (routers/procesamiento.py: _MAX_LOTE_ARCHIVOS).
+// Con 40 por tanda, cada request dispara hasta 40 llamadas a Visión en
+// paralelo (cada una renderiza el PDF a imagen) — confirmado en producción
+// que eso puede agotar la memoria del contenedor y tumbarlo a mitad de
+// tanda (net::ERR_FAILED casi inmediato, distinto del timeout del proxy
+// que corta tandas más largas recién a los 1-3 min). Tandas más chicas
+// bajan el pico de memoria simultánea y además terminan bien dentro de
+// cualquier timeout de proxy.
+export const TAMANO_TANDA = 10
 
 /**
  * Sube `files` en tandas de `TAMANO_TANDA`, una tras otra, y junta los
