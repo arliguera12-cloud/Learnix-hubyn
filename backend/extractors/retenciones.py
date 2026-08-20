@@ -163,9 +163,9 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
             )
             gemini_correcciones = [
-                f"Vision: {a}" for a in _vision_alertas
+                f"Visión: {a}" for a in _vision_alertas
             ] if _vision_alertas else (
-                [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+                [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
                 if _vision_campos else []
             )
 
@@ -329,7 +329,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 ret = float(_ret_mh)
             if _consulta_mh.get("selloVal"):
                 sello = str(_consulta_mh["selloVal"]).upper()
-            gemini_correcciones.append("Montos verificados con la consulta pública de Hacienda")
+            gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
 
         _campos_pre_ia = {
             "nit_prov": nit_prov, "fecha": fecha, "sello": sello, "gen": gen,
@@ -345,7 +345,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 _campos_act,
                 {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
             )
-            gemini_correcciones += _correcciones_ia
+            gemini_correcciones += [f"IA: {c}" for c in _correcciones_ia]
             if _corr_dict.get("fecha"):
                 fecha    = _corr_dict["fecha"]
             if _corr_dict.get("nit_prov"):

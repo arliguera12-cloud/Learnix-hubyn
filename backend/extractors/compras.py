@@ -397,9 +397,9 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             {"nit": _nit_rec_ctx, "nombre": _nom_rec_ctx},
         )
         gemini_correcciones = [
-            f"Vision: {a}" for a in _vision_alertas
+            f"Visión: {a}" for a in _vision_alertas
         ] if _vision_alertas else (
-            [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+            [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
             if _vision_campos else []
         )
 
@@ -853,12 +853,13 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             # texto_visual preserva columnas EMISOR|RECEPTOR — mejor para el modelo.
             # Evitar concatenar lineal+visual (duplica contenido y gasta contexto).
             _texto_ia = texto_visual if texto_visual.strip() else texto_lineal
-            _corr_dict, gemini_correcciones = verificar_compra_con_gemini(
+            _corr_dict, _correcciones_ia = verificar_compra_con_gemini(
                 _texto_ia,
                 _campos_act,
                 nit_receptor,
                 nom_receptor,
             )
+            gemini_correcciones += [f"IA: {c}" for c in _correcciones_ia]
             # Solo aplicar corrección si el campo estaba vacío o Groq da uno mejor
             if _corr_dict.get("fecha") and not fecha:
                 fecha    = _corr_dict["fecha"]
