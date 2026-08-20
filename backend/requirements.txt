@@ -8,6 +8,12 @@ pdfplumber>=0.10.3
 PyMuPDF>=1.23.0
 
 # QR / OCR
+# zxingcpp es la estrategia PRIMARIA de qr_reader.py: wheel pura Python, sin
+# dependencias de sistema. pyzbar queda como respaldo, pero necesita
+# libzbar0 instalado en el SO — en Railway (Nixpacks, sin Aptfile/nixpacks.toml
+# que lo agregue) esa librería no está presente, así que sin zxingcpp la
+# lectura de QR fallaba en silencio en producción (siempre devolvía {}).
+zxing-cpp
 pyzbar
 pytesseract>=0.3.1
 Pillow>=10.0.0

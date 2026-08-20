@@ -949,10 +949,20 @@ def _extraer_campos_corregidos(resultado: dict, campos_actuales: dict, tipo_dte:
         nit = _validar_nit(resultado.get("nit_prov"), campos_actuales.get("nit_prov", ""), excluir)
         if nit and len(nit) == 14:
             campos_corr["nit_prov"] = nit
-        # Montos: aplicar solo cuando el regex devolvió 0 (mismo criterio que compras)
+        # Montos: aplicar cuando el regex devolvió 0 (igual que compras) o
+        # cuando el par base/ret que trajo el regex no cumple ret≈base×1% —
+        # ahí un valor "presente pero mal" es tan sospechoso como uno
+        # ausente, y no tiene sentido dejarlo así solo porque no es cero.
+        _base_actual = float(campos_actuales.get("base", 0) or 0)
+        _ret_actual  = float(campos_actuales.get("ret", 0) or 0)
+        _par_inconsistente = (
+            _base_actual > 0 and _ret_actual > 0
+            and abs(_ret_actual - round(_base_actual * 0.01, 2)) > 0.02
+        )
         for campo_monto in ("base", "ret"):
             val_ia = normalizar_monto_ia(resultado.get(campo_monto))
-            if val_ia is not None and val_ia > 0 and float(campos_actuales.get(campo_monto, 0) or 0) == 0:
+            actual = float(campos_actuales.get(campo_monto, 0) or 0)
+            if val_ia is not None and val_ia > 0 and (actual == 0 or _par_inconsistente):
                 campos_corr[campo_monto] = round(val_ia, 2)
 
     elif tipo_dte == "sujetos_excluidos":
