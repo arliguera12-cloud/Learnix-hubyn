@@ -4,6 +4,8 @@ Lógica portada de pages/2_Extractor_DTE_Compras.py sin dependencias de Streamli
 """
 import re
 import logging
+from concurrent.futures import ThreadPoolExecutor
+
 import pdfplumber
 
 from utils.pdf_utils import (
@@ -20,6 +22,7 @@ from utils.ai_utils import (
 )
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
+from utils.mh_consulta import consultar_dte_publico
 from utils.qa_utils import calcular_confianza
 from utils.dte_layout import buscar_numero_control
 from utils.constants import TIPOS_VALIDOS_COMPRAS, MAX_VALORES_LOOP_COMPRAS
@@ -368,6 +371,26 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
     return ""
 
 
+def _leer_qr_y_consultar_mh(file_bytes: bytes) -> tuple[dict, dict | None]:
+    """
+    Lee el QR y, si trae código de generación, consulta el DTE completo en
+    Hacienda — en un hilo aparte, en paralelo con Visión. Mismo patrón que
+    retenciones.py/ventas.py. A diferencia de ventas.py, acá NO se usa
+    `numeIdenRecep` (es el NIT del receptor/comprador — o sea, del propio
+    declarante en una compra, no del proveedor) — Hacienda no expone el
+    NIT del emisor/proveedor en la consulta pública, así que ese campo
+    sigue dependiendo de regex/Visión/IA.
+    """
+    try:
+        qr = _extraer_qr(file_bytes)
+    except Exception:
+        qr = {}
+    gen = str(qr.get("codigo_generacion") or "").upper()
+    fecha_qr_iso = str(qr.get("fecha_qr") or "").strip()
+    consulta_mh = consultar_dte_publico(gen, fecha_qr_iso) if gen and fecha_qr_iso else None
+    return qr, consulta_mh
+
+
 def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedores_db: dict = None) -> dict:
     """
     Extrae datos de un DTE de compra.
@@ -390,18 +413,24 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
     _vision_alertas: list = []
     _vision_audit: dict   = {}
 
-    if vision_disponible():
-        _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
-            file_bytes,
-            "compras",
-            {"nit": _nit_rec_ctx, "nombre": _nom_rec_ctx},
-        )
-        gemini_correcciones = [
-            f"Visión: {a}" for a in _vision_alertas
-        ] if _vision_alertas else (
-            [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
-            if _vision_campos else []
-        )
+    # El QR + la consulta a Hacienda no dependen de Visión (ni al revés) —
+    # se lanzan en un hilo aparte para correr en paralelo con la llamada a
+    # Visión en vez de esperar sus tiempos de red en serie.
+    with ThreadPoolExecutor(max_workers=1) as _pool:
+        _qr_future = _pool.submit(_leer_qr_y_consultar_mh, file_bytes)
+
+        if vision_disponible():
+            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+                file_bytes,
+                "compras",
+                {"nit": _nit_rec_ctx, "nombre": _nom_rec_ctx},
+            )
+            gemini_correcciones = [
+                f"Visión: {a}" for a in _vision_alertas
+            ] if _vision_alertas else (
+                [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
+                if _vision_campos else []
+            )
 
     try:
         try:
@@ -842,6 +871,70 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
                 sello = v_sello
 
+        # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
+        # (leído en paralelo con Visión más arriba — aquí solo se recoge el
+        # resultado, ya listo, sin volver a leer el QR ni consultar Hacienda).
+        _qr, _consulta_mh = _qr_future.result()
+        _fecha_qr_iso = ""
+        try:
+            if _qr.get("codigo_generacion"):
+                gen = _qr["codigo_generacion"].upper()
+                gen_sin_guiones = gen.replace("-", "")
+            if _qr.get("num_control") and not ctrl:
+                _qc = _qr["num_control"].upper()
+                _mq = re.search(r'DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18}', _qc, re.I)
+                if _mq:
+                    ctrl        = _qc
+                    tipo        = _mq.group(1)
+                    num_control = ctrl.replace("-", "")
+            # NIT del emisor del QR como respaldo si regex no lo encontró
+            if not nit_prov and _qr.get("nit_emisor_qr"):
+                _nq = re.sub(r'[^0-9]', '', str(_qr["nit_emisor_qr"]))
+                if len(_nq) == 14 and _nq not in excluir_nits:
+                    nit_prov = _nq
+            # Fecha del QR como respaldo si regex no la encontró
+            if _qr.get("fecha_qr"):
+                _fecha_qr_iso = str(_qr["fecha_qr"]).strip()
+                if not fecha:
+                    _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fecha_qr_iso)
+                    if _mf:
+                        fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
+        except Exception:
+            pass
+
+        # ── Consulta pública de Hacienda: corre ANTES que la IA a propósito —
+        # es gratis y más confiable que cualquier inferencia sobre el PDF.
+        # Verificado con un CCF real: resumen.totalGravada/totalExenta/
+        # totalNoSuj/totalPagar. NO se usa numeIdenRecep acá — en una compra
+        # ese campo es el NIT del receptor (el propio declarante), no el
+        # del proveedor, así que nit_prov sigue dependiendo de regex/Visión/
+        # IA/QR. La columna "Compras Exentas/No Sujetas" del Anexo 3 es una
+        # sola (no separa exentas de no sujetas como sí hace ventas), así
+        # que se suman ambas en `exe`.
+        if _consulta_mh:
+            _resumen_mh = (_consulta_mh.get("documento") or {}).get("resumen") or {}
+            _grav_mh  = _resumen_mh.get("totalGravada")
+            _exe_mh   = _resumen_mh.get("totalExenta")
+            _nosuj_mh = _resumen_mh.get("totalNoSuj")
+            _tot_mh   = _resumen_mh.get("totalPagar")
+            _iva_mh   = _resumen_mh.get("totalIva")
+            if _iva_mh is None:
+                for _trib in (_resumen_mh.get("tributos") or []):
+                    if str(_trib.get("codigo")) == "20":
+                        _iva_mh = _trib.get("valor")
+                        break
+            if _grav_mh is not None:
+                gra = float(_grav_mh)
+            if _exe_mh is not None or _nosuj_mh is not None:
+                exe = float(_exe_mh or 0) + float(_nosuj_mh or 0)
+            if _tot_mh is not None:
+                tot = float(_tot_mh)
+            if _iva_mh is not None:
+                iva = float(_iva_mh)
+            if _consulta_mh.get("selloVal"):
+                sello = str(_consulta_mh["selloVal"]).upper()
+            gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
+
         # ── Escalar a IA textual solo si la confianza está en zona gris ───────
         _campos_pre_ia = {
             "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
@@ -876,33 +969,6 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 exe = float(_corr_dict["exe"])
             if _corr_dict.get("tot") and tot == 0.0:
                 tot = float(_corr_dict["tot"])
-
-        # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
-        try:
-            _qr = _extraer_qr(file_bytes)
-            if _qr.get("codigo_generacion"):
-                gen = _qr["codigo_generacion"].upper()
-                gen_sin_guiones = gen.replace("-", "")
-            if _qr.get("num_control") and not ctrl:
-                _qc = _qr["num_control"].upper()
-                _mq = re.search(r'DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18}', _qc, re.I)
-                if _mq:
-                    ctrl        = _qc
-                    tipo        = _mq.group(1)
-                    num_control = ctrl.replace("-", "")
-            # NIT del emisor del QR como respaldo si regex no lo encontró
-            if not nit_prov and _qr.get("nit_emisor_qr"):
-                _nq = re.sub(r'[^0-9]', '', str(_qr["nit_emisor_qr"]))
-                if len(_nq) == 14 and _nq not in excluir_nits:
-                    nit_prov = _nq
-            # Fecha del QR como respaldo si regex no la encontró
-            if not fecha and _qr.get("fecha_qr"):
-                _fq = str(_qr["fecha_qr"]).strip()
-                _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fq)
-                if _mf:
-                    fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
-        except Exception:
-            pass
 
         _campos_finales = {
             "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
