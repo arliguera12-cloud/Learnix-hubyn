@@ -2,8 +2,8 @@
 Learnix Hub — AI Utils v5.0 (Groq motor único + Google AI opcional).
 
 Motor PRINCIPAL: Groq Cloud
-  - Texto  : llama-3.3-70b-versatile
-  - Visión : meta-llama/llama-4-scout-17b-16e-instruct
+  - Texto  : openai/gpt-oss-120b
+  - Visión : qwen/qwen3.6-27b
   - Circuit breaker INDEPENDIENTE para Groq
 
 Motor OPCIONAL (Google AI): se activa si GEMINI_API_KEY / VERTEX_API_KEY está
@@ -27,8 +27,8 @@ from groq import Groq
 
 log = logging.getLogger(__name__)
 
-_GROQ_MODEL        = "llama-3.3-70b-versatile"
-_GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+_GROQ_MODEL        = "openai/gpt-oss-120b"
+_GROQ_VISION_MODEL = "qwen/qwen3.6-27b"
 _MAX_RETRIES       = 3
 _BACKOFF_DELAYS    = [2, 4, 8]
 
@@ -269,7 +269,7 @@ ESCALA DE CONFIANZA (auditoria_ia.confianza_extraccion):
   0-59  : alta incertidumbre — se recomienda revisión manual
 
 SIEMPRE completa auditoria_ia con:
-  modelo_utilizado      = "llama-3.3-70b-versatile"
+  modelo_utilizado      = "openai/gpt-oss-120b"
   confianza_extraccion  = número entero 0-100
   notas_de_razonamiento = resumen en 1-2 oraciones
 """
@@ -337,7 +337,7 @@ Estructura requerida:
   "iva": 0.0,
   "tot": 0.0,
   "correcciones": ["descripción de cada campo modificado"],
-  "auditoria_ia": {{"modelo_utilizado": "llama-3.3-70b-versatile", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
+  "auditoria_ia": {{"modelo_utilizado": "openai/gpt-oss-120b", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
 }}"""
 
 
@@ -381,7 +381,7 @@ Estructura requerida:
   "dui_cli": "9 dígitos o null",
   "nom_cli": "nombre del receptor o null",
   "correcciones": ["descripción de cada campo modificado"],
-  "auditoria_ia": {{"modelo_utilizado": "llama-3.3-70b-versatile", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
+  "auditoria_ia": {{"modelo_utilizado": "openai/gpt-oss-120b", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
 }}"""
 
 
@@ -432,7 +432,7 @@ Estructura requerida:
   "base": 0.0,
   "ret": 0.0,
   "correcciones": ["descripción de cada campo modificado"],
-  "auditoria_ia": {{"modelo_utilizado": "llama-3.3-70b-versatile", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
+  "auditoria_ia": {{"modelo_utilizado": "openai/gpt-oss-120b", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
 }}"""
 
 
@@ -476,7 +476,7 @@ Estructura requerida:
   "dui_sujeto": "9 dígitos o null",
   "nom_sujeto": "nombre del sujeto o null",
   "correcciones": ["descripción de cada campo modificado"],
-  "auditoria_ia": {{"modelo_utilizado": "llama-3.3-70b-versatile", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
+  "auditoria_ia": {{"modelo_utilizado": "openai/gpt-oss-120b", "confianza_extraccion": 0, "notas_de_razonamiento": "..."}}
 }}"""
 
 
@@ -1053,7 +1053,7 @@ def procesar_dte_con_gemini(
     proyecto "nomadic-sprite-440003-r7", para máxima precisión. El modelo
     concreto se resuelve en _vertex_model() (default gemini-2.5-flash,
     configurable vía VERTEX_MODEL).
-    Motor de RESPALDO: Groq (llama-3.3-70b-versatile) con circuit breaker, que
+    Motor de RESPALDO: Groq (openai/gpt-oss-120b) con circuit breaker, que
     se usa solo si Vertex AI no está disponible o falla (p. ej. cuota agotada).
 
     Mantiene la misma firma que la versión original para compatibilidad total.
