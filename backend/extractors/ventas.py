@@ -248,9 +248,9 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
         )
         gemini_correcciones = [
-            f"Vision: {a}" for a in _vision_alertas
+            f"Visión: {a}" for a in _vision_alertas
         ] if _vision_alertas else (
-            [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+            [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
             if _vision_campos else []
         )
 
@@ -700,12 +700,13 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "dui_cli": dui_cli,
             }
             _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
-            _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
+            _corr_dict, _correcciones_ia = procesar_dte_con_gemini(
                 _texto_ia,
                 "ventas",
                 _campos_act,
                 {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
             )
+            gemini_correcciones += [f"IA: {c}" for c in _correcciones_ia]
             if _corr_dict.get("fecha"):
                 fecha   = _corr_dict["fecha"]
             if _corr_dict.get("nom_cli"):

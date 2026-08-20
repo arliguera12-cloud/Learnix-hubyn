@@ -137,9 +137,9 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
         )
         gemini_correcciones = [
-            f"Vision: {a}" for a in _vision_alertas
+            f"Visión: {a}" for a in _vision_alertas
         ] if _vision_alertas else (
-            [f"Vision extrajo {len(_vision_campos)} campo(s)"]
+            [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
             if _vision_campos else []
         )
 
@@ -267,12 +267,13 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
                 "dui_sujeto": _dui_suj,
             }
             _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
-            _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
+            _corr_dict, _correcciones_ia = procesar_dte_con_gemini(
                 _texto_ia,
                 "sujetos_excluidos",
                 _campos_act,
                 {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
             )
+            gemini_correcciones += [f"IA: {c}" for c in _correcciones_ia]
             if _corr_dict.get("fecha"):
                 fecha = _corr_dict["fecha"]
             if _corr_dict.get("nom_sujeto"):

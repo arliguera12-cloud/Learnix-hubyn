@@ -69,6 +69,23 @@ function fmt(v) {
   return Number(v).toLocaleString('es-SV', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// El backend prefija cada corrección con su fuente real ("Visión: ...",
+// "Hacienda: ...", "IA: ...") — antes todo se mostraba bajo un único rótulo
+// "Correcciones aplicadas por IA" aunque la mayoría de las veces quien
+// actuó fue el QR/Hacienda o el modelo de Visión, no un modelo de texto.
+const FUENTE_ESTILO = {
+  'Visión':   { label: 'Visión',   clase: 'text-sky-400 border-sky-700' },
+  'Hacienda': { label: 'Hacienda', clase: 'text-emerald-400 border-emerald-700' },
+  'IA':       { label: 'IA',       clase: 'text-amber-400 border-amber-700' },
+}
+const FUENTE_DEFECTO = { label: 'Sistema', clase: 'text-slate-400 border-slate-600' }
+
+function parsearCorreccion(texto) {
+  const m = /^(Visión|Hacienda|IA):\s*(.*)$/.exec(texto)
+  if (!m) return { ...FUENTE_DEFECTO, mensaje: texto }
+  return { ...(FUENTE_ESTILO[m[1]] || FUENTE_DEFECTO), mensaje: m[2] }
+}
+
 function descargarBlob(blobData, nombre) {
   const url = URL.createObjectURL(new Blob([blobData]))
   const a = document.createElement('a')
@@ -142,8 +159,9 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
               )}
               <EstadoBadge estado={registro.estado} />
               {tieneIa && (
-                <span className="text-xs text-amber-400">
-                  IA · {correcciones_ia.length} corrección{correcciones_ia.length > 1 ? 'es' : ''}
+                <span className="text-xs text-slate-400">
+                  {[...new Set(correcciones_ia.map(c => parsearCorreccion(c).label))].join(' · ')}
+                  {' · '}{correcciones_ia.length} nota{correcciones_ia.length > 1 ? 's' : ''}
                 </span>
               )}
             </div>
@@ -240,18 +258,22 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
         </div>
       )}
 
-      {/* Correcciones IA */}
+      {/* Notas por fuente: qué corrigió/verificó cada mecanismo (Visión, Hacienda, IA) */}
       {tieneIa && expandido && (
-        <div className="px-4 py-3 border-t border-surface-600/50 bg-amber-900/10">
-          <p className="text-xs text-amber-400 font-semibold mb-2">
-            Correcciones aplicadas por IA
+        <div className="px-4 py-3 border-t border-surface-600/50 bg-surface-700/30">
+          <p className="text-xs text-slate-400 font-semibold mb-2">
+            Origen de los datos
           </p>
-          <ul className="space-y-1">
-            {correcciones_ia.map((c, i) => (
-              <li key={i} className="text-xs text-slate-300 pl-3 border-l-2 border-amber-700">
-                {c}
-              </li>
-            ))}
+          <ul className="space-y-1.5">
+            {correcciones_ia.map((c, i) => {
+              const { label, clase, mensaje } = parsearCorreccion(c)
+              return (
+                <li key={i} className={`text-xs text-slate-300 pl-3 border-l-2 ${clase}`}>
+                  <span className={`font-semibold mr-1.5 ${clase.split(' ')[0]}`}>{label}:</span>
+                  {mensaje}
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}
