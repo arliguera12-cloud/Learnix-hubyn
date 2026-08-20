@@ -149,19 +149,125 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
     _vision_alertas: list = []
     _vision_audit: dict   = {}
 
-    # El QR + la consulta a Hacienda no dependen de Visión (ni al revés) —
-    # se lanzan en un hilo aparte para que corran en paralelo con la llamada
-    # a Visión (la más lenta del pipeline) en vez de esperar sus tiempos de
-    # red en serie.
-    with ThreadPoolExecutor(max_workers=1) as _pool:
+    # El QR+Hacienda y Visión no dependen del texto/regex del PDF (ni entre
+    # sí) — se lanzan ambos en un hilo aparte para correr en paralelo con el
+    # parseo de texto+regex de abajo (rápido, pero antes esperaba a que
+    # Visión terminara para siquiera empezar), en vez de encadenar sus
+    # tiempos de red en serie.
+    with ThreadPoolExecutor(max_workers=2) as _pool:
         _qr_future = _pool.submit(_leer_qr_y_consultar_mh, file_bytes)
-
-        if vision_disponible():
-            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+        _vision_future = (
+            _pool.submit(
+                extraer_dte_con_vision,
                 file_bytes,
                 "retenciones",
                 {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
             )
+            if vision_disponible() else None
+        )
+
+        try:
+            texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
+            texto_completo = texto_lineal + "\n" + texto_visual
+
+            t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
+            t_no_sp = re.sub(r'\s+', '', t_clean).upper()
+
+            m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]{1,20}-\d{9,18})", t_no_sp)
+            tipo   = "07"
+            if m_ctrl:
+                ctrl   = m_ctrl.group(1).replace("O", "0")
+                m_tipo = re.search(r"DTE-(\d{2})", ctrl)
+                if m_tipo:
+                    tipo = m_tipo.group(1)
+
+            nit_cliente = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
+
+            gen = ""
+            m_uuid = re.search(
+                r"([A-Fa-f0-9]{8}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{12})",
+                t_no_sp
+            )
+            if m_uuid:
+                raw = m_uuid.group(1).replace("-", "")
+                if len(raw) == 32:
+                    gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}".upper()
+
+            sello = extraer_sello(t_clean)
+            fecha = extraer_y_formatear_fecha(t_clean)
+
+            nit_prov = ""
+            patron_ids = (
+                r"\b\d{4}\s*-?\s*\d{6}\s*-?\s*\d{3}\s*-?\s*\d\b"
+                r"|\b\d{14}\b"
+            )
+            # Buscar en texto_completo (con espacios, captura NITs con separadores)
+            ids_raw  = re.findall(patron_ids, texto_completo)
+            # Fallback: buscar 14 dígitos consecutivos en texto sin espacios
+            ids_raw += re.findall(r'\d{14}', t_no_sp)
+            ids_limp   = list(dict.fromkeys(re.sub(r'[^0-9]', '', n) for n in ids_raw))
+            candidatos = [n for n in ids_limp if n != nit_cliente and len(n) == 14]
+
+            proveedores_db = cargar_proveedores_json()
+            for n in candidatos:
+                if n in proveedores_db:
+                    nit_prov = n
+                    break
+
+            if not nit_prov and candidatos:
+                nit_prov = candidatos[0]
+
+            base, ret = 0.0, 0.0
+
+            m_base = re.search(
+                r"(?:Monto\s+[Ss]ujeto|[Ss]ujeto\s+a\s+[Rr]etenci[oó]n|"
+                r"[Tt]otal\s+[Mm]onto\s+[Ss]ujeto(?:\s+a\s+[Rr]etener?)?)"
+                r"[^\d$]{0,30}\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+)",
+                t_clean, re.I
+            )
+            m_ret = re.search(
+                r"(?:[Tt]otal\s+IVA\s+[Rr]etenido|[Tt]otal\s+IVA\s+[Rr]eteni"
+                r"|[Ii]mpuesto\s+[Rr]etenido|[Rr]etenci[oó]n\s+1%|[Mm]onto\s+[Rr]etenci[oó]n)"
+                r"[^\d$]{0,30}\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+)",
+                t_clean, re.I
+            )
+
+            if m_base:
+                base = limpiar_monto(m_base.group(1))
+            if m_ret:
+                ret = limpiar_monto(m_ret.group(1))
+
+            if base == 0.0:
+                montos_raw = re.findall(
+                    r"(?:US\$?|\$)\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d{2,}(?:[.,]\d{1,2})?)",
+                    t_clean
+                )
+                valores = sorted(
+                    list({limpiar_monto(m) for m in montos_raw if limpiar_monto(m) > 0}),
+                    reverse=True
+                )
+                for v in valores:
+                    ret_calc = round(v * 0.01, 2)
+                    if any(abs(r - ret_calc) <= 0.05 for r in valores if r < v):
+                        base = v
+                        ret  = ret_calc
+                        break
+
+            if base > 0 and ret == 0:
+                ret = round(base * 0.01, 2)
+
+            if ret > 0 and base == 0:
+                base = round(ret * 100, 2)
+        except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
+            return {"error": "PDF inválido o corrupto."}
+        except Exception as err:
+            return {"error": str(err)}
+
+        # A este punto el parseo de texto+regex ya terminó — recién ahora hace
+        # falta el resultado de Visión, así que esperarlo aquí no paga nada
+        # extra que no se estuviera pagando ya (corrió en paralelo arriba).
+        if _vision_future is not None:
+            _vision_campos, _vision_alertas, _vision_audit = _vision_future.result()
             gemini_correcciones = [
                 f"Visión: {a}" for a in _vision_alertas
             ] if _vision_alertas else (
@@ -169,107 +275,11 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if _vision_campos else []
             )
 
-    # Salir del `with` espera a que el hilo del QR/Hacienda termine (el
-    # __exit__ del pool hace shutdown(wait=True)) — para este punto
-    # _qr_future ya está resuelto, así que .result() no bloquea nada extra.
-    try:
-        texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
-        texto_completo = texto_lineal + "\n" + texto_visual
-
         if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
             return {"error": "PDF de imagen — sin texto extraíble."}
 
-        t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
-        t_no_sp = re.sub(r'\s+', '', t_clean).upper()
-
-        m_ctrl = re.search(r"(DTE-[0-9O]{2}-[A-Z0-9]{1,20}-\d{9,18})", t_no_sp)
-        tipo   = "07"
-        if m_ctrl:
-            ctrl   = m_ctrl.group(1).replace("O", "0")
-            m_tipo = re.search(r"DTE-(\d{2})", ctrl)
-            if m_tipo:
-                tipo = m_tipo.group(1)
-
         if tipo != "07":
             return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten DTE-07 (Retenciones)."}
-
-        nit_cliente = re.sub(r'[^0-9]', '', cliente_activo.get('nit', ''))
-
-        gen = ""
-        m_uuid = re.search(
-            r"([A-Fa-f0-9]{8}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{12})",
-            t_no_sp
-        )
-        if m_uuid:
-            raw = m_uuid.group(1).replace("-", "")
-            if len(raw) == 32:
-                gen = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}".upper()
-
-        sello = extraer_sello(t_clean)
-        fecha = extraer_y_formatear_fecha(t_clean)
-
-        nit_prov = ""
-        patron_ids = (
-            r"\b\d{4}\s*-?\s*\d{6}\s*-?\s*\d{3}\s*-?\s*\d\b"
-            r"|\b\d{14}\b"
-        )
-        # Buscar en texto_completo (con espacios, captura NITs con separadores)
-        ids_raw  = re.findall(patron_ids, texto_completo)
-        # Fallback: buscar 14 dígitos consecutivos en texto sin espacios
-        ids_raw += re.findall(r'\d{14}', t_no_sp)
-        ids_limp   = list(dict.fromkeys(re.sub(r'[^0-9]', '', n) for n in ids_raw))
-        candidatos = [n for n in ids_limp if n != nit_cliente and len(n) == 14]
-
-        proveedores_db = cargar_proveedores_json()
-        for n in candidatos:
-            if n in proveedores_db:
-                nit_prov = n
-                break
-
-        if not nit_prov and candidatos:
-            nit_prov = candidatos[0]
-
-        base, ret = 0.0, 0.0
-
-        m_base = re.search(
-            r"(?:Monto\s+[Ss]ujeto|[Ss]ujeto\s+a\s+[Rr]etenci[oó]n|"
-            r"[Tt]otal\s+[Mm]onto\s+[Ss]ujeto(?:\s+a\s+[Rr]etener?)?)"
-            r"[^\d$]{0,30}\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+)",
-            t_clean, re.I
-        )
-        m_ret = re.search(
-            r"(?:[Tt]otal\s+IVA\s+[Rr]etenido|[Tt]otal\s+IVA\s+[Rr]eteni"
-            r"|[Ii]mpuesto\s+[Rr]etenido|[Rr]etenci[oó]n\s+1%|[Mm]onto\s+[Rr]etenci[oó]n)"
-            r"[^\d$]{0,30}\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+)",
-            t_clean, re.I
-        )
-
-        if m_base:
-            base = limpiar_monto(m_base.group(1))
-        if m_ret:
-            ret = limpiar_monto(m_ret.group(1))
-
-        if base == 0.0:
-            montos_raw = re.findall(
-                r"(?:US\$?|\$)\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d{2,}(?:[.,]\d{1,2})?)",
-                t_clean
-            )
-            valores = sorted(
-                list({limpiar_monto(m) for m in montos_raw if limpiar_monto(m) > 0}),
-                reverse=True
-            )
-            for v in valores:
-                ret_calc = round(v * 0.01, 2)
-                if any(abs(r - ret_calc) <= 0.05 for r in valores if r < v):
-                    base = v
-                    ret  = ret_calc
-                    break
-
-        if base > 0 and ret == 0:
-            ret = round(base * 0.01, 2)
-
-        if ret > 0 and base == 0:
-            base = round(ret * 100, 2)
 
         # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
         if _vision_campos.get("fecha"):
@@ -391,8 +401,3 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             "_vision_alertas"     : _vision_alertas,
             "_vision_audit"       : _vision_audit,
         }
-
-    except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
-        return {"error": "PDF inválido o corrupto."}
-    except Exception as err:
-        return {"error": str(err)}
