@@ -19,6 +19,8 @@ rutas, lo cual está fuera de alcance de esta migración.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 
 from utils.supabase_admin import get_supabase
 
@@ -26,6 +28,39 @@ log = logging.getLogger(__name__)
 
 _CLIENTES_TABLE = "clientes_directorio"
 _PROVEEDORES_TABLE = "proveedores_directorio"
+
+# Claves de caché — no son nombres de tabla: cargar_proveedores_db y
+# cargar_proveedores_combinados leen la misma tabla pero devuelven formas
+# distintas (lista de filas completas vs. dict indexado por nit con
+# columnas recortadas), así que comparten tabla pero no pueden compartir
+# entrada de caché.
+_CACHE_CLIENTES = "clientes_db"
+_CACHE_PROVEEDORES_COMBINADOS = "proveedores_combinados"
+
+# Un lote de 40 PDFs corre las 40 extracciones en paralelo (ver
+# routers/procesamiento.py: _process_lote), y cada una llamaba a
+# cargar_proveedores_combinados/cargar_clientes_db directo — 40 consultas a
+# Supabase en paralelo por lote, repitiendo exactamente la misma consulta
+# (el directorio no cambia entre PDFs de un mismo lote), y si la tabla no
+# existe o Supabase está lento, esas 40 esperas de red se pagan una por una.
+# TTL corto porque solo busca evitar la repetición dentro del mismo lote, no
+# servir datos desactualizados si alguien edita el directorio entre subidas.
+_TTL_SEGUNDOS = 30
+_cache_lock = threading.Lock()
+_cache: dict[tuple[str, str | None], tuple[float, object]] = {}
+
+
+def _cache_get_or_load(clave_cache: str, organizacion_id: str | None, cargar):
+    clave = (clave_cache, organizacion_id)
+    ahora = time.monotonic()
+    with _cache_lock:
+        entrada = _cache.get(clave)
+        if entrada is not None and ahora - entrada[0] < _TTL_SEGUNDOS:
+            return entrada[1]
+    valor = cargar()
+    with _cache_lock:
+        _cache[clave] = (ahora, valor)
+    return valor
 
 
 def _org_eq(query, organizacion_id: str | None):
@@ -37,7 +72,7 @@ def _org_eq(query, organizacion_id: str | None):
 
 # ── Clientes ──────────────────────────────────────────────────────────────────
 
-def cargar_clientes_db(organizacion_id: str | None = None) -> list[dict]:
+def _cargar_clientes_db_sin_cache(organizacion_id: str | None) -> list[dict]:
     try:
         query = get_supabase().table(_CLIENTES_TABLE).select("*")
         resp = _org_eq(query, organizacion_id).order("nombre_comercial").execute()
@@ -45,6 +80,12 @@ def cargar_clientes_db(organizacion_id: str | None = None) -> list[dict]:
     except Exception as exc:
         log.error("cargar_clientes_db: %s", exc)
         return []
+
+
+def cargar_clientes_db(organizacion_id: str | None = None) -> list[dict]:
+    return _cache_get_or_load(
+        _CACHE_CLIENTES, organizacion_id, lambda: _cargar_clientes_db_sin_cache(organizacion_id)
+    )
 
 
 def guardar_cliente_db(
@@ -72,6 +113,8 @@ def guardar_cliente_db(
             sb.table(_CLIENTES_TABLE).update(row).eq("id", existing.data[0]["id"]).execute()
         else:
             sb.table(_CLIENTES_TABLE).insert(row).execute()
+        with _cache_lock:
+            _cache.pop((_CACHE_CLIENTES, organizacion_id), None)
         return True, ""
     except Exception as exc:
         log.error("guardar_cliente_db(%s): %s", nit, exc)
@@ -86,6 +129,8 @@ def eliminar_cliente_db(cliente_id: str, organizacion_id: str | None = None) -> 
             _org_eq(
                 sb.table(_CLIENTES_TABLE).delete().eq("nit", cliente_id), organizacion_id
             ).execute()
+        with _cache_lock:
+            _cache.pop((_CACHE_CLIENTES, organizacion_id), None)
         return True
     except Exception as exc:
         log.error("eliminar_cliente_db(%s): %s", cliente_id, exc)
@@ -122,6 +167,8 @@ def guardar_proveedor_db(
             sb.table(_PROVEEDORES_TABLE).update(row).eq("id", existing.data[0]["id"]).execute()
         else:
             sb.table(_PROVEEDORES_TABLE).insert(row).execute()
+        with _cache_lock:
+            _cache.pop((_CACHE_PROVEEDORES_COMBINADOS, organizacion_id), None)
         return True
     except Exception as exc:
         log.error("guardar_proveedor_db(%s): %s", nit, exc)
@@ -136,6 +183,8 @@ def eliminar_proveedor_db(proveedor_id: str, organizacion_id: str | None = None)
             _org_eq(
                 sb.table(_PROVEEDORES_TABLE).delete().eq("nit", proveedor_id), organizacion_id
             ).execute()
+        with _cache_lock:
+            _cache.pop((_CACHE_PROVEEDORES_COMBINADOS, organizacion_id), None)
         return True
     except Exception as exc:
         log.error("eliminar_proveedor_db(%s): %s", proveedor_id, exc)
@@ -167,7 +216,7 @@ def auto_registrar_proveedor(
     return guardar_proveedor_db(nit=nit, nombre=nombre, nrc=nrc, organizacion_id=organizacion_id)
 
 
-def cargar_proveedores_combinados(organizacion_id: str | None = None) -> dict:
+def _cargar_proveedores_combinados_sin_cache(organizacion_id: str | None) -> dict:
     try:
         query = get_supabase().table(_PROVEEDORES_TABLE).select("nit,nombre_comercial,nrc")
         resp = _org_eq(query, organizacion_id).execute()
@@ -178,3 +227,11 @@ def cargar_proveedores_combinados(organizacion_id: str | None = None) -> dict:
     except Exception as exc:
         log.error("cargar_proveedores_combinados: %s", exc)
         return {}
+
+
+def cargar_proveedores_combinados(organizacion_id: str | None = None) -> dict:
+    return _cache_get_or_load(
+        _CACHE_PROVEEDORES_COMBINADOS,
+        organizacion_id,
+        lambda: _cargar_proveedores_combinados_sin_cache(organizacion_id),
+    )
