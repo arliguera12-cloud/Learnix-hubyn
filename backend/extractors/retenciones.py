@@ -256,35 +256,6 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         if len(v_sello) >= 25 and "-" not in v_sello and len(sello) < 25:
             sello = v_sello
 
-        _campos_pre_ia = {
-            "nit_prov": nit_prov, "fecha": fecha, "sello": sello, "gen": gen,
-            "base": base, "ret": ret,
-        }
-        _confianza_pre = calcular_confianza(_campos_pre_ia, "retenciones")
-        if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
-            _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "base": base, "ret": ret}
-            _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
-            _corr_dict, gemini_correcciones = procesar_dte_con_gemini(
-                _texto_ia,
-                "retenciones",
-                _campos_act,
-                {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
-            )
-            if _corr_dict.get("fecha"):
-                fecha    = _corr_dict["fecha"]
-            if _corr_dict.get("nit_prov"):
-                nit_prov = _corr_dict["nit_prov"]
-            if _corr_dict.get("base"):
-                base = _corr_dict["base"]
-            if _corr_dict.get("ret"):
-                ret = _corr_dict["ret"]
-            # Si la IA corrigió un solo lado del par base/1%, recalcula el otro
-            # en vez de dejarlos inconsistentes entre sí.
-            if _corr_dict.get("base") and not _corr_dict.get("ret") and ret == 0:
-                ret = round(base * 0.01, 2)
-            elif _corr_dict.get("ret") and not _corr_dict.get("base") and base == 0:
-                base = round(ret * 100, 2)
-
         # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
         _fecha_qr_iso = ""
         try:
@@ -306,12 +277,16 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         except Exception:
             pass
 
-        # ── Consulta pública de Hacienda: fuente más confiable que existe ────────
-        # Con el código de generación del QR se puede pedir el DTE oficial
+        # ── Consulta pública de Hacienda: fuente más confiable que existe, y
+        # corre ANTES que la IA a propósito — es gratis (un GET, sin gastar
+        # tokens) y más confiable que cualquier inferencia sobre el PDF. Con
+        # el código de generación del QR se puede pedir el DTE oficial
         # completo al MH — el mismo dato que muestra la página de
         # "consultaPublica" al escanear el QR con el celular. Si responde,
-        # sus montos pisan lo que haya (regex o IA) porque vienen directo de
-        # la base de datos de Hacienda, no de una inferencia sobre el PDF.
+        # sus montos pisan lo que haya (regex/Vision) y el gate de la IA de
+        # abajo ya no tiene nada que corregir en base/ret, ahorrando la
+        # llamada. Hacienda no expone el NIT del sujeto retenido (privacidad),
+        # así que ese campo sigue dependiendo de regex/Vision/IA.
         if gen and _fecha_qr_iso:
             _consulta_mh = consultar_dte_publico(gen, _fecha_qr_iso)
             if _consulta_mh:
@@ -325,6 +300,36 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if _consulta_mh.get("selloVal"):
                     sello = str(_consulta_mh["selloVal"]).upper()
                 gemini_correcciones.append("Montos verificados con la consulta pública de Hacienda")
+
+        _campos_pre_ia = {
+            "nit_prov": nit_prov, "fecha": fecha, "sello": sello, "gen": gen,
+            "base": base, "ret": ret,
+        }
+        _confianza_pre = calcular_confianza(_campos_pre_ia, "retenciones")
+        if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
+            _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "base": base, "ret": ret}
+            _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
+            _corr_dict, _correcciones_ia = procesar_dte_con_gemini(
+                _texto_ia,
+                "retenciones",
+                _campos_act,
+                {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
+            )
+            gemini_correcciones += _correcciones_ia
+            if _corr_dict.get("fecha"):
+                fecha    = _corr_dict["fecha"]
+            if _corr_dict.get("nit_prov"):
+                nit_prov = _corr_dict["nit_prov"]
+            if _corr_dict.get("base"):
+                base = _corr_dict["base"]
+            if _corr_dict.get("ret"):
+                ret = _corr_dict["ret"]
+            # Si la IA corrigió un solo lado del par base/1%, recalcula el otro
+            # en vez de dejarlos inconsistentes entre sí.
+            if _corr_dict.get("base") and not _corr_dict.get("ret") and ret == 0:
+                ret = round(base * 0.01, 2)
+            elif _corr_dict.get("ret") and not _corr_dict.get("base") and base == 0:
+                base = round(ret * 100, 2)
 
         _campos_finales = {
             "nit_prov": nit_prov, "fecha": fecha, "sello": sello, "gen": gen,
