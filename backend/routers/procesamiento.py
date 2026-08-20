@@ -186,8 +186,9 @@ async def procesar_retenciones(
     nombre_declarante: str = Form("", description="Nombre/razón social del declarante"),
 ):
     """
-    Extrae los datos de un DTE de retenciones (DTE-07, casilla 162 / IVA 1%).
-    Devuelve un registro con estructura del Anexo 7 DGII.
+    Extrae los datos de un DTE de retenciones (Comprobante de Retención DTE-07,
+    o su corrección vía Nota de Crédito DTE-05 / Nota de Débito DTE-06 —
+    casilla 162 / IVA 1%). Devuelve un registro con estructura del Anexo 7 DGII.
     """
     content, _ext = _read_upload_bytes(file, permitir_json=False)
     cliente = _build_cliente_activo(declarante_id, nombre=nombre_declarante)

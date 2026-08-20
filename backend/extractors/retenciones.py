@@ -1,5 +1,8 @@
 """
-Extractor de DTEs de Retenciones (DTE-07 — casilla 162 / IVA 1%).
+Extractor de DTEs de Retenciones (Anexo 7 DGII — casilla 162 / IVA 1%).
+Admite Comprobante de Retención (DTE-07) y sus correcciones — Nota de
+Crédito (DTE-05) y Nota de Débito (DTE-06) — según el rango de "Tipo de
+Documento" que define el manual del Anexo 7 del Ministerio de Hacienda.
 Lógica portada de pages/3_Extractor_DTE_retenciones.py sin dependencias de Streamlit.
 """
 import re
@@ -197,6 +200,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             fecha = extraer_y_formatear_fecha(t_clean)
 
             nit_prov = ""
+            dui_agente = ""
             patron_ids = (
                 r"\b\d{4}\s*-?\s*\d{6}\s*-?\s*\d{3}\s*-?\s*\d\b"
                 r"|\b\d{14}\b"
@@ -216,6 +220,17 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
 
             if not nit_prov and candidatos:
                 nit_prov = candidatos[0]
+
+            # DUI del agente de retención (solo si no hay NIT) — el manual del
+            # Anexo 7 acepta ambos identificadores (columnas A y H), para el
+            # caso de un agente persona natural sin NIT. Mismo patrón que ya
+            # usa compras.py para el DUI del proveedor.
+            if not nit_prov:
+                for m in re.finditer(r'\b(\d{8}[\s\-]?\d|\d{9})\b', texto_completo):
+                    _dui_cand = re.sub(r'[^0-9]', '', m.group(0))
+                    if _dui_cand != nit_cliente and len(_dui_cand) == 9:
+                        dui_agente = _dui_cand
+                        break
 
             base, ret = 0.0, 0.0
 
@@ -278,8 +293,21 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
             return {"error": "PDF de imagen — sin texto extraíble."}
 
-        if tipo != "07":
-            return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten DTE-07 (Retenciones)."}
+        # El Anexo 7 admite Comprobante de Retención (07) y también Notas de
+        # Crédito/Débito (05/06) que corrigen una retención ya declarada —
+        # el manual del MH define ese mismo rango para la columna "Tipo de
+        # Documento". El regex de montos de abajo es genérico (busca
+        # "Monto Sujeto"/"Total IVA Retenido" en el texto) y Visión no
+        # depende del tipo de documento, así que en principio funcionan
+        # igual — pero no está verificado contra una Nota de Crédito/Débito
+        # real todavía.
+        if tipo not in ("05", "06", "07"):
+            return {
+                "error_tipo": (
+                    f"Documento DTE-{tipo}. Solo se admiten DTE-07 (Comprobante de "
+                    "Retención), DTE-05 (Nota de Crédito) o DTE-06 (Nota de Débito)."
+                )
+            }
 
         # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
         if _vision_campos.get("fecha"):
@@ -341,9 +369,13 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 sello = str(_consulta_mh["selloVal"]).upper()
             gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
 
+        # "nit_prov or dui_agente" solo para el cálculo de confianza — el
+        # campo requerido es "algún identificador del agente", no
+        # específicamente el NIT (que puede legítimamente estar vacío
+        # cuando el agente es una persona natural identificada por DUI).
         _campos_pre_ia = {
-            "nit_prov": nit_prov, "fecha": fecha, "sello": sello, "gen": gen,
-            "base": base, "ret": ret,
+            "nit_prov": nit_prov or dui_agente, "fecha": fecha, "sello": sello,
+            "gen": gen, "base": base, "ret": ret,
         }
         _confianza_pre = calcular_confianza(_campos_pre_ia, "retenciones")
         if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
@@ -372,8 +404,8 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 base = round(ret * 100, 2)
 
         _campos_finales = {
-            "nit_prov": nit_prov, "fecha": fecha, "sello": sello, "gen": gen,
-            "base": base, "ret": ret,
+            "nit_prov": nit_prov or dui_agente, "fecha": fecha, "sello": sello,
+            "gen": gen, "base": base, "ret": ret,
         }
         _confianza = calcular_confianza(_campos_finales, "retenciones")
         if _confianza["score"] >= 85:
@@ -385,6 +417,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
 
         return {
             "nit_prov"            : nit_prov,
+            "dui_agente"          : dui_agente,
             "fecha"               : fecha,
             "tipo"                : tipo,
             "sello"               : sello,
