@@ -24,7 +24,8 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 _MAX_PDF_SIZE = 10 * 1024 * 1024   # 10MB
 _MAX_JSON_SIZE = 2 * 1024 * 1024   # 2MB
-_MAX_LOTE_ARCHIVOS = 40             # más que esto y el proxy corta la conexión antes de terminar
+_MAX_LOTE_ARCHIVOS = 15             # ver TAMANO_TANDA en frontend/src/utils/dte.jsx — con más,
+                                     # el pico de memoria de Visión en paralelo tumbaba el contenedor
 
 
 # ---------------------------------------------------------------------------
