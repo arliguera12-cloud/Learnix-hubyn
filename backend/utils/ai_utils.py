@@ -1370,7 +1370,12 @@ def _llamar_groq_vision(prompt: str, img_b64: str) -> dict | None:
                 model=_GROQ_VISION_MODEL,
                 messages=mensajes,
                 temperature=0.1,
-                max_tokens=1024,
+                # qwen3.6-27b es un modelo con razonamiento interno — con
+                # max_tokens=1024 (el límite que tenía cuando el modelo de
+                # visión era llama-4-scout, que no razona) se gastaba todo
+                # el presupuesto "pensando" y no dejaba nada para la
+                # respuesta JSON visible, devolviendo content vacío.
+                max_tokens=4096,
             )
             try:
                 response = client.chat.completions.create(
