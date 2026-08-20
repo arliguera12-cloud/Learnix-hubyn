@@ -3,7 +3,7 @@ import PdfUploader from '../components/PdfUploader'
 import { procesarVentas, procesarVentasLote, exportarExcelVentas, guardarResultados } from '../services/api'
 import {
   fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados,
-  usePersistenciaExtractor, useProgresoSimulado, subirLoteEnTandas,
+  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA,
 } from '../utils/dte'
 import { IconVentas, IconExportar, IconCheck, IconAlerta } from '../components/Icons'
 
@@ -29,7 +29,7 @@ export default function Ventas() {
   const [exportando,   setExportando]   = useState(false)
   const [tab,          setTab]          = useState(0)
   const [aviso,        setAviso]        = useState(null)
-  const { progress, iniciar: iniciarProgreso, avanzarA, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoSimulado()
+  const { progress, iniciar: iniciarProgreso, avanzar: avanzarProgreso, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoLote()
 
   // Cambiar de cliente en el selector vacía la tabla de inmediato — antes
   // quedaba la del cliente anterior en pantalla hasta la próxima extracción,
@@ -50,10 +50,9 @@ export default function Ventas() {
         // Se sube en tandas de a lo sumo TAMANO_TANDA (el backend las procesa
         // en paralelo internamente) — así un lote de cientos de PDFs no choca
         // con el límite por request ni con el timeout del proxy.
-        iniciarProgreso(filesOrFile.length)
+        iniciarProgreso(filesOrFile.length, Math.ceil(filesOrFile.length / TAMANO_TANDA))
         const { resultados: res, errores } = await subirLoteEnTandas(
-          filesOrFile, procesarVentasLote, dId, undefined,
-          (procesados, total) => avanzarA(Math.round((procesados / total) * 92)),
+          filesOrFile, procesarVentasLote, dId, undefined, avanzarProgreso,
         )
         nuevos = res
         if (errores.length) setError(errores.map(e => `${e.filename}: ${e.error}`).join('\n'))
@@ -193,10 +192,11 @@ export default function Ventas() {
         <div className="card space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-slate-300">
-              Procesando {progress.total} PDF{progress.total !== 1 ? 's' : ''} en paralelo…
+              Procesando {progress.procesados} de {progress.total} PDF{progress.total !== 1 ? 's' : ''}
+              {progress.totalTandas > 1 && ` (tanda ${progress.tandaActual || 1} de ${progress.totalTandas})`}…
             </span>
             <span className="text-slate-400 font-mono text-xs">
-              {Math.round(progress.pct)}%
+              {Math.round(progress.pct)}%{progress.etaTexto && ` · ${progress.etaTexto}`}
             </span>
           </div>
           <div className="h-1.5 bg-surface-700 rounded-full overflow-hidden">

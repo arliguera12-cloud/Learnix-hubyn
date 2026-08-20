@@ -1,12 +1,19 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import PdfUploader from './PdfUploader'
 import ResultadosTabla from './ResultadosTabla'
 import { exportarExcel, guardarResultados } from '../services/api'
 import {
-  fmt, descargarBlob, fusionarSinDuplicados, avisoDuplicados,
-  usePersistenciaExtractor, useProgresoSimulado, subirLoteEnTandas,
+  fmt, descargarBlob, fusionarSinDuplicados, avisoDuplicados, nivelEstado,
+  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA,
 } from '../utils/dte'
 import { IconExportar, IconAlerta } from './Icons'
+
+const FILTROS = [
+  ['todos',   'Todos'],
+  ['ok',      'Conforme'],
+  ['revisar', 'Revisar'],
+  ['manual',  'Revisión manual'],
+]
 
 // Campos monetarios por tipo para el resumen financiero
 const CAMPOS_FINANCIEROS = {
@@ -34,7 +41,8 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
   const [error,        setError]        = useState(null)
   const [exportando,   setExportando]   = useState(false)
   const [aviso,        setAviso]        = useState(null)
-  const { progress, iniciar: iniciarProgreso, avanzarA, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoSimulado()
+  const [filtro,       setFiltro]       = useState('todos')
+  const { progress, iniciar: iniciarProgreso, avanzar: avanzarProgreso, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoLote()
 
   // Cambiar de cliente en el selector vacía la tabla de inmediato — antes
   // quedaba la del cliente anterior en pantalla hasta la próxima extracción,
@@ -60,10 +68,9 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
         // Se sube en tandas de a lo sumo TAMANO_TANDA (el backend las procesa
         // en paralelo internamente) — así un lote de cientos de PDFs no choca
         // con el límite por request ni con el timeout del proxy.
-        iniciarProgreso(filesOrFile.length)
+        iniciarProgreso(filesOrFile.length, Math.ceil(filesOrFile.length / TAMANO_TANDA))
         const { resultados: res, errores } = await subirLoteEnTandas(
-          filesOrFile, loteApiFn, dId, nombre,
-          (procesados, total) => avanzarA(Math.round((procesados / total) * 92)),
+          filesOrFile, loteApiFn, dId, nombre, avanzarProgreso,
         )
         nuevos = res
         if (errores.length) {
@@ -72,10 +79,11 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
         terminarProgreso()
       } else if (isMultiple) {
         // Secuencial como fallback, si el tipo no tiene endpoint de lote
+        iniciarProgreso(filesOrFile.length, filesOrFile.length)
         for (let i = 0; i < filesOrFile.length; i++) {
-          iniciarProgreso(filesOrFile.length)
           const { data } = await apiFn(filesOrFile[i], dId, nombre)
           nuevos.push(data)
+          avanzarProgreso(i + 1, filesOrFile.length, i + 1, filesOrFile.length)
         }
         terminarProgreso()
       } else {
@@ -132,6 +140,27 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
   const labelGrav  = tipo === 'ventas' ? 'Ventas Gravadas' : 'Monto Gravado'
   const labelTotal = 'Total'
 
+  // Con lotes grandes, encontrar a mano los documentos con alerta entre
+  // cientos de tarjetas es tedioso — estos filtros dejan saltar directo a
+  // los que necesitan revisión en vez de scrollear todo.
+  const conteos = useMemo(() => {
+    const c = { todos: resultados.length, ok: 0, revisar: 0, manual: 0 }
+    for (const r of resultados) {
+      const n = nivelEstado(r.registro?.estado)
+      if (n === 'ok') c.ok++
+      else if (n === 'revisar') c.revisar++
+      else if (n === 'manual') c.manual++
+    }
+    return c
+  }, [resultados])
+
+  const resultadosFiltrados = useMemo(() => {
+    if (filtro === 'todos') return resultados.map((r, i) => [r, i])
+    return resultados
+      .map((r, i) => [r, i])
+      .filter(([r]) => nivelEstado(r.registro?.estado) === filtro)
+  }, [resultados, filtro])
+
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Cabecera */}
@@ -156,15 +185,16 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
         <div className="card space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-slate-300">
-              Procesando {progress.total} PDF{progress.total !== 1 ? 's' : ''}…
+              Procesando {progress.procesados} de {progress.total} documento{progress.total !== 1 ? 's' : ''}
+              {progress.totalTandas > 1 && ` (tanda ${progress.tandaActual || 1} de ${progress.totalTandas})`}…
             </span>
             <span className="text-slate-400 font-mono text-xs">
-              {Math.round(progress.pct)}%
+              {Math.round(progress.pct)}%{progress.etaTexto && ` · ${progress.etaTexto}`}
             </span>
           </div>
           <div className="h-1.5 bg-surface-700 rounded-full overflow-hidden">
             <div
-              className="h-full bg-brand-500 transition-all duration-300 ease-out"
+              className="h-full bg-brand-500 transition-all duration-500 ease-out"
               style={{ width: `${progress.pct}%` }}
             />
           </div>
@@ -253,10 +283,39 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
         </div>
       )}
 
+      {/* Filtros por estado — clave para encontrar las alertas en un lote grande */}
+      {exitosos > 1 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {FILTROS.map(([valor, label]) => {
+            const n = conteos[valor]
+            if (valor !== 'todos' && n === 0) return null
+            return (
+              <button
+                key={valor}
+                onClick={() => setFiltro(valor)}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                  filtro === valor
+                    ? 'bg-brand-500/20 border-brand-500 text-brand-400'
+                    : 'border-surface-600 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+                }`}
+              >
+                {label} ({n})
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {/* Resultados individuales */}
-      {resultados.map((r, i) => (
-        <ResultadosTabla key={i} data={r} tipo={tipo} declaranteId={declaranteId} index={i + 1} />
-      ))}
+      {resultadosFiltrados.length === 0 && filtro !== 'todos' ? (
+        <p className="text-center text-slate-500 py-8 text-sm">
+          Ningún documento en «{FILTROS.find(([v]) => v === filtro)?.[1]}».
+        </p>
+      ) : (
+        resultadosFiltrados.map(([r, i]) => (
+          <ResultadosTabla key={i} data={r} tipo={tipo} declaranteId={declaranteId} index={i + 1} />
+        ))
+      )}
     </div>
   )
 }

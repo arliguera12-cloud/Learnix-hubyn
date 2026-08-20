@@ -6,7 +6,7 @@
  * `estado` habría que hacerla dos veces (y ExtractorPage tenía una tercera
  * copia de `fmt`/`descargarBlob`).
  */
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { IconCheck, IconAlerta } from '../components/Icons'
 
 /**
@@ -66,59 +66,52 @@ export function usePersistenciaExtractor(tipo) {
 }
 
 /**
- * Progreso simulado para la subida por lote.
- *
- * El endpoint /lote procesa todos los PDF en paralelo en el backend
- * (ThreadPoolExecutor) y responde una sola vez al terminar — no hay forma
- * de saber "cuál" documento va a mitad de camino. La barra anterior fijaba
- * `done=0` mientras esperaba la respuesta y saltaba a 100% de golpe: quedaba
- * congelada en 0% todo el tiempo que tardaba el lote, y parecía trabada.
- * Esta avanza sola hacia ~92% mientras se espera (sin prometer un progreso
- * que no se puede medir) y solo llega a 100% cuando la respuesta llega de
- * verdad.
+ * Progreso REAL de una subida por lote troceada en tandas (ver
+ * subirLoteEnTandas). Cada tanda es un request que termina de una sola vez
+ * (el backend la procesa en paralelo y responde al final), así que dentro de
+ * una tanda no hay forma de medir avance — pero entre tandas sí: se sabe
+ * exactamente cuántos documentos van procesados sobre el total, y con eso
+ * alcanza para un porcentaje real y una estimación de tiempo restante
+ * (a partir de cuánto tardaron las tandas ya completadas).
  */
-export function useProgresoSimulado() {
+export function useProgresoLote() {
   const [progress, setProgress] = useState(null)
-  const intervaloRef = useRef(null)
+  const inicioRef = useRef(0)
 
-  function limpiarIntervalo() {
-    if (intervaloRef.current) {
-      clearInterval(intervaloRef.current)
-      intervaloRef.current = null
+  function iniciar(total, totalTandas) {
+    inicioRef.current = Date.now()
+    setProgress({
+      procesados: 0, total, tandaActual: 0, totalTandas,
+      pct: 1, etaTexto: null, fase: 'procesando',
+    })
+  }
+
+  /** Se llama al terminar cada tanda, con el conteo real hasta ese momento. */
+  function avanzar(procesados, total, tandaActual, totalTandas) {
+    const transcurridoMs = Date.now() - inicioRef.current
+    const pct = Math.min(99, Math.round((procesados / total) * 100))
+
+    let etaTexto = null
+    if (tandaActual > 0 && tandaActual < totalTandas) {
+      const msPorTanda   = transcurridoMs / tandaActual
+      const restanteSeg  = Math.round((msPorTanda * (totalTandas - tandaActual)) / 1000)
+      etaTexto = restanteSeg < 60
+        ? `~${restanteSeg}s restantes`
+        : `~${Math.round(restanteSeg / 60)} min restantes`
     }
-  }
 
-  function iniciar(total) {
-    limpiarIntervalo()
-    setProgress({ pct: 3, total, fase: 'procesando' })
-    intervaloRef.current = setInterval(() => {
-      setProgress(p => (p ? { ...p, pct: p.pct + (92 - p.pct) * 0.06 } : p))
-    }, 350)
-  }
-
-  /**
-   * Sube el piso del progreso a `piso` (nunca lo baja) sin reiniciar la
-   * animación — la usan los lotes grandes al terminar cada tanda de 40, para
-   * que la barra avance de verdad entre tandas en vez de solo simular dentro
-   * de una.
-   */
-  function avanzarA(piso) {
-    setProgress(p => (p ? { ...p, pct: Math.max(p.pct, piso) } : p))
+    setProgress(p => (p ? { ...p, procesados, total, tandaActual, totalTandas, pct, etaTexto } : p))
   }
 
   function terminar() {
-    limpiarIntervalo()
-    setProgress(p => (p ? { ...p, pct: 100, fase: 'listo' } : p))
+    setProgress(p => (p ? { ...p, pct: 100, etaTexto: null, fase: 'listo' } : p))
   }
 
   function limpiar() {
-    limpiarIntervalo()
     setProgress(null)
   }
 
-  useEffect(() => limpiarIntervalo, [])
-
-  return { progress, iniciar, avanzarA, terminar, limpiar }
+  return { progress, iniciar, avanzar, terminar, limpiar }
 }
 
 // Mismo tope que el backend (routers/procesamiento.py: _MAX_LOTE_ARCHIVOS) —
@@ -130,11 +123,16 @@ export const TAMANO_TANDA = 40
  * resultados y errores de todas. Así el usuario puede soltar 200+ PDF de una
  * sola vez sin toparse con el límite por request — el troceo pasa
  * desapercibido, solo se nota en que la barra de progreso avanza por tandas.
+ *
+ * `onProgreso(procesados, total, tandaActual, totalTandas)` se llama al
+ * terminar cada tanda, con el conteo real hasta ese momento.
  */
 export async function subirLoteEnTandas(files, loteApiFn, declaranteId, nombre, onProgreso) {
   const resultados = []
   const errores = []
   let procesados = 0
+  let tandaActual = 0
+  const totalTandas = Math.ceil(files.length / TAMANO_TANDA)
 
   for (let i = 0; i < files.length; i += TAMANO_TANDA) {
     const tanda = files.slice(i, i + TAMANO_TANDA)
@@ -142,7 +140,8 @@ export async function subirLoteEnTandas(files, loteApiFn, declaranteId, nombre, 
     resultados.push(...(data.resultados ?? []))
     errores.push(...(data.errores ?? []))
     procesados += tanda.length
-    onProgreso?.(procesados, files.length)
+    tandaActual += 1
+    onProgreso?.(procesados, files.length, tandaActual, totalTandas)
   }
 
   return { resultados, errores }
