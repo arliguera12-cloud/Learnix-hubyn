@@ -16,7 +16,27 @@ from utils.pdf_utils import (
 from utils.ai_utils import gemini_disponible, procesar_dte_con_gemini
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
+from utils.mh_consulta import consultar_dte_publico
 from utils.qa_utils import calcular_confianza
+
+
+def _leer_qr_y_consultar_mh(file_bytes: bytes) -> tuple[dict, dict | None]:
+    """
+    Lee el QR y, si trae código de generación, consulta el DTE completo en
+    Hacienda — en un hilo aparte, en paralelo con Visión. Igual que en
+    retenciones.py: a diferencia de ese caso, para DTE-14 Hacienda sí expone
+    la identificación del sujeto excluido (`numeIdenRecep`), no solo los
+    montos — no hay razón de privacidad para ocultarla, a diferencia del NIT
+    del sujeto retenido en un DTE-07.
+    """
+    try:
+        qr = _extraer_qr(file_bytes)
+    except Exception:
+        qr = {}
+    gen = str(qr.get("codigo_generacion") or "").upper()
+    fecha_qr_iso = str(qr.get("fecha_qr") or "").strip()
+    consulta_mh = consultar_dte_publico(gen, fecha_qr_iso) if gen and fecha_qr_iso else None
+    return qr, consulta_mh
 
 
 
@@ -132,10 +152,12 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
     _vision_alertas: list = []
     _vision_audit: dict   = {}
 
-    # Visión no depende del texto/regex del PDF (ni al revés) — se lanza en
-    # un hilo aparte para correr en paralelo con el parseo de texto de abajo
-    # en vez de bloquear antes de que ese parseo (rápido) siquiera empiece.
-    with ThreadPoolExecutor(max_workers=1) as _pool:
+    # Visión y QR+Hacienda no dependen del texto/regex del PDF (ni entre sí)
+    # — se lanzan ambos en un hilo aparte para correr en paralelo con el
+    # parseo de texto de abajo en vez de bloquear antes de que ese parseo
+    # (rápido) siquiera empiece.
+    with ThreadPoolExecutor(max_workers=2) as _pool:
+        _qr_future = _pool.submit(_leer_qr_y_consultar_mh, file_bytes)
         _vision_future = (
             _pool.submit(
                 extraer_dte_con_vision,
@@ -271,6 +293,55 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         if _vision_campos.get("ret") and ret == 0.0:
             ret = float(_vision_campos["ret"])
 
+        # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
+        # (leído en paralelo con Visión más arriba — aquí solo se recoge el
+        # resultado, ya listo, sin volver a leer el QR ni consultar Hacienda).
+        _qr, _consulta_mh = _qr_future.result()
+        _fecha_qr_iso = ""
+        try:
+            if _qr.get("codigo_generacion"):
+                gen = _qr["codigo_generacion"].upper()
+            if _qr.get("num_control") and not num_control:
+                _qc = _qr["num_control"].upper()
+                _mq = re.search(r'DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18}', _qc, re.I)
+                if _mq:
+                    num_control = _qc.replace("-", "")
+                    tipo        = _mq.group(1)
+            # NIT del sujeto excluido del QR como respaldo
+            if not id_sujeto and _qr.get("nit_emisor_qr"):
+                _nq = re.sub(r'[^0-9]', '', str(_qr["nit_emisor_qr"]))
+                if len(_nq) >= 9 and _nq != nit_cliente:
+                    id_sujeto = _nq
+            # Fecha del QR como respaldo
+            if _qr.get("fecha_qr"):
+                _fecha_qr_iso = str(_qr["fecha_qr"]).strip()
+                if not fecha:
+                    _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fecha_qr_iso)
+                    if _mf:
+                        fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
+        except Exception:
+            pass
+
+        # ── Consulta pública de Hacienda: corre ANTES que la IA a propósito —
+        # es gratis y más confiable que cualquier inferencia sobre el PDF.
+        # A diferencia de retenciones, acá Hacienda sí expone la
+        # identificación del sujeto excluido (numeIdenRecep) — no hay razón
+        # de privacidad para ocultarla como con el NIT de un sujeto retenido.
+        if _consulta_mh:
+            _resumen_mh = (_consulta_mh.get("documento") or {}).get("resumen") or {}
+            _base_mh = _resumen_mh.get("subTotal")
+            _ret_mh  = _resumen_mh.get("reteRenta")
+            _id_mh   = str(_consulta_mh.get("numeIdenRecep") or "").strip()
+            if _base_mh is not None:
+                base = float(_base_mh)
+            if _ret_mh is not None:
+                ret = float(_ret_mh)
+            if _id_mh:
+                id_sujeto = _id_mh
+            if _consulta_mh.get("selloVal"):
+                sello = str(_consulta_mh["selloVal"]).upper()
+            gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
+
         _campos_pre_ia = {
             "id_sujeto": id_sujeto, "nom_sujeto": nom_sujeto, "fecha": fecha,
             "sello": sello, "gen": gen, "base": base, "ret": ret,
@@ -301,31 +372,6 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
                 id_sujeto = _corr_dict["nit_sujeto"]
             elif _corr_dict.get("dui_sujeto"):
                 id_sujeto = _corr_dict["dui_sujeto"]
-
-        # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
-        try:
-            _qr = _extraer_qr(file_bytes)
-            if _qr.get("codigo_generacion"):
-                gen = _qr["codigo_generacion"].upper()
-            if _qr.get("num_control") and not num_control:
-                _qc = _qr["num_control"].upper()
-                _mq = re.search(r'DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18}', _qc, re.I)
-                if _mq:
-                    num_control = _qc.replace("-", "")
-                    tipo        = _mq.group(1)
-            # NIT del sujeto excluido del QR como respaldo
-            if not id_sujeto and _qr.get("nit_emisor_qr"):
-                _nq = re.sub(r'[^0-9]', '', str(_qr["nit_emisor_qr"]))
-                if len(_nq) >= 9 and _nq != nit_cliente:
-                    id_sujeto = _nq
-            # Fecha del QR como respaldo
-            if not fecha and _qr.get("fecha_qr"):
-                _fq = str(_qr["fecha_qr"]).strip()
-                _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fq)
-                if _mf:
-                    fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
-        except Exception:
-            pass
 
         _campos_finales = {
             "id_sujeto": id_sujeto, "nom_sujeto": nom_sujeto, "fecha": fecha,

@@ -593,6 +593,13 @@ _CAMPOS_REQUERIDOS = {
 
 _VALORES_VACIOS = {"", "SIN NOMBRE", "⚠️ REVISAR NOMBRE", None}
 
+# Distinto de "SIN NOMBRE" (valor legítimo para consumidor final, DTE-01):
+# esto es un marcador explícito de "no se pudo extraer, hace falta revisión
+# humana". Con documentos de pocos campos requeridos, que falte uno solo
+# igual puede dar un score ≥85 por completitud — sin este tope, un campo con
+# esta advertencia quedaba "Conforme" en silencio con 6 de 7 campos ok.
+_MARCADORES_ADVERTENCIA = {"⚠️ REVISAR NOMBRE"}
+
 
 def _campo_vacio(valor) -> bool:
     if valor in _VALORES_VACIOS:
@@ -620,6 +627,10 @@ def calcular_confianza(resultado: dict, tipo_dte: str) -> dict:
     faltantes = [c for c in campos if _campo_vacio(resultado.get(c))]
     score = round(100 * (len(campos) - len(faltantes)) / len(campos)) if campos else 100
 
+    advertencias = [c for c in campos if resultado.get(c) in _MARCADORES_ADVERTENCIA]
+    if advertencias:
+        score = min(score, 60)
+
     validador = _VALIDADORES_MONTOS.get(tipo_dte)
     alertas = validador(resultado) if validador else []
     validacion_montos = "error" if alertas else "ok"
@@ -629,6 +640,8 @@ def calcular_confianza(resultado: dict, tipo_dte: str) -> dict:
     detalle_partes = []
     if faltantes:
         detalle_partes.append(f"Campos faltantes: {', '.join(faltantes)}")
+    if advertencias:
+        detalle_partes.append(f"Requiere revisión manual: {', '.join(advertencias)}")
     if alertas:
         detalle_partes.append("; ".join(alertas))
 
