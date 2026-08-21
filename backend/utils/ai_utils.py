@@ -32,6 +32,15 @@ _GROQ_VISION_MODEL = "qwen/qwen3.6-27b"
 _MAX_RETRIES       = 3
 _BACKOFF_DELAYS    = [2, 4, 8]
 
+# Un lote corre hasta 10 documentos en paralelo (_MAX_LOTE_ARCHIVOS en
+# procesamiento.py), y cada uno llama a Groq (texto y/o visión) — sin límite,
+# las 10 llamadas salían disparadas juntas y chocaban contra el rate limit de
+# la cuenta ("Groq rate limit, waiting 2s" en cascada en los logs). Texto y
+# visión comparten esta cuota porque comparten cuenta/rate limit real.
+# Semáforo, no cola: los hilos que no consiguen turno esperan bloqueados
+# (más simple que una cola explícita) y lo sueltan al terminar sus reintentos.
+_GROQ_CONCURRENCIA = threading.Semaphore(3)
+
 # ─── Configuración Vertex AI (motor prioritario) ─────────────────────────────
 _VERTEX_PROJECT  = "nomadic-sprite-440003-r7"
 _VERTEX_LOCATION = "us-central1"
@@ -757,75 +766,79 @@ def _llamar_groq(prompt: str) -> dict | None:
 
     client = Groq(api_key=api_key)
 
-    for attempt in range(_MAX_RETRIES):
-        try:
-            response = client.chat.completions.create(
-                model=_GROQ_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Eres un extractor de datos fiscales. "
-                            "Responde ÚNICAMENTE con JSON válido, sin texto adicional, "
-                            "sin bloques de código Markdown."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                max_tokens=2048,
-                response_format={"type": "json_object"},
-            )
+    # Limita cuántas llamadas a Groq (texto + visión) corren en simultáneo
+    # en todo el proceso — ver _GROQ_CONCURRENCIA. Se mantiene tomado durante
+    # los reintentos con backoff: son parte del mismo "turno" de esta llamada.
+    with _GROQ_CONCURRENCIA:
+        for attempt in range(_MAX_RETRIES):
+            try:
+                response = client.chat.completions.create(
+                    model=_GROQ_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Eres un extractor de datos fiscales. "
+                                "Responde ÚNICAMENTE con JSON válido, sin texto adicional, "
+                                "sin bloques de código Markdown."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.1,
+                    max_tokens=2048,
+                    response_format={"type": "json_object"},
+                )
 
-            raw = response.choices[0].message.content or ""
-            raw = raw.strip()
-            raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
-            raw = re.sub(r'\s*```\s*$', '', raw)
+                raw = response.choices[0].message.content or ""
+                raw = raw.strip()
+                raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
+                raw = re.sub(r'\s*```\s*$', '', raw)
 
-            resultado = json.loads(raw)
-            _cb_on_success()
-            _ultimo_error = ""
-            return resultado
+                resultado = json.loads(raw)
+                _cb_on_success()
+                _ultimo_error = ""
+                return resultado
 
-        except json.JSONDecodeError as e:
-            _ultimo_error = f"Groq devolvió JSON inválido: {e}"
-            log.warning("Groq JSON error (intento %d/%d): %s", attempt + 1, _MAX_RETRIES, e)
-            _cb_on_failure()
-            if attempt < _MAX_RETRIES - 1:
-                wait = _BACKOFF_DELAYS[attempt]
-                log.info("Reintentando en %ds...", wait)
-                time.sleep(wait)
-                continue
-            return None
-
-        except Exception as exc:
-            msg = str(exc)
-            if "rate_limit" in msg.lower() or "429" in msg:
-                _ultimo_error = "Límite de tasa de Groq alcanzado."
-                # Rate limits are transient — don't penalize the circuit breaker
+            except json.JSONDecodeError as e:
+                _ultimo_error = f"Groq devolvió JSON inválido: {e}"
+                log.warning("Groq JSON error (intento %d/%d): %s", attempt + 1, _MAX_RETRIES, e)
+                _cb_on_failure()
                 if attempt < _MAX_RETRIES - 1:
                     wait = _BACKOFF_DELAYS[attempt]
-                    log.warning("Groq rate limit (attempt %d/%d), waiting %ds", attempt + 1, _MAX_RETRIES, wait)
+                    log.info("Reintentando en %ds...", wait)
                     time.sleep(wait)
                     continue
-                _ultimo_error += f" (tras {_MAX_RETRIES} intentos)"
-            elif "authentication" in msg.lower() or "401" in msg:
-                _ultimo_error = "API key de Groq inválida (401). Verifica en console.groq.com."
-                _cb_on_failure()
                 return None
-            elif "timeout" in msg.lower():
-                _ultimo_error = "Timeout esperando respuesta de Groq."
-                _cb_on_failure()
-                return None
-            elif "connection" in msg.lower():
-                _ultimo_error = "Sin conexión a Internet para llamar a Groq."
-                _cb_on_failure()
-                return None
-            else:
-                _ultimo_error = f"Error inesperado de Groq: {msg[:120]}"
-                _cb_on_failure()
-                log.error("Groq unexpected error: %s", msg)
-                return None
+
+            except Exception as exc:
+                msg = str(exc)
+                if "rate_limit" in msg.lower() or "429" in msg:
+                    _ultimo_error = "Límite de tasa de Groq alcanzado."
+                    # Rate limits are transient — don't penalize the circuit breaker
+                    if attempt < _MAX_RETRIES - 1:
+                        wait = _BACKOFF_DELAYS[attempt]
+                        log.warning("Groq rate limit (attempt %d/%d), waiting %ds", attempt + 1, _MAX_RETRIES, wait)
+                        time.sleep(wait)
+                        continue
+                    _ultimo_error += f" (tras {_MAX_RETRIES} intentos)"
+                elif "authentication" in msg.lower() or "401" in msg:
+                    _ultimo_error = "API key de Groq inválida (401). Verifica en console.groq.com."
+                    _cb_on_failure()
+                    return None
+                elif "timeout" in msg.lower():
+                    _ultimo_error = "Timeout esperando respuesta de Groq."
+                    _cb_on_failure()
+                    return None
+                elif "connection" in msg.lower():
+                    _ultimo_error = "Sin conexión a Internet para llamar a Groq."
+                    _cb_on_failure()
+                    return None
+                else:
+                    _ultimo_error = f"Error inesperado de Groq: {msg[:120]}"
+                    _cb_on_failure()
+                    log.error("Groq unexpected error: %s", msg)
+                    return None
 
     return None
 
@@ -1362,73 +1375,76 @@ def _llamar_groq_vision(prompt: str, img_b64: str) -> dict | None:
         ],
     }]
 
-    for attempt in range(_MAX_RETRIES):
-        try:
-            # Llama-4 en Groq soporta JSON mode; si el endpoint lo rechaza,
-            # reintentamos sin response_format y parseamos manualmente.
-            kwargs = dict(
-                model=_GROQ_VISION_MODEL,
-                messages=mensajes,
-                temperature=0.1,
-                # qwen3.6-27b es un modelo con razonamiento interno — con
-                # max_tokens=1024 (el límite que tenía cuando el modelo de
-                # visión era llama-4-scout, que no razona) se gastaba todo
-                # el presupuesto "pensando" y no dejaba nada para la
-                # respuesta JSON visible, devolviendo content vacío.
-                max_tokens=4096,
-            )
+    # Mismo semáforo que _llamar_groq — texto y visión comparten cuenta/rate
+    # limit real en Groq, así que comparten también el límite de concurrencia.
+    with _GROQ_CONCURRENCIA:
+        for attempt in range(_MAX_RETRIES):
             try:
-                response = client.chat.completions.create(
-                    response_format={"type": "json_object"}, **kwargs
+                # Llama-4 en Groq soporta JSON mode; si el endpoint lo rechaza,
+                # reintentamos sin response_format y parseamos manualmente.
+                kwargs = dict(
+                    model=_GROQ_VISION_MODEL,
+                    messages=mensajes,
+                    temperature=0.1,
+                    # qwen3.6-27b es un modelo con razonamiento interno — con
+                    # max_tokens=1024 (el límite que tenía cuando el modelo de
+                    # visión era llama-4-scout, que no razona) se gastaba todo
+                    # el presupuesto "pensando" y no dejaba nada para la
+                    # respuesta JSON visible, devolviendo content vacío.
+                    max_tokens=4096,
                 )
-            except Exception as exc_fmt:
-                if "response_format" in str(exc_fmt).lower() or "json" in str(exc_fmt).lower():
-                    response = client.chat.completions.create(**kwargs)
-                else:
-                    raise
+                try:
+                    response = client.chat.completions.create(
+                        response_format={"type": "json_object"}, **kwargs
+                    )
+                except Exception as exc_fmt:
+                    if "response_format" in str(exc_fmt).lower() or "json" in str(exc_fmt).lower():
+                        response = client.chat.completions.create(**kwargs)
+                    else:
+                        raise
 
-            raw = (response.choices[0].message.content or "").strip()
-            raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
-            raw = re.sub(r'\s*```\s*$', '', raw)
-            # Aislar el primer objeto JSON por si el modelo añade prosa.
-            m = re.search(r'\{.*\}', raw, re.S)
-            if m:
-                raw = m.group(0)
-            resultado = json.loads(raw)
-            _cb_on_success()
-            _ultimo_error_vision = ""
-            return resultado
+                raw = (response.choices[0].message.content or "").strip()
+                raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.I)
+                raw = re.sub(r'\s*```\s*$', '', raw)
+                # Aislar el primer objeto JSON por si el modelo añade prosa.
+                m = re.search(r'\{.*\}', raw, re.S)
+                if m:
+                    raw = m.group(0)
+                resultado = json.loads(raw)
+                _cb_on_success()
+                _ultimo_error_vision = ""
+                return resultado
 
-        except json.JSONDecodeError as e:
-            _ultimo_error_vision = f"Visión devolvió JSON inválido: {e}"
-            log.warning("Visión JSON error (intento %d/%d): %s", attempt + 1, _MAX_RETRIES, e)
-            _cb_on_failure()
-            if attempt < _MAX_RETRIES - 1:
-                time.sleep(_BACKOFF_DELAYS[attempt])
-                continue
-            return None
-
-        except Exception as exc:
-            msg = str(exc)
-            if "rate_limit" in msg.lower() or "429" in msg:
-                _ultimo_error_vision = "Límite de tasa de Groq (visión)."
-                # Rate limits are transient — don't penalize the circuit breaker
+            except json.JSONDecodeError as e:
+                _ultimo_error_vision = f"Visión devolvió JSON inválido: {e}"
+                log.warning("Visión JSON error (intento %d/%d): %s", attempt + 1, _MAX_RETRIES, e)
+                _cb_on_failure()
                 if attempt < _MAX_RETRIES - 1:
                     time.sleep(_BACKOFF_DELAYS[attempt])
                     continue
-            elif "authentication" in msg.lower() or "401" in msg:
-                _ultimo_error_vision = "API key de Groq inválida (401)."
-                _cb_on_failure()
                 return None
-            elif "model" in msg.lower() and ("decommission" in msg.lower() or "not found" in msg.lower()):
-                _ultimo_error_vision = f"Modelo de visión no disponible: {msg[:80]}"
-                _cb_on_failure()
-                return None
-            else:
-                _ultimo_error_vision = f"Error de visión: {msg[:120]}"
-                _cb_on_failure()
-                log.error("Visión error inesperado: %s", msg)
-                return None
+
+            except Exception as exc:
+                msg = str(exc)
+                if "rate_limit" in msg.lower() or "429" in msg:
+                    _ultimo_error_vision = "Límite de tasa de Groq (visión)."
+                    # Rate limits are transient — don't penalize the circuit breaker
+                    if attempt < _MAX_RETRIES - 1:
+                        time.sleep(_BACKOFF_DELAYS[attempt])
+                        continue
+                elif "authentication" in msg.lower() or "401" in msg:
+                    _ultimo_error_vision = "API key de Groq inválida (401)."
+                    _cb_on_failure()
+                    return None
+                elif "model" in msg.lower() and ("decommission" in msg.lower() or "not found" in msg.lower()):
+                    _ultimo_error_vision = f"Modelo de visión no disponible: {msg[:80]}"
+                    _cb_on_failure()
+                    return None
+                else:
+                    _ultimo_error_vision = f"Error de visión: {msg[:120]}"
+                    _cb_on_failure()
+                    log.error("Visión error inesperado: %s", msg)
+                    return None
     return None
 
 
