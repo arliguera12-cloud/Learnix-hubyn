@@ -347,7 +347,7 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             "sello": sello, "gen": gen, "base": base, "ret": ret,
         }
         _confianza_pre = calcular_confianza(_campos_pre_ia, "sujetos_excluidos")
-        if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
+        if 50 <= _confianza_pre["score"] < 100 and gemini_disponible():
             _nit_suj = id_sujeto if len(id_sujeto) == 14 else ""
             _dui_suj = id_sujeto if len(id_sujeto) == 9  else ""
             _campos_act = {
