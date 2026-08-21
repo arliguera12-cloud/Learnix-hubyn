@@ -962,7 +962,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 "nom_prov": nom_prov, "gra": gra, "tot": tot,
             }
             _confianza_pre = calcular_confianza(_campos_pre_ia, "compras")
-            if 50 <= _confianza_pre["score"] < 100 and gemini_disponible():
+            if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
                 _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "nom_prov": nom_prov}
                 # texto_visual preserva columnas EMISOR|RECEPTOR — mejor para el modelo.
                 # Evitar concatenar lineal+visual (duplica contenido y gasta contexto).

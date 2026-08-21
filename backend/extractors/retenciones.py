@@ -378,7 +378,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             "gen": gen, "base": base, "ret": ret,
         }
         _confianza_pre = calcular_confianza(_campos_pre_ia, "retenciones")
-        if 50 <= _confianza_pre["score"] < 100 and gemini_disponible():
+        if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
             _campos_act = {"fecha": fecha, "nit_prov": nit_prov, "base": base, "ret": ret}
             _texto_ia = (texto_visual + "\n\n" + texto_lineal) if texto_visual else texto_lineal
             _corr_dict, _correcciones_ia = procesar_dte_con_gemini(

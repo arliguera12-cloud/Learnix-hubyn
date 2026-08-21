@@ -804,7 +804,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "nom_cli": nom_cli, "gravadas": gravadas, "total": total,
             }
             _confianza_pre = calcular_confianza(_campos_pre_ia, "ventas")
-            if 50 <= _confianza_pre["score"] < 100 and gemini_disponible():
+            if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
                 _campos_act = {
                     "fecha"  : fecha,
                     "nom_cli": nom_cli,
