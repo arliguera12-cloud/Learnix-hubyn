@@ -268,26 +268,24 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
     _vision_alertas: list = []
     _vision_audit: dict   = {}
 
-    # Visión y QR+Hacienda no dependen del texto/regex del PDF (ni entre sí)
-    # — se lanzan ambos en un hilo aparte para correr en paralelo con el
-    # parseo de texto de abajo (antes Visión bloqueaba y ese parseo ni
-    # siquiera empezaba hasta que terminara).
-    with ThreadPoolExecutor(max_workers=2) as _pool:
+    # QR+Hacienda no depende del texto/regex del PDF — se lanza en un hilo
+    # aparte para correr en paralelo con el parseo de texto de abajo. Visión
+    # YA NO se lanza aquí sin condición: antes se disparaba para TODOS los
+    # documentos de un lote, saturando el rate limit de Groq; ahora solo se
+    # llama más abajo si, tras regex + QR + Hacienda, la confianza sigue
+    # baja (ver "Visión solo si Hacienda + regex no alcanzan").
+    with ThreadPoolExecutor(max_workers=1) as _pool:
         _qr_future = _pool.submit(_leer_qr_y_consultar_mh, file_bytes)
-        _vision_future = (
-            _pool.submit(
-                extraer_dte_con_vision, file_bytes, "ventas",
-                {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
-            )
-            if vision_disponible() else None
-        )
 
         try:
             try:
                 texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
             except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
-                if _vision_future is not None:
-                    _vision_campos, _vision_alertas, _vision_audit = _vision_future.result()
+                if vision_disponible():
+                    _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+                        file_bytes, "ventas",
+                        {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
+                    )
                     gemini_correcciones = [
                         f"Visión: {a}" for a in _vision_alertas
                     ] if _vision_alertas else (
@@ -554,16 +552,6 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     )
                 nom_cli = nombre_encontrado if nombre_encontrado else "SIN NOMBRE"
 
-            # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
-            if _vision_campos.get("fecha"):
-                fecha   = _vision_campos["fecha"]
-            if _vision_campos.get("nom_cli"):
-                nom_cli = _vision_campos["nom_cli"]
-            if _vision_campos.get("nit_cli"):
-                nit_cli = _vision_campos["nit_cli"]
-            if _vision_campos.get("dui_cli"):
-                dui_cli = _vision_campos["dui_cli"]
-
             # ── Montos ────────────────────────────────────────────────────────────
             exentas    = 0.0
             no_sujetas = 0.0
@@ -702,37 +690,9 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     elif total == 0.0 and gravadas > 0 and debito > 0:
                         total = round(gravadas + debito + exentas + no_sujetas, 2)
 
-            # A este punto el parseo de texto+regex ya terminó — recién ahora hace
-            # falta el resultado de Visión, así que esperarlo aquí no paga nada
-            # extra que no se estuviera pagando ya (corrió en paralelo arriba).
-            if _vision_future is not None:
-                _vision_campos, _vision_alertas, _vision_audit = _vision_future.result()
-                gemini_correcciones = [
-                    f"Visión: {a}" for a in _vision_alertas
-                ] if _vision_alertas else (
-                    [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
-                    if _vision_campos else []
-                )
-
-            if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
+            # A este punto el parseo de texto+regex ya terminó.
+            if len(texto_completo.strip()) < 50 and not ctrl:
                 return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
-
-            # ── Completar campos desde Vision cuando regex obtuvo vacío/0 ─────────
-            if _vision_campos:
-                if _vision_campos.get("gravadas") and gravadas == 0.0:
-                    gravadas = round(float(_vision_campos["gravadas"]), 2)
-                if _vision_campos.get("iva") and debito == 0.0:
-                    debito = round(float(_vision_campos["iva"]), 2)
-                if _vision_campos.get("total") and total == 0.0:
-                    total = round(float(_vision_campos["total"]), 2)
-                if _vision_campos.get("exentas") and exentas == 0.0:
-                    exentas = round(float(_vision_campos["exentas"]), 2)
-                if _vision_campos.get("no_sujetas") and no_sujetas == 0.0:
-                    no_sujetas = round(float(_vision_campos["no_sujetas"]), 2)
-                # Sello: Vision es la fuente primaria (~40 chars); regex como respaldo
-                v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
-                if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
-                    sello = v_sello
 
             # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
             # (leído en paralelo con Visión más arriba — aquí solo se recoge el
@@ -798,10 +758,64 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     sello = str(_consulta_mh["selloVal"]).upper()
                 gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
 
+            # ── Visión SOLO si Hacienda + regex no alcanzan ───────────────────────
+            # Antes Visión se lanzaba SIEMPRE en paralelo para cada documento del
+            # lote, sin importar si ya había datos suficientes — eso saturaba el
+            # rate limit de Groq cuando el lote tenía 10-20 PDFs. Ahora se calcula
+            # la confianza con lo que ya se tiene (regex + QR + Hacienda) y solo
+            # se gasta una llamada a Visión si el documento sigue incompleto.
+            _campos_pre_vision = {
+                "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
+                "nom_cli": nom_cli, "gravadas": gravadas, "total": total,
+                # debito/exentas/no_sujetas no cuentan para el % de completitud
+                # (calcular_confianza solo mira los 7 campos de arriba), pero
+                # SÍ hacen falta aquí para que validar_montos_ventas concilie
+                # bien el total — sin ellos "total ≠ gravadas" siempre dispara
+                # una alerta falsa y tapa el score en 60, forzando Visión
+                # aunque el documento ya esté completo.
+                "debito": debito, "exentas": exentas, "no_sujetas": no_sujetas,
+            }
+            _confianza_pre_vision = calcular_confianza(_campos_pre_vision, "ventas")
+            if _confianza_pre_vision["score"] < 85 and vision_disponible():
+                _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+                    file_bytes, "ventas",
+                    {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
+                )
+                gemini_correcciones += [
+                    f"Visión: {a}" for a in _vision_alertas
+                ] if _vision_alertas else (
+                    [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
+                    if _vision_campos else []
+                )
+                if _vision_campos:
+                    if _vision_campos.get("fecha") and not fecha:
+                        fecha = _vision_campos["fecha"]
+                    if _vision_campos.get("nom_cli") and nom_cli == "SIN NOMBRE":
+                        nom_cli = _vision_campos["nom_cli"]
+                    if _vision_campos.get("nit_cli") and not nit_cli:
+                        nit_cli = _vision_campos["nit_cli"]
+                    if _vision_campos.get("dui_cli") and not dui_cli:
+                        dui_cli = _vision_campos["dui_cli"]
+                    if _vision_campos.get("gravadas") and gravadas == 0.0:
+                        gravadas = round(float(_vision_campos["gravadas"]), 2)
+                    if _vision_campos.get("iva") and debito == 0.0:
+                        debito = round(float(_vision_campos["iva"]), 2)
+                    if _vision_campos.get("total") and total == 0.0:
+                        total = round(float(_vision_campos["total"]), 2)
+                    if _vision_campos.get("exentas") and exentas == 0.0:
+                        exentas = round(float(_vision_campos["exentas"]), 2)
+                    if _vision_campos.get("no_sujetas") and no_sujetas == 0.0:
+                        no_sujetas = round(float(_vision_campos["no_sujetas"]), 2)
+                    # Sello: Vision es la fuente primaria (~40 chars); regex como respaldo
+                    v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
+                    if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
+                        sello = v_sello
+
             # ── Escalar a IA textual solo si la confianza está en zona gris ───────
             _campos_pre_ia = {
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_cli": nom_cli, "gravadas": gravadas, "total": total,
+                "debito": debito, "exentas": exentas, "no_sujetas": no_sujetas,
             }
             _confianza_pre = calcular_confianza(_campos_pre_ia, "ventas")
             if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():

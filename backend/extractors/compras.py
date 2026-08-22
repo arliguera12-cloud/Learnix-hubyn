@@ -413,44 +413,40 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
     _vision_alertas: list = []
     _vision_audit: dict   = {}
 
-    # Visión y QR+Hacienda no dependen del texto/regex del PDF (ni entre sí)
-    # — se lanzan ambos en un hilo aparte para correr en paralelo con el
-    # parseo de texto de abajo (antes Visión bloqueaba y ese parseo ni
-    # siquiera empezaba hasta que terminara).
-    with ThreadPoolExecutor(max_workers=2) as _pool:
+    # QR+Hacienda no depende del texto/regex del PDF — se lanza en un hilo
+    # aparte para correr en paralelo con el parseo de texto de abajo. Visión
+    # YA NO se lanza aquí sin condición: antes se disparaba para TODOS los
+    # documentos de un lote, saturando el rate limit de Groq; ahora solo se
+    # llama si, tras regex + QR + Hacienda, el documento sigue incompleto
+    # (ver "Visión solo si Hacienda + regex no alcanzan" más abajo).
+    with ThreadPoolExecutor(max_workers=1) as _pool:
         _qr_future = _pool.submit(_leer_qr_y_consultar_mh, file_bytes)
-        _vision_future = (
-            _pool.submit(
-                extraer_dte_con_vision, file_bytes, "compras",
+        _vision_ejecutada = False
+
+        def _llamar_vision():
+            # Único punto que invoca Visión — idempotente (si ya se llamó,
+            # p. ej. en el fallback de número de control, no la repite).
+            nonlocal _vision_campos, _vision_alertas, _vision_audit
+            nonlocal gemini_correcciones, _vision_ejecutada
+            if _vision_ejecutada or not vision_disponible():
+                return
+            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+                file_bytes, "compras",
                 {"nit": _nit_rec_ctx, "nombre": _nom_rec_ctx},
             )
-            if vision_disponible() else None
-        )
-        _vision_resuelta = False
-
-        def _asegurar_vision():
-            # compras.py necesita _vision_campos en dos puntos: el fallback
-            # de número de control (mid-función, si el regex no lo
-            # encuentra) y la fusión final. Idempotente — el segundo
-            # llamado no vuelve a construir gemini_correcciones.
-            nonlocal _vision_campos, _vision_alertas, _vision_audit
-            nonlocal gemini_correcciones, _vision_resuelta
-            if _vision_future is None or _vision_resuelta:
-                return
-            _vision_campos, _vision_alertas, _vision_audit = _vision_future.result()
             gemini_correcciones = [
                 f"Visión: {a}" for a in _vision_alertas
             ] if _vision_alertas else (
                 [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
                 if _vision_campos else []
             )
-            _vision_resuelta = True
+            _vision_ejecutada = True
 
         try:
             try:
                 texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
             except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
-                _asegurar_vision()
+                _llamar_vision()
                 if not _vision_campos.get("num_control"):
                     return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
                 texto_lineal = texto_visual = ""
@@ -479,10 +475,23 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 num_control = ctrl.replace("-", "")
 
             if not ctrl:
-                # Fallback: Vision extrajo num_control pero pdfplumber no lo encontró en texto
-                _asegurar_vision()
-                _vc_ctrl = safe_str(_vision_campos.get("num_control", ""))
-                _m_vc = re.search(r'(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})', _vc_ctrl, re.I)
+                # Fallback: antes de gastar una llamada a Visión, el QR y la
+                # consulta a Hacienda (ya corriendo en paralelo) también traen
+                # el número de control — más barato y tan confiable como Visión.
+                _qr_ctrl, _consulta_mh_ctrl = _qr_future.result()
+                _ctrl_candidato = ""
+                if _consulta_mh_ctrl:
+                    _ctrl_candidato = safe_str(
+                        ((_consulta_mh_ctrl.get("documento") or {}).get("identificacion") or {})
+                        .get("numeroControl")
+                    )
+                if not _ctrl_candidato and _qr_ctrl.get("num_control"):
+                    _ctrl_candidato = safe_str(_qr_ctrl["num_control"])
+                _m_vc = re.search(r'(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})', _ctrl_candidato, re.I)
+                if not _m_vc:
+                    _llamar_vision()
+                    _vc_ctrl = safe_str(_vision_campos.get("num_control", ""))
+                    _m_vc = re.search(r'(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})', _vc_ctrl, re.I)
                 if _m_vc:
                     ctrl        = _m_vc.group(1).upper()
                     tipo        = _m_vc.group(2)
@@ -869,28 +878,9 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             iva = max(iva, 0.0)
             tot = max(tot, 0.0)
 
-            # A este punto el parseo de texto+regex ya terminó — recién ahora hace
-            # falta el resultado de Visión si todavía no se resolvió (caso común:
-            # el número de control sí lo encontró el regex, así que el fallback
-            # de arriba nunca llamó a _asegurar_vision()).
-            _asegurar_vision()
-            if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
+            # A este punto el parseo de texto+regex ya terminó.
+            if len(texto_completo.strip()) < 50 and not ctrl:
                 return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
-
-            # ── Completar campos desde Vision cuando regex obtuvo vacío/0 ─────────
-            if _vision_campos:
-                if _vision_campos.get("gravadas") and gra == 0.0:
-                    gra = round(float(_vision_campos["gravadas"]), 2)
-                if _vision_campos.get("iva") and iva == 0.0:
-                    iva = round(float(_vision_campos["iva"]), 2)
-                if _vision_campos.get("total") and tot == 0.0:
-                    tot = round(float(_vision_campos["total"]), 2)
-                if _vision_campos.get("exentas") and exe == 0.0:
-                    exe = round(float(_vision_campos["exentas"]), 2)
-                # Sello: Vision es la fuente primaria (~40 chars); regex como respaldo
-                v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
-                if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
-                    sello = v_sello
 
             # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
             # (leído en paralelo con Visión más arriba — aquí solo se recoge el
@@ -956,10 +946,49 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                     sello = str(_consulta_mh["selloVal"]).upper()
                 gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
 
+            # ── Visión SOLO si Hacienda + regex no alcanzan ───────────────────────
+            # Antes Visión se lanzaba SIEMPRE en paralelo para cada documento del
+            # lote, sin importar si ya había datos suficientes — eso saturaba el
+            # rate limit de Groq cuando el lote tenía 10-20 PDFs. Ahora se calcula
+            # la confianza con lo que ya se tiene (regex + QR + Hacienda) y solo
+            # se gasta una llamada a Visión si el documento sigue incompleto.
+            _campos_pre_vision = {
+                "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
+                "nom_prov": nom_prov, "gra": gra, "tot": tot,
+                # iva/exe no cuentan para el % de completitud, pero hacen falta
+                # para que validar_montos_ventas concilie el total — sin ellos
+                # "total ≠ gravadas" dispara una alerta falsa y tapa el score
+                # en 60, forzando Visión aunque el documento ya esté completo.
+                "iva": iva, "exe": exe,
+            }
+            _confianza_pre_vision = calcular_confianza(_campos_pre_vision, "compras")
+            if _confianza_pre_vision["score"] < 85:
+                _llamar_vision()
+                if _vision_campos:
+                    if _vision_campos.get("fecha") and not fecha:
+                        fecha = _vision_campos["fecha"]
+                    if _vision_campos.get("nom_prov") and not nom_prov:
+                        nom_prov = _vision_campos["nom_prov"]
+                    if _vision_campos.get("nit_prov") and not nit_prov:
+                        nit_prov = _vision_campos["nit_prov"]
+                    if _vision_campos.get("gravadas") and gra == 0.0:
+                        gra = round(float(_vision_campos["gravadas"]), 2)
+                    if _vision_campos.get("iva") and iva == 0.0:
+                        iva = round(float(_vision_campos["iva"]), 2)
+                    if _vision_campos.get("total") and tot == 0.0:
+                        tot = round(float(_vision_campos["total"]), 2)
+                    if _vision_campos.get("exentas") and exe == 0.0:
+                        exe = round(float(_vision_campos["exentas"]), 2)
+                    # Sello: Vision es la fuente primaria (~40 chars); regex como respaldo
+                    v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
+                    if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
+                        sello = v_sello
+
             # ── Escalar a IA textual solo si la confianza está en zona gris ───────
             _campos_pre_ia = {
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_prov": nom_prov, "gra": gra, "tot": tot,
+                "iva": iva, "exe": exe,
             }
             _confianza_pre = calcular_confianza(_campos_pre_ia, "compras")
             if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():

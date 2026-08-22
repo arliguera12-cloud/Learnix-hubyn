@@ -152,22 +152,14 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
     _vision_alertas: list = []
     _vision_audit: dict   = {}
 
-    # El QR+Hacienda y Visión no dependen del texto/regex del PDF (ni entre
-    # sí) — se lanzan ambos en un hilo aparte para correr en paralelo con el
-    # parseo de texto+regex de abajo (rápido, pero antes esperaba a que
-    # Visión terminara para siquiera empezar), en vez de encadenar sus
-    # tiempos de red en serie.
-    with ThreadPoolExecutor(max_workers=2) as _pool:
+    # El QR+Hacienda no depende del texto/regex del PDF — se lanza en un
+    # hilo aparte para correr en paralelo con el parseo de texto+regex de
+    # abajo. Visión YA NO se lanza aquí sin condición: antes se disparaba
+    # para TODOS los documentos de un lote, saturando el rate limit de
+    # Groq; ahora solo se llama más abajo si, tras regex + QR + Hacienda,
+    # la confianza sigue baja.
+    with ThreadPoolExecutor(max_workers=1) as _pool:
         _qr_future = _pool.submit(_leer_qr_y_consultar_mh, file_bytes)
-        _vision_future = (
-            _pool.submit(
-                extraer_dte_con_vision,
-                file_bytes,
-                "retenciones",
-                {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
-            )
-            if vision_disponible() else None
-        )
 
         try:
             texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
@@ -278,19 +270,8 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         except Exception as err:
             return {"error": str(err)}
 
-        # A este punto el parseo de texto+regex ya terminó — recién ahora hace
-        # falta el resultado de Visión, así que esperarlo aquí no paga nada
-        # extra que no se estuviera pagando ya (corrió en paralelo arriba).
-        if _vision_future is not None:
-            _vision_campos, _vision_alertas, _vision_audit = _vision_future.result()
-            gemini_correcciones = [
-                f"Visión: {a}" for a in _vision_alertas
-            ] if _vision_alertas else (
-                [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
-                if _vision_campos else []
-            )
-
-        if len(texto_completo.strip()) < 50 and not _vision_campos.get("num_control"):
+        # A este punto el parseo de texto+regex ya terminó.
+        if len(texto_completo.strip()) < 50 and not m_ctrl:
             return {"error": "PDF de imagen — sin texto extraíble."}
 
         # El Anexo 7 admite Comprobante de Retención (07) y también Notas de
@@ -308,21 +289,6 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                     "Retención), DTE-05 (Nota de Crédito) o DTE-06 (Nota de Débito)."
                 )
             }
-
-        # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
-        if _vision_campos.get("fecha"):
-            fecha    = _vision_campos["fecha"]
-        if _vision_campos.get("nit_prov"):
-            nit_prov = _vision_campos["nit_prov"]
-        if _vision_campos.get("base") and base == 0.0:
-            base = float(_vision_campos["base"])
-        if _vision_campos.get("ret") and ret == 0.0:
-            ret = float(_vision_campos["ret"])
-
-        # Sello: aplicar Vision si regex no lo encontró o encontró uno corto
-        v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
-        if len(v_sello) >= 25 and "-" not in v_sello and len(sello) < 25:
-            sello = v_sello
 
         # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
         # (leído en paralelo con Visión más arriba — aquí solo se recoge el
@@ -368,6 +334,41 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             if _consulta_mh.get("selloVal"):
                 sello = str(_consulta_mh["selloVal"]).upper()
             gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
+
+        # ── Visión SOLO si Hacienda + regex no alcanzan ───────────────────────
+        # Antes Visión se lanzaba SIEMPRE en paralelo para cada documento del
+        # lote, sin importar si ya había datos suficientes — eso saturaba el
+        # rate limit de Groq cuando el lote tenía 10-20 PDFs. Ahora se calcula
+        # la confianza con lo que ya se tiene (regex + QR + Hacienda) y solo
+        # se gasta una llamada a Visión si el documento sigue incompleto.
+        _campos_pre_vision = {
+            "nit_prov": nit_prov or dui_agente, "fecha": fecha, "sello": sello,
+            "gen": gen, "base": base, "ret": ret,
+        }
+        _confianza_pre_vision = calcular_confianza(_campos_pre_vision, "retenciones")
+        if _confianza_pre_vision["score"] < 85 and vision_disponible():
+            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+                file_bytes, "retenciones",
+                {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
+            )
+            gemini_correcciones += [
+                f"Visión: {a}" for a in _vision_alertas
+            ] if _vision_alertas else (
+                [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
+                if _vision_campos else []
+            )
+            if _vision_campos:
+                if _vision_campos.get("fecha") and not fecha:
+                    fecha    = _vision_campos["fecha"]
+                if _vision_campos.get("nit_prov") and not nit_prov:
+                    nit_prov = _vision_campos["nit_prov"]
+                if _vision_campos.get("base") and base == 0.0:
+                    base = float(_vision_campos["base"])
+                if _vision_campos.get("ret") and ret == 0.0:
+                    ret = float(_vision_campos["ret"])
+                v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
+                if len(v_sello) >= 25 and "-" not in v_sello and len(sello) < 25:
+                    sello = v_sello
 
         # "nit_prov or dui_agente" solo para el cálculo de confianza — el
         # campo requerido es "algún identificador del agente", no
