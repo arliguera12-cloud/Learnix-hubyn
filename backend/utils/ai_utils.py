@@ -187,7 +187,15 @@ _ANTIPATRONES_NOMBRE = re.compile(
     r'DATOS\s+DEL\s+(?:EMISOR|RECEPTOR|PROVEEDOR|CLIENTE)|'
     r'ACTIVIDAD\s+ECON[OÓ]MICA|TIPO\s+(?:DE\s+)?ESTABLECIMIENTO|'
     r'DIRECCI[OÓ]N|MUNICIPIO|DEPARTAMENTO|CASA\s+MATRIZ|SUCURSAL\s*\d|'
-    r'TEL[EÉ]FONO|CORREO\s+ELECTR[OÓ]NICO|P[AÁ]GINA\s+WEB'
+    r'TEL[EÉ]FONO|CORREO\s+ELECTR[OÓ]NICO|P[AÁ]GINA\s+WEB|'
+    # Pie de página estándar del DTE ("Consulte este documento en... Consulta
+    # MH JSON y PDF... Moneda: USD Versión JSON: 3") — antes solo se
+    # detectaba si aparecía al INICIO de la línea (SKIP_LINEAS, anclado);
+    # acá se busca en cualquier posición, porque regex a veces recorta el
+    # candidato y deja este texto pegado al final de otra línea.
+    r'CONSULTA\s+(?:MH|P[UÚ]BLICA)|JSON\s+Y\s+PDF|VERSI[OÓ]N\s+JSON|'
+    r'MONEDA\s*:?\s*(?:USD|SVC)|ADMIN\.FACTURA\.GOB|'
+    r'PARA\s+LA\s+VENTA\s+DE\s+PRODUCTOS'
     r')\b',
     re.I,
 )
