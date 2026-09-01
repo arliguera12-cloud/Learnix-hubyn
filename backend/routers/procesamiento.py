@@ -6,7 +6,7 @@ listos para guardarse en Supabase.
 """
 import asyncio
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 from typing import List
@@ -19,6 +19,7 @@ from schemas.procesamiento import DeclaranteFields
 from utils.auth_dependency import get_current_user
 from utils.concurrent_processor import procesar_json_nativo_ventas, procesar_json_nativo_compras
 from utils.dte_json import cargar_json as _cargar_json_dte
+from utils import jobs as jobs_store
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -220,91 +221,136 @@ async def procesar_sujetos_excluidos(
 # Lote (multi-PDF/JSON)
 # ---------------------------------------------------------------------------
 
-async def _process_lote(
-    files: List[UploadFile], extractor_fn, tipo: str,
+def _procesar_uno_bytes(
+    filename: str, content: bytes, ext: str, extractor_fn, json_fn, tipo: str,
+    cliente: dict, declarante_id: str,
+) -> tuple[bool, dict]:
+    """Corre en threadpool — bloqueante (regex, pdfplumber, requests a Groq/
+    Hacienda), a propósito fuera del event loop."""
+    try:
+        if ext == "json" and json_fn is not None:
+            result = json_fn(content)
+        else:
+            result = extractor_fn(content, cliente)
+        return True, _handle_extractor_result(result, tipo, filename, declarante_id)
+    except HTTPException as e:
+        return False, {"filename": filename, "error": e.detail}
+    except Exception as e:
+        return False, {"filename": filename, "error": str(e)}
+
+
+async def _ejecutar_lote_job(
+    job_id: str, archivos: list[tuple[str, bytes, str]], extractor_fn, json_fn,
+    tipo: str, cliente: dict, declarante_id: str,
+) -> None:
+    """
+    Tarea de background (FastAPI BackgroundTasks) — corre DESPUÉS de que la
+    request ya respondió con el job_id, así que nada de esto puede generar
+    un "Network Error": no hay ninguna conexión HTTP abierta esperándolo.
+
+    Cada archivo corre en threadpool en paralelo (igual que antes), pero acá
+    el progreso se va guardando en el job a medida que cada uno termina, en
+    vez de esperar a que termine todo el lote para recién ahí devolver algo.
+    """
+    async def _uno(filename: str, content: bytes, ext: str) -> None:
+        ok, r = await run_in_threadpool(
+            _procesar_uno_bytes, filename, content, ext, extractor_fn, json_fn,
+            tipo, cliente, declarante_id,
+        )
+        jobs_store.actualizar_progreso(job_id, resultado=r if ok else None, error=None if ok else r)
+
+    try:
+        await asyncio.gather(*(_uno(fn, c, e) for fn, c, e in archivos))
+    finally:
+        jobs_store.finalizar_job(job_id)
+
+
+async def _iniciar_lote_job(
+    background_tasks: BackgroundTasks, files: List[UploadFile], extractor_fn, tipo: str,
     declarante_id: str, nombre_declarante: str = "", nrc_declarante: str = "",
     permitir_json: bool = False, json_fn=None,
 ) -> dict:
     if len(files) > _MAX_LOTE_ARCHIVOS:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"Máximo {_MAX_LOTE_ARCHIVOS} archivos por lote (subiste {len(files)}). "
-                "Subí en tandas más chicas — con lotes muy grandes la conexión se corta "
-                "antes de terminar de procesar."
-            ),
+            detail=f"Máximo {_MAX_LOTE_ARCHIVOS} archivos por lote (subiste {len(files)}).",
         )
 
     cliente = _build_cliente_activo(declarante_id, nombre=nombre_declarante, nrc=nrc_declarante)
 
-    def _procesar_uno(f: UploadFile):
-        try:
-            content, ext = _read_upload_bytes(f, permitir_json=permitir_json)
-            if ext == "json" and json_fn is not None:
-                result = json_fn(content)
-            else:
-                result = extractor_fn(content, cliente)
-            return True, _handle_extractor_result(result, tipo, f.filename, declarante_id)
-        except HTTPException as e:
-            return False, {"filename": f.filename, "error": e.detail}
-        except Exception as e:
-            return False, {"filename": f.filename, "error": str(e)}
+    # Los archivos se leen ACÁ, todavía con la conexión abierta — un UploadFile
+    # deja de ser válido apenas la request termina, así que hay que sacarle
+    # los bytes antes de agendar el trabajo de background.
+    archivos: list[tuple[str, bytes, str]] = []
+    for f in files:
+        content, ext = _read_upload_bytes(f, permitir_json=permitir_json)
+        archivos.append((f.filename, content, ext))
 
-    # Cada extracción hace llamadas de red (Groq/Gemini) y E/S de archivo, así
-    # que corren en threadpool en paralelo en vez de una por una — antes un
-    # lote de cientos de PDFs bloqueaba el único proceso de Uvicorn el tiempo
-    # suficiente para que el proxy cortara la conexión ("network error" en el
-    # frontend, aunque cada extracción individual funcionaba bien).
-    resultados_raw = await asyncio.gather(*(run_in_threadpool(_procesar_uno, f) for f in files))
-
-    resultados = [r for ok, r in resultados_raw if ok]
-    errores = [r for ok, r in resultados_raw if not ok]
-    return {"resultados": resultados, "errores": errores, "total": len(files),
-            "exitosos": len(resultados), "fallidos": len(errores)}
+    job_id = jobs_store.crear_job(len(archivos))
+    background_tasks.add_task(
+        _ejecutar_lote_job, job_id, archivos, extractor_fn, json_fn, tipo, cliente, declarante_id,
+    )
+    return {"job_id": job_id, "total": len(archivos)}
 
 
 @router.post("/ventas/lote")
 async def procesar_ventas_lote(
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     declarante_id: str = Form(...),
     nombre_declarante: str = Form(""),
     nrc_declarante: str = Form(""),
 ):
-    return await _process_lote(files, extraer_venta_nativo_pro, "ventas",
+    return await _iniciar_lote_job(background_tasks, files, extraer_venta_nativo_pro, "ventas",
                          declarante_id, nombre_declarante, nrc_declarante,
                          permitir_json=True, json_fn=procesar_json_nativo_ventas)
 
 
 @router.post("/compras/lote")
 async def procesar_compras_lote(
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     declarante_id: str = Form(...),
     nombre_declarante: str = Form(""),
     nrc_declarante: str = Form(""),
 ):
-    return await _process_lote(files, extraer_compra_nativo_pro, "compras",
+    return await _iniciar_lote_job(background_tasks, files, extraer_compra_nativo_pro, "compras",
                          declarante_id, nombre_declarante, nrc_declarante,
                          permitir_json=True, json_fn=procesar_json_nativo_compras)
 
 
 @router.post("/retenciones/lote")
 async def procesar_retenciones_lote(
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     declarante_id: str = Form(...),
     nombre_declarante: str = Form(""),
 ):
-    return await _process_lote(files, extraer_retencion_nativa, "retenciones",
+    return await _iniciar_lote_job(background_tasks, files, extraer_retencion_nativa, "retenciones",
                          declarante_id, nombre_declarante)
 
 
 @router.post("/sujetos-excluidos/lote")
 async def procesar_sujetos_excluidos_lote(
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     declarante_id: str = Form(...),
     nombre_declarante: str = Form(""),
 ):
-    return await _process_lote(files, extraer_sujetos_nativo, "sujetos_excluidos",
+    return await _iniciar_lote_job(background_tasks, files, extraer_sujetos_nativo, "sujetos_excluidos",
                          declarante_id, nombre_declarante)
+
+
+@router.get("/lote/jobs/{job_id}")
+async def obtener_estado_lote(job_id: str):
+    """
+    Progreso/resultado de un lote en background. El frontend hace polling acá
+    cada pocos segundos hasta que `status` sea "done" (o "error").
+    """
+    job = jobs_store.obtener_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job no encontrado o expirado")
+    return job
 
 
 # ---------------------------------------------------------------------------

@@ -189,10 +189,10 @@ export default function LandingPage() {
 
       {/* ═══ Hero ═══ */}
       <section className="max-w-[100rem] mx-auto px-5 lg:px-12 pt-16 pb-16 md:pt-24 md:pb-24">
-        <div className="grid md:grid-cols-[1.15fr_1fr] gap-12 md:gap-16 items-end">
+        <div className="grid md:grid-cols-2 gap-12 md:gap-16 items-end">
           {/* Titular */}
           <h1 className="animate-rise font-light text-fg tracking-[-0.045em] leading-[0.92]"
-              style={{ fontSize: 'clamp(52px, 9vw, 140px)' }}>
+              style={{ fontSize: 'clamp(44px, 6.2vw, 100px)' }}>
             Tus DTE,
             <span className="block font-display italic font-black text-accent2">
               por fin,

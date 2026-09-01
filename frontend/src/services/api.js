@@ -71,6 +71,16 @@ export function procesarSujetosExcluidosLote(files, declaranteId, nombre) {
   return api.post('/procesar/sujetos-excluidos/lote', buildLoteForm(files, declaranteId, nombre))
 }
 
+/**
+ * Progreso/resultado de un lote que corre en background en el servidor.
+ * Cada llamada de este tipo es una request corta (un GET liviano) — no hay
+ * ninguna conexión larga que un timeout intermedio pueda cortar a mitad de
+ * camino, a diferencia de esperar la respuesta directa de /lote.
+ */
+export function obtenerEstadoLote(jobId) {
+  return api.get(`/procesar/lote/jobs/${jobId}`)
+}
+
 // ─── Guardar en Supabase ───────────────────────────────────────────────────
 
 const _TABLA = {
