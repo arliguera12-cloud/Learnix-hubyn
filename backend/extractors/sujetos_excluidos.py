@@ -13,7 +13,7 @@ from utils.pdf_utils import (
     extraer_y_formatear_fecha,
     extraer_texto_pdf,
 )
-from utils.ai_utils import gemini_disponible, procesar_dte_con_gemini
+from utils.ai_utils import gemini_disponible, procesar_dte_con_gemini, es_nombre_sospechoso
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
 from utils.mh_consulta import consultar_dte_publico
@@ -61,7 +61,7 @@ def extraer_nombre_receptor(texto: str) -> str:
         # Cortar si llega a NIT: o DUI: u otro campo
         nombre = re.split(r'\s+(?:NIT|DUI|N[úu]mero|Direcci[oó]n|Correo|Tel[eé]fono)\s*[:\-]', nombre, flags=re.I)[0]
         nombre = nombre.strip()
-        if 3 < len(nombre) <= 65:
+        if 3 < len(nombre) <= 65 and not es_nombre_sospechoso(nombre):
             return nombre.upper()
 
     # ── Estrategia 2: líneas separadas — tomar el último "Nombre o razón social:" ──
@@ -73,11 +73,11 @@ def extraer_nombre_receptor(texto: str) -> str:
         nombre = re.sub(r'\s+', ' ', todas[-1]).strip()
         nombre = re.split(r'\s+(?:NIT|DUI|N[úu]mero|Direcci[oó]n|Correo|Tel[eé]fono)\s*[:\-]', nombre, flags=re.I)[0]
         nombre = nombre.strip()
-        if 3 < len(nombre) <= 65:
+        if 3 < len(nombre) <= 65 and not es_nombre_sospechoso(nombre):
             return nombre.upper()
     elif len(todas) == 1:
         nombre = re.sub(r'\s+', ' ', todas[0]).strip()
-        if 3 < len(nombre) <= 65:
+        if 3 < len(nombre) <= 65 and not es_nombre_sospechoso(nombre):
             return nombre.upper()
 
     return "⚠️ REVISAR NOMBRE"
