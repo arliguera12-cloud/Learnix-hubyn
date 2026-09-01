@@ -172,7 +172,7 @@ _SOSPECHOSO = re.compile(
 )
 _PAT_FECHA_STR  = re.compile(r'\d{2}[/\-]\d{2}[/\-]\d{4}')
 _PAT_HORA       = re.compile(r'\b\d{2}:\d{2}:\d{2}\b')
-_PAT_META       = re.compile(r'\b(?:PROCESADO|MODELO\s+FACTURACI|GENERACI[OÓ]N\s*:)', re.I)
+_PAT_META       = re.compile(r'\b(?:PROCESADO\b|MODELO\s+FACTURACI|GENERACI[OÓ]N\s*:)', re.I)
 _PAT_DDMMYYYY   = re.compile(r'^\d{2}/\d{2}/20\d{2}$')
 _PAT_SOLO_NUMS  = re.compile(r'^\d[\d\-]{5,}$')        # solo dígitos/guiones → es un ID no un nombre
 _PAT_UUID_LIKE  = re.compile(r'[A-F0-9]{8}-[A-F0-9]{4}', re.I)  # fragmento UUID

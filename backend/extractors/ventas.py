@@ -630,10 +630,14 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 debito   = 0.0  # El anexo 2 no pide débito fiscal separado
 
             if tipo in TIPOS_CONTRIBUYENTES:
-                # Para CCF: calcular gravadas sin IVA si no se encontraron
-                if gravadas == 0.0 and total > 0 and debito > 0:
-                    gravadas = round(total - debito - exentas - no_sujetas, 2)
-
+                # "Sub-Total:" es un valor explícito del documento — se intenta
+                # ANTES que la resta total-débito, porque esa resta asume
+                # total = gravadas + débito + exentas + no_sujetas, lo cual es
+                # falso si el documento tiene "Otros montos no afectos" (p. ej.
+                # un costo de flete facturado a través, no sujeto a IVA): en
+                # ese caso la resta infla las gravadas de más exactamente por
+                # ese monto, y como ya deja de ser 0.0, este regex más
+                # confiable nunca llegaba a correr.
                 if gravadas == 0.0:
                     m_sub = re.search(
                         r"Sub[\s\-]?Total\s*:\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -641,6 +645,10 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     )
                     if m_sub:
                         gravadas = limpiar_monto(m_sub.group(1))
+
+                # Para CCF: calcular gravadas sin IVA si no se encontraron
+                if gravadas == 0.0 and total > 0 and debito > 0:
+                    gravadas = round(total - debito - exentas - no_sujetas, 2)
 
                 encontrado = total > 0 and debito > 0 and gravadas > 0
 
