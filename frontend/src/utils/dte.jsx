@@ -8,6 +8,7 @@
  */
 import { useRef, useState } from 'react'
 import { IconCheck, IconAlerta } from '../components/Icons'
+import { obtenerEstadoLote } from '../services/api'
 
 /**
  * Mantiene `resultados` y `declaranteId` de un extractor en sessionStorage.
@@ -67,12 +68,10 @@ export function usePersistenciaExtractor(tipo) {
 
 /**
  * Progreso REAL de una subida por lote troceada en tandas (ver
- * subirLoteEnTandas). Cada tanda es un request que termina de una sola vez
- * (el backend la procesa en paralelo y responde al final), así que dentro de
- * una tanda no hay forma de medir avance — pero entre tandas sí: se sabe
- * exactamente cuántos documentos van procesados sobre el total, y con eso
- * alcanza para un porcentaje real y una estimación de tiempo restante
- * (a partir de cuánto tardaron las tandas ya completadas).
+ * subirLoteEnTandas). El backend procesa cada tanda como un job en
+ * background y el frontend hace polling de su avance, así que el progreso
+ * es granular incluso dentro de una tanda (no solo al terminarla) — con eso
+ * alcanza para un porcentaje real y una estimación de tiempo restante.
  */
 export function useProgresoLote() {
   const [progress, setProgress] = useState(null)
@@ -133,6 +132,28 @@ export const TAMANO_TANDA = 10
  * `onProgreso(procesados, total, tandaActual, totalTandas)` se llama al
  * terminar cada tanda, con el conteo real hasta ese momento.
  */
+const POLL_INTERVALO_MS = 2000
+
+/**
+ * Espera a que un job de lote termine, consultando su progreso cada
+ * `POLL_INTERVALO_MS`. Cada consulta es un GET corto — nada que un timeout
+ * intermedio (navegador, proxy, Vercel) pueda cortar a mitad de camino,
+ * a diferencia de esperar la respuesta directa del POST original (que
+ * podía tardar varios minutos y mostraba "Network Error" aunque el
+ * servidor terminara bien).
+ */
+async function _esperarJob(jobId, onProgresoTanda) {
+  for (;;) {
+    await new Promise(resolve => setTimeout(resolve, POLL_INTERVALO_MS))
+    const { data: job } = await obtenerEstadoLote(jobId)
+    onProgresoTanda?.(job.procesados, job.total)
+    if (job.status === 'done') return job
+    if (job.status === 'error') {
+      throw new Error(job.error_fatal || 'El procesamiento del lote falló.')
+    }
+  }
+}
+
 export async function subirLoteEnTandas(files, loteApiFn, declaranteId, nombre, onProgreso) {
   const resultados = []
   const errores = []
@@ -142,9 +163,12 @@ export async function subirLoteEnTandas(files, loteApiFn, declaranteId, nombre, 
 
   for (let i = 0; i < files.length; i += TAMANO_TANDA) {
     const tanda = files.slice(i, i + TAMANO_TANDA)
-    const { data } = await loteApiFn(tanda, declaranteId, nombre)
-    resultados.push(...(data.resultados ?? []))
-    errores.push(...(data.errores ?? []))
+    const { data: inicio } = await loteApiFn(tanda, declaranteId, nombre)
+    const job = await _esperarJob(inicio.job_id, (procesadosTanda) => {
+      onProgreso?.(procesados + procesadosTanda, files.length, tandaActual + 1, totalTandas)
+    })
+    resultados.push(...(job.resultados ?? []))
+    errores.push(...(job.errores ?? []))
     procesados += tanda.length
     tandaActual += 1
     onProgreso?.(procesados, files.length, tandaActual, totalTandas)
