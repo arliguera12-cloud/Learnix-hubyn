@@ -257,12 +257,16 @@ async def _ejecutar_lote_job(
             _procesar_uno_bytes, filename, content, ext, extractor_fn, json_fn,
             tipo, cliente, declarante_id,
         )
-        jobs_store.actualizar_progreso(job_id, resultado=r if ok else None, error=None if ok else r)
+        snapshot = jobs_store.actualizar_progreso(job_id, resultado=r if ok else None, error=None if ok else r)
+        if snapshot is not None:
+            await run_in_threadpool(jobs_store.guardar_snapshot, snapshot)
 
     try:
         await asyncio.gather(*(_uno(fn, c, e) for fn, c, e in archivos))
     finally:
-        jobs_store.finalizar_job(job_id)
+        snapshot = jobs_store.finalizar_job(job_id)
+        if snapshot is not None:
+            await run_in_threadpool(jobs_store.guardar_snapshot, snapshot)
 
 
 async def _iniciar_lote_job(
@@ -286,7 +290,13 @@ async def _iniciar_lote_job(
         content, ext = _read_upload_bytes(f, permitir_json=permitir_json)
         archivos.append((f.filename, content, ext))
 
-    job_id = jobs_store.crear_job(len(archivos))
+    job = jobs_store.crear_job(len(archivos))
+    job_id = job["job_id"]
+    # Se respalda ACÁ (con la conexión todavía abierta) para que el job ya
+    # exista en Supabase antes de responder — si el contenedor se reinicia
+    # apenas después de crear el job (p. ej. un redeploy que arranca justo
+    # en este instante), el primer polling del frontend igual lo encuentra.
+    await run_in_threadpool(jobs_store.guardar_snapshot, job)
     background_tasks.add_task(
         _ejecutar_lote_job, job_id, archivos, extractor_fn, json_fn, tipo, cliente, declarante_id,
     )
@@ -348,6 +358,11 @@ async def obtener_estado_lote(job_id: str):
     cada pocos segundos hasta que `status` sea "done" (o "error").
     """
     job = jobs_store.obtener_job(job_id)
+    if not job:
+        # No está en memoria — puede ser que el contenedor se haya
+        # reiniciado (redeploy) mientras el job corría. Antes de darlo por
+        # perdido, se intenta recuperar del respaldo en Supabase.
+        job = await run_in_threadpool(jobs_store.cargar_de_supabase, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado o expirado")
     return job
