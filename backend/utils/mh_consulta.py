@@ -25,6 +25,15 @@ resultados (éxito/fallo/tiempo) se loguean con log.warning en los casos de
 falla real para que queden visibles en Railway (antes de agregar
 logging.basicConfig() en main.py, TODO log.info() de este módulo se
 descartaba en silencio y esta consulta era invisible en los logs).
+
+Circuit breaker: si Hacienda está caída/degradada (varios fallos de red o
+timeout seguidos — no un simple "documento no encontrado", que es una
+respuesta válida), se abre el circuito y las siguientes consultas se omiten
+directo por _CIRCUITO_COOLDOWN segundos, sin ni siquiera intentar la
+llamada. Sin esto, un lote de 96 PDFs con Hacienda caída pagaría el timeout
+completo en CADA documento — con el aviso oficial de uso restringido de
+endpoints (efectivo 25-ago-2026) ya vencido y reportes de lentitud real,
+es exactamente el escenario a cubrir.
 """
 from __future__ import annotations
 
@@ -38,7 +47,8 @@ import requests
 log = logging.getLogger(__name__)
 
 _URL = "https://admin.factura.gob.sv/prod/consultas/publica/simple/1"
-_TIMEOUT = 8  # segundos — no vale la pena esperar más por un dato opcional
+_TIMEOUT = 4  # segundos — reducido de 8: un dato opcional no debería poder
+              # costarle 8s a cada documento cuando Hacienda está lenta.
 
 _UUID_RE  = re.compile(r'^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$')
 _FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
@@ -52,12 +62,46 @@ _FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 # volumen que una consulta manual hecha a mano, nunca en bucles de scraping",
 # pero sin este límite el comportamiento real es justo una ráfaga concurrente
 # — el patrón que el aviso de Hacienda sobre uso restringido de endpoints
-# (25-ago-2026) apunta a frenar, y candidato directo a disparar un tope de
-# tasa en su lado. Se serializa a lo sumo _MAX_CONCURRENTES consultas a la
-# vez; el resto de la extracción (Visión, regex) no se ve afectado, solo
-# esta llamada de red puntual.
-_MAX_CONCURRENTES = 2
+# apunta a frenar, y candidato directo a disparar un tope de tasa en su lado.
+# _MAX_CONCURRENTES=5 (mitad de una tanda) es un punto medio: sigue evitando
+# la ráfaga de 10 a la vez, pero con el circuit breaker de abajo el caso
+# realmente costoso (Hacienda caída) ya no depende de este número — se
+# resuelve dejando de intentar del todo tras unos pocos fallos.
+_MAX_CONCURRENTES = 5
 _semaforo = threading.Semaphore(_MAX_CONCURRENTES)
+
+# ── Circuit breaker ──────────────────────────────────────────────────────
+_FALLOS_CONSECUTIVOS_MAX = 4
+_CIRCUITO_COOLDOWN = 60  # segundos que se deja de intentar tras abrir el circuito
+
+_estado_lock = threading.Lock()
+_fallos_consecutivos = 0
+_circuito_abierto_hasta = 0.0
+
+
+def _circuito_abierto() -> bool:
+    with _estado_lock:
+        return time.monotonic() < _circuito_abierto_hasta
+
+
+def _registrar_resultado(ok: bool) -> None:
+    """Solo fallos de red/timeout/HTTP cuentan para el circuito — un 'no
+    encontrado' (action != OK) es una respuesta normal del servicio, no una
+    caída, y no debe abrirlo."""
+    global _fallos_consecutivos, _circuito_abierto_hasta
+    with _estado_lock:
+        if ok:
+            _fallos_consecutivos = 0
+            _circuito_abierto_hasta = 0.0
+            return
+        _fallos_consecutivos += 1
+        if _fallos_consecutivos >= _FALLOS_CONSECUTIVOS_MAX and time.monotonic() >= _circuito_abierto_hasta:
+            _circuito_abierto_hasta = time.monotonic() + _CIRCUITO_COOLDOWN
+            log.warning(
+                "Consulta pública MH: circuito ABIERTO tras %d fallos seguidos — "
+                "se omite esta consulta por %ds (Hacienda parece caída/degradada)",
+                _fallos_consecutivos, _CIRCUITO_COOLDOWN,
+            )
 
 
 def consultar_dte_publico(codigo_generacion: str, fecha_emi_iso: str, ambiente: str = "01") -> dict | None:
@@ -84,6 +128,10 @@ def consultar_dte_publico(codigo_generacion: str, fecha_emi_iso: str, ambiente: 
         log.info("Consulta pública MH: codigo_generacion/fecha con formato inválido (cod=%r, fecha=%r) — se omite", cod, fecha)
         return None
 
+    if _circuito_abierto():
+        log.info("Consulta pública MH: circuito abierto (Hacienda caída/degradada) — se omite %s sin intentar", cod)
+        return None
+
     t0 = time.monotonic()
     with _semaforo:
         espera = round(time.monotonic() - t0, 2)
@@ -99,23 +147,29 @@ def consultar_dte_publico(codigo_generacion: str, fecha_emi_iso: str, ambiente: 
             elapsed = round(time.monotonic() - t1, 2)
             if resp.status_code == 429:
                 log.warning("Consulta pública MH: TOPE de tasa (429) para %s tras %.2fs — Retry-After=%s", cod, elapsed, resp.headers.get("Retry-After"))
+                _registrar_resultado(False)
                 return None
             resp.raise_for_status()
             data = resp.json()
             if data.get("action") == "OK" and isinstance(data.get("documento"), dict):
                 log.info("Consulta pública MH OK para %s (estado=%s, %.2fs)", cod, data.get("estadoDoc"), elapsed)
+                _registrar_resultado(True)
                 return data
             log.info("Consulta pública MH: %s respondió sin documento válido (action=%r, %.2fs)", cod, data.get("action"), elapsed)
+            _registrar_resultado(True)  # el servicio respondió bien, solo no hay documento — no es una caída
             return None
         except requests.exceptions.Timeout:
             elapsed = round(time.monotonic() - t1, 2)
             log.warning("Consulta pública MH: TIMEOUT para %s tras %.2fs (límite %ds)", cod, elapsed, _TIMEOUT)
+            _registrar_resultado(False)
             return None
         except requests.exceptions.HTTPError as exc:
             elapsed = round(time.monotonic() - t1, 2)
             log.warning("Consulta pública MH: HTTP %s para %s tras %.2fs", getattr(exc.response, "status_code", "?"), cod, elapsed)
+            _registrar_resultado(False)
             return None
         except Exception as exc:
             elapsed = round(time.monotonic() - t1, 2)
             log.warning("Consulta pública MH falló para %s tras %.2fs: %s", cod, elapsed, exc)
+            _registrar_resultado(False)
             return None
