@@ -3,7 +3,7 @@ Learnix Hub — AI Utils v5.0 (Groq motor único + Google AI opcional).
 
 Motor PRINCIPAL: Groq Cloud
   - Texto  : openai/gpt-oss-120b
-  - Visión : qwen/qwen3.6-27b
+  - Visión : qwen/qwen3.8-27b
   - Circuit breaker INDEPENDIENTE para Groq
 
 Motor OPCIONAL (Google AI): se activa si GEMINI_API_KEY / VERTEX_API_KEY está
@@ -28,7 +28,10 @@ from groq import Groq
 log = logging.getLogger(__name__)
 
 _GROQ_MODEL        = "openai/gpt-oss-120b"
-_GROQ_VISION_MODEL = "qwen/qwen3.6-27b"
+# Groq deprecó qwen3.6-27b el 1-sep-2026 (decomisión 14-sep-2026), reemplazo
+# oficial qwen3.8-27b — actualizado antes de depender del ruteo automático
+# que Groq prometió para requests al modelo viejo después de esa fecha.
+_GROQ_VISION_MODEL = "qwen/qwen3.8-27b"
 _MAX_RETRIES       = 3
 _BACKOFF_DELAYS    = [2, 4, 8]
 
@@ -1394,7 +1397,7 @@ def _llamar_groq_vision(prompt: str, img_b64: str) -> dict | None:
                     model=_GROQ_VISION_MODEL,
                     messages=mensajes,
                     temperature=0.1,
-                    # qwen3.6-27b es un modelo con razonamiento interno — con
+                    # La familia qwen3-27b son modelos con razonamiento interno — con
                     # max_tokens=1024 (el límite que tenía cuando el modelo de
                     # visión era llama-4-scout, que no razona) se gastaba todo
                     # el presupuesto "pensando" y no dejaba nada para la
