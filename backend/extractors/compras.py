@@ -22,7 +22,7 @@ from utils.ai_utils import (
 )
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
-from utils.mh_consulta import consultar_dte_publico
+from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta
 from utils.qa_utils import calcular_confianza
 from utils.dte_layout import buscar_numero_control
 from utils.constants import TIPOS_VALIDOS_COMPRAS, MAX_VALORES_LOOP_COMPRAS
@@ -934,6 +934,10 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             # IA/QR. La columna "Compras Exentas/No Sujetas" del Anexo 3 es una
             # sola (no separa exentas de no sujetas como sí hace ventas), así
             # que se suman ambas en `exe`.
+            _mh_alerta = estado_doc_alerta(_consulta_mh)
+            if _mh_alerta:
+                gemini_correcciones.append(f"Hacienda: {_mh_alerta}")
+
             if _consulta_mh:
                 _resumen_mh = (_consulta_mh.get("documento") or {}).get("resumen") or {}
                 _grav_mh    = _resumen_mh.get("totalGravada")
@@ -1083,6 +1087,12 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 estado = "REVISAR"
             else:
                 estado = "REVISION_MANUAL"
+            _detalle_confianza = _confianza["detalle"]
+            if _mh_alerta:
+                # Un documento rechazado/invalidado por Hacienda nunca puede
+                # quedar "OK" solo porque los campos vinieron completos.
+                estado = "REVISION_MANUAL"
+                _detalle_confianza = f"Hacienda: {_mh_alerta}. " + _detalle_confianza
 
             return {
                 "fecha"          : fecha,
@@ -1108,7 +1118,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 "confianza"           : _confianza["score"],
                 "campos_faltantes"    : _confianza["campos_faltantes"],
                 "validacion_montos"   : _confianza["validacion_montos"],
-                "detalle_confianza"   : _confianza["detalle"],
+                "detalle_confianza"   : _detalle_confianza,
                 "iva_calc"            : iva_calculado,
                 "es_nuevo"            : es_nuevo,
                 "gemini_correcciones" : gemini_correcciones,

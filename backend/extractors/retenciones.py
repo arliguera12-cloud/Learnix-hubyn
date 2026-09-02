@@ -19,7 +19,7 @@ from utils.pdf_utils import (
 from utils.ai_utils import gemini_disponible, procesar_dte_con_gemini
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
-from utils.mh_consulta import consultar_dte_publico
+from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta
 from utils.qa_utils import calcular_confianza
 from utils.local_db import cargar_proveedores_combinados
 
@@ -328,6 +328,10 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         # abajo ya no tiene nada que corregir en base/ret, ahorrando la
         # llamada. Hacienda no expone el NIT del sujeto retenido (privacidad),
         # así que ese campo sigue dependiendo de regex/Vision/IA.
+        _mh_alerta = estado_doc_alerta(_consulta_mh)
+        if _mh_alerta:
+            gemini_correcciones.append(f"Hacienda: {_mh_alerta}")
+
         if _consulta_mh:
             _resumen_mh = (_consulta_mh.get("documento") or {}).get("resumen") or {}
             _base_mh = _resumen_mh.get("totalSujetoRetencion")
@@ -432,6 +436,10 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             estado = "REVISAR"
         else:
             estado = "REVISION_MANUAL"
+        _detalle_confianza = _confianza["detalle"]
+        if _mh_alerta:
+            estado = "REVISION_MANUAL"
+            _detalle_confianza = f"Hacienda: {_mh_alerta}. " + _detalle_confianza
 
         return {
             "nit_prov"            : nit_prov,
@@ -447,7 +455,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             "confianza"           : _confianza["score"],
             "campos_faltantes"    : _confianza["campos_faltantes"],
             "validacion_montos"   : _confianza["validacion_montos"],
-            "detalle_confianza"   : _confianza["detalle"],
+            "detalle_confianza"   : _detalle_confianza,
             "gemini_correcciones" : gemini_correcciones,
             "_vision_campos"      : _vision_campos,
             "_vision_alertas"     : _vision_alertas,

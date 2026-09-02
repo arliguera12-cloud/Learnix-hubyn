@@ -21,7 +21,7 @@ from utils.ai_utils import (
 )
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
-from utils.mh_consulta import consultar_dte_publico
+from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta
 from utils.qa_utils import calcular_confianza
 from utils.dte_layout import ids_pareados, identificadores_emisor, buscar_numero_control
 from utils.constants import (
@@ -743,6 +743,10 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             # real está en resumen.tributos (código "20"). numeIdenRecep expone
             # el NIT del receptor (cliente) — a diferencia del sujeto retenido
             # en un DTE-07, acá Hacienda sí lo da.
+            _mh_alerta = estado_doc_alerta(_consulta_mh)
+            if _mh_alerta:
+                gemini_correcciones.append(f"Hacienda: {_mh_alerta}")
+
             if _consulta_mh:
                 _resumen_mh = (_consulta_mh.get("documento") or {}).get("resumen") or {}
                 _grav_mh  = _resumen_mh.get("totalGravada")
@@ -897,6 +901,10 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 estado = "REVISAR"
             else:
                 estado = "REVISION_MANUAL"
+            _detalle_confianza = _confianza["detalle"]
+            if _mh_alerta:
+                estado = "REVISION_MANUAL"
+                _detalle_confianza = f"Hacienda: {_mh_alerta}. " + _detalle_confianza
 
             return {
                 "fecha"         : fecha,
@@ -922,7 +930,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "confianza"           : _confianza["score"],
                 "campos_faltantes"    : _confianza["campos_faltantes"],
                 "validacion_montos"   : _confianza["validacion_montos"],
-                "detalle_confianza"   : _confianza["detalle"],
+                "detalle_confianza"   : _detalle_confianza,
                 "iva_calc"            : iva_calc,
                 "es_nuevo"            : es_nuevo,
                 "gemini_correcciones" : gemini_correcciones,

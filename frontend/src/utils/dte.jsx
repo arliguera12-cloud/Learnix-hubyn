@@ -206,6 +206,44 @@ export function fmt(n) {
   })
 }
 
+// Colores por método real que resolvió un campo (registro.fuentes[campo] —
+// ver backend/extractors/*.py). Compartido entre las tablas "Auditoría
+// completa" de Ventas.jsx/Compras.jsx y el detalle expandible de
+// ResultadosTabla.jsx.
+export const FUENTE_CAMPO_ESTILO = {
+  regex:        { label: 'Regex',        clase: 'text-slate-400 bg-slate-700/40' },
+  qr:           { label: 'QR',           clase: 'text-violet-400 bg-violet-900/30' },
+  hacienda:     { label: 'Hacienda',     clase: 'text-emerald-400 bg-emerald-900/30' },
+  vision:       { label: 'Visión',       clase: 'text-sky-400 bg-sky-900/30' },
+  ia:           { label: 'IA',           clase: 'text-amber-400 bg-amber-900/30' },
+  json_oficial: { label: 'JSON oficial', clase: 'text-emerald-400 bg-emerald-900/30' },
+}
+
+/**
+ * Resumen compacto de fuentes para una fila de tabla: dedupea los métodos
+ * que tocaron algún campo del registro y los muestra como badges chiquitos.
+ * "necesito saber con qué método se sacó la información" — antes solo se
+ * podía ver expandiendo cada documento uno por uno; esto lo pone a simple
+ * vista en la tabla completa.
+ */
+export function FuenteResumen({ fuentes }) {
+  if (!fuentes) return <span className="text-slate-600">—</span>
+  const distintas = [...new Set(Object.values(fuentes))]
+  if (distintas.length === 0) return <span className="text-slate-600">—</span>
+  return (
+    <div className="flex flex-wrap gap-1">
+      {distintas.map(f => {
+        const info = FUENTE_CAMPO_ESTILO[f] || { label: f, clase: 'text-slate-400 bg-slate-700/40' }
+        return (
+          <span key={f} className={`text-[0.65rem] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap ${info.clase}`}>
+            {info.label}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
 export function descargarBlob(blobData, nombre) {
   const url = URL.createObjectURL(new Blob([blobData]))
   const a = document.createElement('a')

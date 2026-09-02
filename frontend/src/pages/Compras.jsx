@@ -3,7 +3,7 @@ import PdfUploader from '../components/PdfUploader'
 import { procesarCompras, procesarComprasLote, exportarExcelCompras, guardarResultados } from '../services/api'
 import {
   fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados,
-  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA,
+  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen,
 } from '../utils/dte'
 import { IconCompras, IconExportar, IconCheck, IconAlerta } from '../components/Icons'
 
@@ -306,7 +306,7 @@ export default function Compras() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr>
-                      {['Fecha','Tipo','Nombre Proveedor','NIT/NRC','DUI','Exentas','Gravadas','IVA','Ret.','Perc.','Total','FOVIAL','COTRANS','Sello','UUID','N° Control','Archivo'].map(h => (
+                      {['Fecha','Tipo','Nombre Proveedor','NIT/NRC','DUI','Exentas','Gravadas','IVA','Ret.','Perc.','Total','FOVIAL','COTRANS','Sello','UUID','N° Control','Estatus','Fuente','Archivo'].map(h => (
                         <th key={h} className="table-head text-left whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -332,6 +332,8 @@ export default function Compras() {
                           <td className="table-cell font-mono text-slate-500 max-w-[80px] truncate" title={d.sello}>{d.sello || '—'}</td>
                           <td className="table-cell font-mono text-slate-500 max-w-[80px] truncate" title={d.gen}>{d.gen || '—'}</td>
                           <td className="table-cell font-mono">{d.num_control_raw || d.num_control || '—'}</td>
+                          <td className="table-cell"><EstadoBadge estado={d.estado} /></td>
+                          <td className="table-cell"><FuenteResumen fuentes={d.fuentes} /></td>
                           <td className="table-cell text-slate-500">{r.filename || '—'}</td>
                         </tr>
                       )
