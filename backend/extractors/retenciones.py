@@ -290,6 +290,9 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 )
             }
 
+        # ── Auditoría: qué método sacó cada campo (ver mismo patrón en compras.py) ──
+        fuentes: dict[str, str] = {k: "regex" for k in ("fecha", "nit_prov", "sello", "base", "ret")}
+
         # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
         # (leído en paralelo con Visión más arriba — aquí solo se recoge el
         # resultado, ya listo, sin volver a leer el QR ni consultar Hacienda).
@@ -303,6 +306,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 _nq = re.sub(r'[^0-9]', '', str(_qr["nit_emisor_qr"]))
                 if len(_nq) == 14 and _nq != nit_cliente:
                     nit_prov = _nq
+                    fuentes["nit_prov"] = "qr"
             # Fecha del QR como respaldo
             if _qr.get("fecha_qr"):
                 _fecha_qr_iso = str(_qr["fecha_qr"]).strip()
@@ -310,6 +314,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                     _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fecha_qr_iso)
                     if _mf:
                         fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
+                        fuentes["fecha"] = "qr"
         except Exception:
             pass
 
@@ -329,10 +334,13 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             _ret_mh  = _resumen_mh.get("totalIVAretenido")
             if _base_mh is not None:
                 base = float(_base_mh)
+                fuentes["base"] = "hacienda"
             if _ret_mh is not None:
                 ret = float(_ret_mh)
+                fuentes["ret"] = "hacienda"
             if _consulta_mh.get("selloVal"):
                 sello = str(_consulta_mh["selloVal"]).upper()
+                fuentes["sello"] = "hacienda"
             gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
 
         # ── Visión SOLO si Hacienda + regex no alcanzan ───────────────────────
@@ -360,15 +368,20 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             if _vision_campos:
                 if _vision_campos.get("fecha") and not fecha:
                     fecha    = _vision_campos["fecha"]
+                    fuentes["fecha"] = "vision"
                 if _vision_campos.get("nit_prov") and not nit_prov:
                     nit_prov = _vision_campos["nit_prov"]
+                    fuentes["nit_prov"] = "vision"
                 if _vision_campos.get("base") and base == 0.0:
                     base = float(_vision_campos["base"])
+                    fuentes["base"] = "vision"
                 if _vision_campos.get("ret") and ret == 0.0:
                     ret = float(_vision_campos["ret"])
+                    fuentes["ret"] = "vision"
                 v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
                 if len(v_sello) >= 25 and "-" not in v_sello and len(sello) < 25:
                     sello = v_sello
+                    fuentes["sello"] = "vision"
 
         # "nit_prov or dui_agente" solo para el cálculo de confianza — el
         # campo requerido es "algún identificador del agente", no
@@ -391,12 +404,16 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             gemini_correcciones += [f"IA: {c}" for c in _correcciones_ia]
             if _corr_dict.get("fecha"):
                 fecha    = _corr_dict["fecha"]
+                fuentes["fecha"] = "ia"
             if _corr_dict.get("nit_prov"):
                 nit_prov = _corr_dict["nit_prov"]
+                fuentes["nit_prov"] = "ia"
             if _corr_dict.get("base"):
                 base = _corr_dict["base"]
+                fuentes["base"] = "ia"
             if _corr_dict.get("ret"):
                 ret = _corr_dict["ret"]
+                fuentes["ret"] = "ia"
             # Si la IA corrigió un solo lado del par base/1%, recalcula el otro
             # en vez de dejarlos inconsistentes entre sí.
             if _corr_dict.get("base") and not _corr_dict.get("ret") and ret == 0:
@@ -425,6 +442,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             "gen"                 : gen,
             "base"                : base,
             "ret"                 : ret,
+            "fuentes"             : fuentes,
             "estado"              : estado,
             "confianza"           : _confianza["score"],
             "campos_faltantes"    : _confianza["campos_faltantes"],

@@ -86,6 +86,20 @@ function parsearCorreccion(texto) {
   return { ...(FUENTE_ESTILO[m[1]] || FUENTE_DEFECTO), mensaje: m[2] }
 }
 
+// El backend etiqueta cada campo del registro con el método real que lo
+// resolvió (registro.fuentes[campo]) — "de qué método vino cada dato" es
+// justo lo que antes solo se podía inferir de las notas de correcciones (y
+// solo cuando algo intervino más allá del regex base). Con esto se ve
+// explícito para TODOS los campos, no solo los corregidos.
+const FUENTE_CAMPO_ESTILO = {
+  regex:         { label: 'Regex',       clase: 'text-slate-400 bg-slate-700/40' },
+  qr:            { label: 'QR',          clase: 'text-violet-400 bg-violet-900/30' },
+  hacienda:      { label: 'Hacienda',    clase: 'text-emerald-400 bg-emerald-900/30' },
+  vision:        { label: 'Visión',      clase: 'text-sky-400 bg-sky-900/30' },
+  ia:            { label: 'IA',          clase: 'text-amber-400 bg-amber-900/30' },
+  json_oficial:  { label: 'JSON oficial', clase: 'text-emerald-400 bg-emerald-900/30' },
+}
+
 function descargarBlob(blobData, nombre) {
   const url = URL.createObjectURL(new Blob([blobData]))
   const a = document.createElement('a')
@@ -236,19 +250,28 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
                 const val = registro[key]
                 if (val === undefined || val === null) return null
                 const esNum = CAMPOS_NUMERICOS.has(key)
+                const fuente = registro.fuentes?.[key]
+                const fuenteInfo = fuente ? (FUENTE_CAMPO_ESTILO[fuente] || { label: fuente, clase: 'text-slate-400 bg-slate-700/40' }) : null
                 return (
                   <tr key={key} className="hover:bg-surface-700/40 transition-colors">
                     <td className="table-cell text-slate-500 text-xs font-medium w-40">{label}</td>
                     <td className="table-cell">
-                      {val === '' ? (
-                        <span className="text-slate-600 italic text-xs">—</span>
-                      ) : esNum ? (
-                        <span className="font-mono text-emerald-400 text-sm tabular-nums">
-                          ${fmt(val)}
-                        </span>
-                      ) : (
-                        <span className="text-slate-200 text-sm break-all">{String(val)}</span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {val === '' ? (
+                          <span className="text-slate-600 italic text-xs">—</span>
+                        ) : esNum ? (
+                          <span className="font-mono text-emerald-400 text-sm tabular-nums">
+                            ${fmt(val)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-200 text-sm break-all">{String(val)}</span>
+                        )}
+                        {fuenteInfo && val !== '' && (
+                          <span className={`shrink-0 text-[0.65rem] font-semibold px-1.5 py-0.5 rounded ${fuenteInfo.clase}`}>
+                            {fuenteInfo.label}
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )

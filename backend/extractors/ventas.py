@@ -702,6 +702,11 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             if len(texto_completo.strip()) < 50 and not ctrl:
                 return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
 
+            # ── Auditoría: qué método sacó cada campo (ver mismo patrón en compras.py) ──
+            fuentes: dict[str, str] = {
+                k: "regex" for k in ("fecha", "nit_cli", "nom_cli", "gravadas", "debito", "exentas", "total", "sello", "num_control")
+            }
+
             # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
             # (leído en paralelo con Visión más arriba — aquí solo se recoge el
             # resultado, ya listo, sin volver a leer el QR ni consultar Hacienda).
@@ -718,12 +723,14 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                         ctrl        = _qc
                         tipo        = _mq.group(1)
                         num_control = ctrl.replace("-", "")
+                        fuentes["num_control"] = "qr"
                 if _qr.get("fecha_qr"):
                     _fecha_qr_iso = str(_qr["fecha_qr"]).strip()
                     if not fecha:
                         _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fecha_qr_iso)
                         if _mf:
                             fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
+                            fuentes["fecha"] = "qr"
             except Exception:
                 pass
 
@@ -754,8 +761,10 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                         _cotrans_mh = _trib.get("valor") or 0.0
                 if _grav_mh is not None:
                     gravadas = float(_grav_mh)
+                    fuentes["gravadas"] = "hacienda"
                 if _exe_mh is not None:
                     exentas = float(_exe_mh)
+                    fuentes["exentas"] = "hacienda"
                 if _nosuj_mh is not None:
                     no_sujetas = float(_nosuj_mh)
                 # FOVIAL/COTRANS (tributos código C3/59) son componentes aparte
@@ -767,14 +776,18 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 exentas = round(exentas + float(_fovial_mh) + float(_cotrans_mh), 2)
                 if _tot_mh is not None:
                     total = float(_tot_mh)
+                    fuentes["total"] = "hacienda"
                 if _iva_mh is not None:
                     debito = float(_iva_mh)
+                    fuentes["debito"] = "hacienda"
                 if not nit_cli:
                     _nit_mh = re.sub(r'[^0-9]', '', str(_consulta_mh.get("numeIdenRecep") or ""))
                     if len(_nit_mh) == 14:
                         nit_cli = _nit_mh
+                        fuentes["nit_cli"] = "hacienda"
                 if _consulta_mh.get("selloVal"):
                     sello = str(_consulta_mh["selloVal"]).upper()
+                    fuentes["sello"] = "hacienda"
                 gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
 
             # ── Visión SOLO si Hacienda + regex no alcanzan ───────────────────────
@@ -809,26 +822,34 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 if _vision_campos:
                     if _vision_campos.get("fecha") and not fecha:
                         fecha = _vision_campos["fecha"]
+                        fuentes["fecha"] = "vision"
                     if _vision_campos.get("nom_cli") and nom_cli == "SIN NOMBRE":
                         nom_cli = _vision_campos["nom_cli"]
+                        fuentes["nom_cli"] = "vision"
                     if _vision_campos.get("nit_cli") and not nit_cli:
                         nit_cli = _vision_campos["nit_cli"]
+                        fuentes["nit_cli"] = "vision"
                     if _vision_campos.get("dui_cli") and not dui_cli:
                         dui_cli = _vision_campos["dui_cli"]
                     if _vision_campos.get("gravadas") and gravadas == 0.0:
                         gravadas = round(float(_vision_campos["gravadas"]), 2)
+                        fuentes["gravadas"] = "vision"
                     if _vision_campos.get("iva") and debito == 0.0:
                         debito = round(float(_vision_campos["iva"]), 2)
+                        fuentes["debito"] = "vision"
                     if _vision_campos.get("total") and total == 0.0:
                         total = round(float(_vision_campos["total"]), 2)
+                        fuentes["total"] = "vision"
                     if _vision_campos.get("exentas") and exentas == 0.0:
                         exentas = round(float(_vision_campos["exentas"]), 2)
+                        fuentes["exentas"] = "vision"
                     if _vision_campos.get("no_sujetas") and no_sujetas == 0.0:
                         no_sujetas = round(float(_vision_campos["no_sujetas"]), 2)
                     # Sello: Vision es la fuente primaria (~40 chars); regex como respaldo
                     v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
                     if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
                         sello = v_sello
+                        fuentes["sello"] = "vision"
 
             # ── Escalar a IA textual solo si la confianza está en zona gris ───────
             _campos_pre_ia = {
@@ -854,10 +875,13 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 gemini_correcciones += [f"IA: {c}" for c in _correcciones_ia]
                 if _corr_dict.get("fecha"):
                     fecha   = _corr_dict["fecha"]
+                    fuentes["fecha"] = "ia"
                 if _corr_dict.get("nom_cli"):
                     nom_cli = _corr_dict["nom_cli"]
+                    fuentes["nom_cli"] = "ia"
                 if _corr_dict.get("nit_cli"):
                     nit_cli = _corr_dict["nit_cli"]
+                    fuentes["nit_cli"] = "ia"
                 if _corr_dict.get("dui_cli"):
                     dui_cli = _corr_dict["dui_cli"]
 
@@ -886,6 +910,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "nit_cli"       : nit_cli,        # Vacío si consumidor con DUI
                 "dui_cli"       : dui_cli,
                 "nom_cli"       : nom_cli,
+                "fuentes"       : fuentes,
                 "exentas"       : round(exentas, 2),
                 "no_sujetas"    : round(no_sujetas, 2),
                 "gravadas"      : round(gravadas, 2),

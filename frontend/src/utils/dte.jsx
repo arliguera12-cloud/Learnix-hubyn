@@ -73,6 +73,13 @@ export function usePersistenciaExtractor(tipo) {
  * es granular incluso dentro de una tanda (no solo al terminarla) — con eso
  * alcanza para un porcentaje real y una estimación de tiempo restante.
  */
+function _formatearDuracion(seg) {
+  if (seg < 60) return `${seg}s`
+  const min = Math.floor(seg / 60)
+  const rest = seg % 60
+  return rest > 0 ? `${min}m ${rest}s` : `${min}m`
+}
+
 export function useProgresoLote() {
   const [progress, setProgress] = useState(null)
   const inicioRef = useRef(0)
@@ -81,29 +88,43 @@ export function useProgresoLote() {
     inicioRef.current = Date.now()
     setProgress({
       procesados: 0, total, tandaActual: 0, totalTandas,
-      pct: 1, etaTexto: null, fase: 'procesando',
+      pct: 1, etaTexto: null, transcurridoTexto: null, fase: 'procesando',
     })
   }
 
-  /** Se llama al terminar cada tanda, con el conteo real hasta ese momento. */
+  /**
+   * Se llama en cada poll (cada 2s dentro de una tanda, y al terminarla) con
+   * el conteo real hasta ese momento. La ETA usa el ritmo por-documento
+   * (transcurrido / procesados) en vez de por-tanda: antes solo se
+   * recalculaba al cerrar una tanda completa, así que durante los ~2-20s de
+   * una tanda en curso (con lotes de 100+ PDFs, varias tandas de 10) el
+   * texto de tiempo restante quedaba congelado aunque la barra sí avanzara.
+   */
   function avanzar(procesados, total, tandaActual, totalTandas) {
-    const transcurridoMs = Date.now() - inicioRef.current
+    const transcurridoMs  = Date.now() - inicioRef.current
+    const transcurridoSeg = Math.round(transcurridoMs / 1000)
     const pct = Math.min(99, Math.round((procesados / total) * 100))
 
     let etaTexto = null
-    if (tandaActual > 0 && tandaActual < totalTandas) {
-      const msPorTanda   = transcurridoMs / tandaActual
-      const restanteSeg  = Math.round((msPorTanda * (totalTandas - tandaActual)) / 1000)
-      etaTexto = restanteSeg < 60
-        ? `~${restanteSeg}s restantes`
-        : `~${Math.round(restanteSeg / 60)} min restantes`
+    if (procesados > 0 && procesados < total) {
+      const msPorDoc     = transcurridoMs / procesados
+      const restanteSeg   = Math.round((msPorDoc * (total - procesados)) / 1000)
+      etaTexto = `~${_formatearDuracion(restanteSeg)} restantes`
     }
 
-    setProgress(p => (p ? { ...p, procesados, total, tandaActual, totalTandas, pct, etaTexto } : p))
+    setProgress(p => (p ? {
+      ...p, procesados, total, tandaActual, totalTandas, pct, etaTexto,
+      transcurridoTexto: transcurridoSeg > 0 ? _formatearDuracion(transcurridoSeg) : null,
+    } : p))
   }
 
   function terminar() {
-    setProgress(p => (p ? { ...p, pct: 100, etaTexto: null, fase: 'listo' } : p))
+    const transcurridoSeg = Math.round((Date.now() - inicioRef.current) / 1000)
+    setProgress(p => (p ? {
+      ...p, pct: 100, etaTexto: null,
+      transcurridoTexto: _formatearDuracion(transcurridoSeg),
+      fase: 'listo',
+    } : p))
   }
 
   function limpiar() {
