@@ -104,6 +104,28 @@ def _registrar_resultado(ok: bool) -> None:
             )
 
 
+# Único estado "sano" que devuelve Hacienda para un DTE aceptado. Cualquier
+# otro valor no vacío (Rechazado, Invalidado, Anulado, ...) es una alerta real
+# que el usuario iría a buscar manualmente escaneando el QR.
+_ESTADO_DOC_SANO = "PROCESADO"
+
+
+def estado_doc_alerta(consulta_mh: dict | None) -> str | None:
+    """
+    Si la consulta MH trae un estadoDoc distinto de "Procesado" (Rechazado,
+    Invalidado, Anulado, etc.), arma un mensaje de alerta listo para
+    gemini_correcciones/detalle_confianza. None si no hay nada que alertar
+    (sin consulta, o estadoDoc vacío/"Procesado").
+    """
+    if not consulta_mh:
+        return None
+    estado = str(consulta_mh.get("estadoDoc") or "").strip()
+    if not estado or estado.upper() == _ESTADO_DOC_SANO:
+        return None
+    detalle = str(consulta_mh.get("descripcionEstado") or "").strip()
+    return f"documento {estado.upper()} ante Hacienda" + (f" — {detalle}" if detalle else "")
+
+
 def consultar_dte_publico(codigo_generacion: str, fecha_emi_iso: str, ambiente: str = "01") -> dict | None:
     """
     Consulta el DTE en el portal público del MH.
@@ -153,6 +175,25 @@ def consultar_dte_publico(codigo_generacion: str, fecha_emi_iso: str, ambiente: 
             data = resp.json()
             if data.get("action") == "OK" and isinstance(data.get("documento"), dict):
                 log.info("Consulta pública MH OK para %s (estado=%s, %.2fs)", cod, data.get("estadoDoc"), elapsed)
+                _registrar_resultado(True)
+                return data
+            # Hacienda respondió (no es una caída del servicio), pero con
+            # action != "OK" — puede ser simplemente que el documento no
+            # existe/no se encontró, O puede traer un estadoDoc real y valioso
+            # (p. ej. "Rechazado": el documento se transmitió pero Hacienda lo
+            # rechazó por no cumplir estructura/parámetros — confirmado con un
+            # caso real: action="ERROR" pero estadoDoc="Rechazado" con
+            # descripcionEstado explicando el motivo). Descartar esto en
+            # silencio escondía justo la información que un usuario iría a
+            # buscar manualmente escaneando el QR — se devuelve igual para que
+            # el extractor pueda marcarlo como alerta en vez de tratarlo como
+            # "no encontrado, seguir con regex/Visión sin más".
+            _estado_doc = str(data.get("estadoDoc") or "").strip()
+            if _estado_doc:
+                log.warning(
+                    "Consulta pública MH: %s tiene estadoDoc=%r (%s) — %.2fs",
+                    cod, _estado_doc, data.get("descripcionEstado") or "sin detalle", elapsed,
+                )
                 _registrar_resultado(True)
                 return data
             log.info("Consulta pública MH: %s respondió sin documento válido (action=%r, %.2fs)", cod, data.get("action"), elapsed)

@@ -3,7 +3,7 @@ import PdfUploader from '../components/PdfUploader'
 import { procesarVentas, procesarVentasLote, exportarExcelVentas, guardarResultados } from '../services/api'
 import {
   fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados,
-  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA,
+  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen,
 } from '../utils/dte'
 import { IconVentas, IconExportar, IconCheck, IconAlerta } from '../components/Icons'
 
@@ -423,7 +423,7 @@ export default function Ventas() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr>
-                      {['Fecha','Tipo','Anexo','Cliente/Nombre','NIT/NRC','DUI','N° Control','Exentas','No Suj.','Gravadas','Débito','Total','Estatus','Archivo'].map(h => (
+                      {['Fecha','Tipo','Anexo','Cliente/Nombre','NIT/NRC','DUI','N° Control','Exentas','No Suj.','Gravadas','Débito','Total','Estatus','Fuente','Archivo'].map(h => (
                         <th key={h} className="table-head text-left whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -451,6 +451,7 @@ export default function Ventas() {
                           <td className="table-cell text-right font-mono text-amber-400">{d.debito != null ? `$${fmt(d.debito)}` : '—'}</td>
                           <td className="table-cell text-right font-mono text-white">{d.total != null ? `$${fmt(d.total)}` : '—'}</td>
                           <td className="table-cell"><EstadoBadge estado={d.estado} /></td>
+                          <td className="table-cell"><FuenteResumen fuentes={d.fuentes} /></td>
                           <td className="table-cell text-slate-500">{r.filename || '—'}</td>
                         </tr>
                       )
