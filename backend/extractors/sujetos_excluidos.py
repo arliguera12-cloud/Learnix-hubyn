@@ -262,6 +262,9 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         if tipo != "14":
             return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten DTE-14 (Sujetos Excluidos)."}
 
+        # ── Auditoría: qué método sacó cada campo (ver mismo patrón en compras.py) ──
+        fuentes: dict[str, str] = {k: "regex" for k in ("fecha", "id_sujeto", "nom_sujeto", "sello", "base", "ret")}
+
         # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
         # (leído en paralelo con Visión más arriba — aquí solo se recoge el
         # resultado, ya listo, sin volver a leer el QR ni consultar Hacienda).
@@ -281,6 +284,7 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
                 _nq = re.sub(r'[^0-9]', '', str(_qr["nit_emisor_qr"]))
                 if len(_nq) >= 9 and _nq != nit_cliente:
                     id_sujeto = _nq
+                    fuentes["id_sujeto"] = "qr"
             # Fecha del QR como respaldo
             if _qr.get("fecha_qr"):
                 _fecha_qr_iso = str(_qr["fecha_qr"]).strip()
@@ -288,6 +292,7 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
                     _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fecha_qr_iso)
                     if _mf:
                         fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
+                        fuentes["fecha"] = "qr"
         except Exception:
             pass
 
@@ -303,12 +308,16 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             _id_mh   = str(_consulta_mh.get("numeIdenRecep") or "").strip()
             if _base_mh is not None:
                 base = float(_base_mh)
+                fuentes["base"] = "hacienda"
             if _ret_mh is not None:
                 ret = float(_ret_mh)
+                fuentes["ret"] = "hacienda"
             if _id_mh:
                 id_sujeto = _id_mh
+                fuentes["id_sujeto"] = "hacienda"
             if _consulta_mh.get("selloVal"):
                 sello = str(_consulta_mh["selloVal"]).upper()
+                fuentes["sello"] = "hacienda"
             gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
 
         # ── Visión SOLO si Hacienda + regex no alcanzan ───────────────────────
@@ -336,14 +345,19 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             if _vision_campos:
                 if _vision_campos.get("fecha") and not fecha:
                     fecha = _vision_campos["fecha"]
+                    fuentes["fecha"] = "vision"
                 if _vision_campos.get("nom_sujeto") and nom_sujeto == "⚠️ REVISAR NOMBRE":
                     nom_sujeto = _vision_campos["nom_sujeto"]
+                    fuentes["nom_sujeto"] = "vision"
                 if _vision_campos.get("id_sujeto") and not id_sujeto:
                     id_sujeto = _vision_campos["id_sujeto"]
+                    fuentes["id_sujeto"] = "vision"
                 if _vision_campos.get("base") and base == 0.0:
                     base = float(_vision_campos["base"])
+                    fuentes["base"] = "vision"
                 if _vision_campos.get("ret") and ret == 0.0:
                     ret = float(_vision_campos["ret"])
+                    fuentes["ret"] = "vision"
 
         _campos_pre_ia = {
             "id_sujeto": id_sujeto, "nom_sujeto": nom_sujeto, "fecha": fecha,
@@ -369,12 +383,16 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             gemini_correcciones += [f"IA: {c}" for c in _correcciones_ia]
             if _corr_dict.get("fecha"):
                 fecha = _corr_dict["fecha"]
+                fuentes["fecha"] = "ia"
             if _corr_dict.get("nom_sujeto"):
                 nom_sujeto = _corr_dict["nom_sujeto"]
+                fuentes["nom_sujeto"] = "ia"
             if _corr_dict.get("nit_sujeto"):
                 id_sujeto = _corr_dict["nit_sujeto"]
+                fuentes["id_sujeto"] = "ia"
             elif _corr_dict.get("dui_sujeto"):
                 id_sujeto = _corr_dict["dui_sujeto"]
+                fuentes["id_sujeto"] = "ia"
 
         _campos_finales = {
             "id_sujeto": id_sujeto, "nom_sujeto": nom_sujeto, "fecha": fecha,
@@ -396,6 +414,7 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             "sello"               : sello,
             "gen"                 : gen,
             "num_control"         : num_control,
+            "fuentes"             : fuentes,
             "base"                : base,
             "ret"                 : ret,
             "estado"              : estado,

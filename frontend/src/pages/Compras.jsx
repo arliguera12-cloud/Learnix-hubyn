@@ -171,7 +171,9 @@ export default function Compras() {
               {progress.totalTandas > 1 && ` (tanda ${progress.tandaActual || 1} de ${progress.totalTandas})`}…
             </span>
             <span className="text-slate-400 font-mono text-xs">
-              {Math.round(progress.pct)}%{progress.etaTexto && ` · ${progress.etaTexto}`}
+              {Math.round(progress.pct)}%
+              {progress.transcurridoTexto && ` · ${progress.transcurridoTexto} transcurridos`}
+              {progress.etaTexto && ` · ${progress.etaTexto}`}
             </span>
           </div>
           <div className="h-1.5 bg-surface-700 rounded-full overflow-hidden">

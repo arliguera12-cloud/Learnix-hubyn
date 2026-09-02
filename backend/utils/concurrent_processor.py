@@ -357,6 +357,10 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
         "fovial"         : round(fovial, 2),
         "cotrans"        : round(cotrans, 2),
         "_origen"        : "json_nativo",
+        "fuentes"        : {
+            k: "json_oficial" for k in
+            ("fecha", "num_control", "sello", "nit_cli", "nom_cli", "gravadas", "debito", "exentas", "total")
+        },
     }
 
     from utils.qa_utils import validar_montos_ventas
@@ -457,6 +461,10 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
         "fovial"         : round(fovial, 2),
         "cotrans"        : round(cotrans, 2),
         "_origen"        : "json_nativo",
+        "fuentes"        : {
+            k: "json_oficial" for k in
+            ("fecha", "num_control", "sello", "nit_prov", "nom_prov", "gra", "iva", "exe", "tot")
+        },
     }
 
     from utils.qa_utils import validar_montos_ventas

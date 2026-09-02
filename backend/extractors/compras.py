@@ -882,6 +882,15 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             if len(texto_completo.strip()) < 50 and not ctrl:
                 return {"error_fatal": "PDF de imagen sin texto extraible. Usa OCR."}
 
+            # ── Auditoría: qué método sacó cada campo ─────────────────────────────
+            # Se inicializa en "regex" para todo lo que el parseo de texto ya haya
+            # resuelto (aunque sea vacío/0 — de ahí "sistema" en el frontend cuando
+            # ningún mecanismo posterior lo tocó); QR/Hacienda/Visión/IA pisan la
+            # entrada correspondiente solo cuando de verdad cambian el valor.
+            fuentes: dict[str, str] = {
+                k: "regex" for k in ("fecha", "nit_prov", "nom_prov", "gra", "iva", "exe", "tot", "sello", "num_control")
+            }
+
             # ── QR ES EL REY: sobreescribe campos con datos confiables del QR ────────
             # (leído en paralelo con Visión más arriba — aquí solo se recoge el
             # resultado, ya listo, sin volver a leer el QR ni consultar Hacienda).
@@ -898,11 +907,13 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                         ctrl        = _qc
                         tipo        = _mq.group(1)
                         num_control = ctrl.replace("-", "")
+                        fuentes["num_control"] = "qr"
                 # NIT del emisor del QR como respaldo si regex no lo encontró
                 if not nit_prov and _qr.get("nit_emisor_qr"):
                     _nq = re.sub(r'[^0-9]', '', str(_qr["nit_emisor_qr"]))
                     if len(_nq) == 14 and _nq not in excluir_nits:
                         nit_prov = _nq
+                        fuentes["nit_prov"] = "qr"
                 # Fecha del QR como respaldo si regex no la encontró
                 if _qr.get("fecha_qr"):
                     _fecha_qr_iso = str(_qr["fecha_qr"]).strip()
@@ -910,6 +921,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                         _mf = re.match(r'(\d{4})-(\d{2})-(\d{2})', _fecha_qr_iso)
                         if _mf:
                             fecha = f"{_mf.group(3)}/{_mf.group(2)}/{_mf.group(1)}"
+                            fuentes["fecha"] = "qr"
             except Exception:
                 pass
 
@@ -941,8 +953,10 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                         _cotrans_mh = _trib.get("valor")
                 if _grav_mh is not None:
                     gra = float(_grav_mh)
+                    fuentes["gra"] = "hacienda"
                 if _exe_mh is not None or _nosuj_mh is not None:
                     exe = float(_exe_mh or 0) + float(_nosuj_mh or 0)
+                    fuentes["exe"] = "hacienda"
                 # FOVIAL/COTRANS son tributos aparte en el resumen oficial de
                 # Hacienda (código C3/59) — NO forman parte de totalExenta ni
                 # totalNoSuj, pero SÍ están incluidos en totalPagar. Sin
@@ -959,10 +973,13 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 exe = round(exe + fovial + cotrans, 2)
                 if _tot_mh is not None:
                     tot = float(_tot_mh)
+                    fuentes["tot"] = "hacienda"
                 if _iva_mh is not None:
                     iva = float(_iva_mh)
+                    fuentes["iva"] = "hacienda"
                 if _consulta_mh.get("selloVal"):
                     sello = str(_consulta_mh["selloVal"]).upper()
+                    fuentes["sello"] = "hacienda"
                 gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
 
             # ── Visión SOLO si Hacienda + regex no alcanzan ───────────────────────
@@ -986,22 +1003,30 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 if _vision_campos:
                     if _vision_campos.get("fecha") and not fecha:
                         fecha = _vision_campos["fecha"]
+                        fuentes["fecha"] = "vision"
                     if _vision_campos.get("nom_prov") and not nom_prov:
                         nom_prov = _vision_campos["nom_prov"]
+                        fuentes["nom_prov"] = "vision"
                     if _vision_campos.get("nit_prov") and not nit_prov:
                         nit_prov = _vision_campos["nit_prov"]
+                        fuentes["nit_prov"] = "vision"
                     if _vision_campos.get("gravadas") and gra == 0.0:
                         gra = round(float(_vision_campos["gravadas"]), 2)
+                        fuentes["gra"] = "vision"
                     if _vision_campos.get("iva") and iva == 0.0:
                         iva = round(float(_vision_campos["iva"]), 2)
+                        fuentes["iva"] = "vision"
                     if _vision_campos.get("total") and tot == 0.0:
                         tot = round(float(_vision_campos["total"]), 2)
+                        fuentes["tot"] = "vision"
                     if _vision_campos.get("exentas") and exe == 0.0:
                         exe = round(float(_vision_campos["exentas"]), 2)
+                        fuentes["exe"] = "vision"
                     # Sello: Vision es la fuente primaria (~40 chars); regex como respaldo
                     v_sello = str(_vision_campos.get("sello_recepcion") or "").strip()
                     if len(v_sello) >= 30 and len(v_sello) <= 45 and "-" not in v_sello:
                         sello = v_sello
+                        fuentes["sello"] = "vision"
 
             # ── Escalar a IA textual solo si la confianza está en zona gris ───────
             _campos_pre_ia = {
@@ -1025,19 +1050,26 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 # Solo aplicar corrección si el campo estaba vacío o Groq da uno mejor
                 if _corr_dict.get("fecha") and not fecha:
                     fecha    = _corr_dict["fecha"]
+                    fuentes["fecha"] = "ia"
                 if _corr_dict.get("nom_prov") and (not nom_prov or nom_prov == nom_receptor):
                     nom_prov = _corr_dict["nom_prov"]
+                    fuentes["nom_prov"] = "ia"
                 if _corr_dict.get("nit_prov") and not nit_prov:
                     nit_prov = _corr_dict["nit_prov"]
+                    fuentes["nit_prov"] = "ia"
                 # Montos: Groq extrae cuando regex devolvió 0
                 if _corr_dict.get("gra") and gra == 0.0:
                     gra = float(_corr_dict["gra"])
+                    fuentes["gra"] = "ia"
                 if _corr_dict.get("iva") and iva == 0.0:
                     iva = float(_corr_dict["iva"])
+                    fuentes["iva"] = "ia"
                 if _corr_dict.get("exe") and exe == 0.0:
                     exe = float(_corr_dict["exe"])
+                    fuentes["exe"] = "ia"
                 if _corr_dict.get("tot") and tot == 0.0:
                     tot = float(_corr_dict["tot"])
+                    fuentes["tot"] = "ia"
 
             _campos_finales = {
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
@@ -1063,6 +1095,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 "nit_prov"       : nit_prov,
                 "dui_prov"       : dui_prov,
                 "nom_prov"       : nom_prov,
+                "fuentes"        : fuentes,
                 "exe"            : round(exe,  2),
                 "gra"            : round(gra,  2),
                 "iva"            : round(iva,  2),

@@ -1,3 +1,4 @@
+import logging
 import os
 
 from fastapi import FastAPI, Request
@@ -5,6 +6,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from middleware.rate_limit import rate_limit_middleware
 from routers import procesamiento, exportar, importar
+
+# Sin esto, el logger raíz de Python queda en WARNING sin handler (uvicorn
+# solo configura sus propios loggers "uvicorn"/"uvicorn.error"/"uvicorn.access",
+# no el root) — TODOS los log.info()/log.debug() del resto del código
+# (utils/mh_consulta.py, extractors/*, etc.) se descartan en silencio y nunca
+# llegan a los logs de Railway, aunque el código sí se esté ejecutando.
+# Confirmado: root logger sin este basicConfig queda en level=WARNING(30),
+# handlers=[].
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 app = FastAPI(
     title="Learnix DTE Hub API",
