@@ -3,7 +3,7 @@ Learnix Hub — AI Utils v5.0 (Groq motor único + Google AI opcional).
 
 Motor PRINCIPAL: Groq Cloud
   - Texto  : openai/gpt-oss-120b
-  - Visión : qwen/qwen3.8-27b
+  - Visión : qwen/qwen3.6-27b
   - Circuit breaker INDEPENDIENTE para Groq
 
 Motor OPCIONAL (Google AI): se activa si GEMINI_API_KEY / VERTEX_API_KEY está
@@ -29,11 +29,20 @@ log = logging.getLogger(__name__)
 
 _GROQ_MODEL        = "openai/gpt-oss-120b"
 # Groq deprecó qwen3.6-27b el 1-sep-2026 (decomisión 14-sep-2026), reemplazo
-# oficial qwen3.8-27b — actualizado antes de depender del ruteo automático
-# que Groq prometió para requests al modelo viejo después de esa fecha.
-_GROQ_VISION_MODEL = "qwen/qwen3.8-27b"
+# anunciado qwen3.8-27b. Se probó qwen3.8-27b en producción (PR #159) y un
+# lote de 96 PDFs quedó colgado — 4+ minutos para procesar 1 solo documento,
+# sin ningún error en los logs (ni rate limit, ni nada), consistente con el
+# cliente Groq colgado esperando respuesta de un modelo mal configurado en
+# vez de fallar rápido. Revertido a qwen3.6-27b (todavía funcional hasta el
+# 14-sep-2026) hasta confirmar el ID exacto del reemplazo con calma.
+_GROQ_VISION_MODEL = "qwen/qwen3.6-27b"
 _MAX_RETRIES       = 3
 _BACKOFF_DELAYS    = [2, 4, 8]
+# Sin esto, un cliente Groq colgado (modelo mal configurado, problema de red)
+# podía esperar indefinidamente en vez de fallar rápido y dejar que el
+# retry-con-backoff hiciera su trabajo — confirmado en producción con el
+# intento fallido de qwen3.8-27b arriba.
+_GROQ_TIMEOUT_SEGUNDOS = 30
 
 # Un lote corre hasta 10 documentos en paralelo (_MAX_LOTE_ARCHIVOS en
 # procesamiento.py), y cada uno llama a Groq (texto y/o visión) — sin límite,
@@ -775,7 +784,7 @@ def _llamar_groq(prompt: str) -> dict | None:
         log.warning("Groq call blocked by circuit breaker")
         return None
 
-    client = Groq(api_key=api_key)
+    client = Groq(api_key=api_key, timeout=_GROQ_TIMEOUT_SEGUNDOS)
 
     # Limita cuántas llamadas a Groq (texto + visión) corren en simultáneo
     # en todo el proceso — ver _GROQ_CONCURRENCIA. Se mantiene tomado durante
@@ -1376,7 +1385,7 @@ def _llamar_groq_vision(prompt: str, img_b64: str) -> dict | None:
         _ultimo_error_vision = "Visión suspendida (circuit breaker abierto)."
         return None
 
-    client  = Groq(api_key=api_key)
+    client  = Groq(api_key=api_key, timeout=_GROQ_TIMEOUT_SEGUNDOS)
     mensajes = [{
         "role": "user",
         "content": [
