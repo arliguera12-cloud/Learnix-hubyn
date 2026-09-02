@@ -344,7 +344,11 @@ def procesar_json_nativo_ventas(file_bytes: bytes) -> dict:
         "nit_cli"        : nit_r if len(nit_r) == 14 else "",
         "dui_cli"        : dui_r if len(dui_r) == 9 else "",
         "gravadas"       : round(resumen.totalGravada, 2),
-        "exentas"        : round(resumen.totalExenta, 2),
+        # FOVIAL/COTRANS (tributos C3/59) están en totalPagar pero no en
+        # totalExenta/totalNoSuj — sin sumarlos, validar_montos_ventas marca
+        # "Total no cuadra" en toda venta de combustible (mismo bug
+        # encontrado y corregido en el path PDF con documentos reales).
+        "exentas"        : round(resumen.totalExenta + fovial + cotrans, 2),
         "no_sujetas"     : round(resumen.totalNoSuj, 2),
         "debito"         : round(iva_val, 2),
         "terceros"       : 0.0,
@@ -441,7 +445,10 @@ def procesar_json_nativo_compras(file_bytes: bytes) -> dict:
         "nit_prov"       : nit_prov,
         "dui_prov"       : dui_prov,
         "gra"            : round(resumen.totalGravada, 2),
-        "exe"            : round(resumen.totalExenta, 2),
+        # FOVIAL/COTRANS (tributos C3/59) están en totalPagar pero no en
+        # totalExenta/totalNoSuj — mismo ajuste que en el lado ventas, ver
+        # comentario arriba.
+        "exe"            : round(resumen.totalExenta + fovial + cotrans, 2),
         "no_sujetas"     : round(resumen.totalNoSuj, 2),
         "iva"            : round(iva_val, 2),
         "ret"            : 0.0,

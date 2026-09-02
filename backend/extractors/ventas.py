@@ -743,17 +743,28 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 _nosuj_mh = _resumen_mh.get("totalNoSuj")
                 _tot_mh   = _resumen_mh.get("totalPagar")
                 _iva_mh   = _resumen_mh.get("totalIva")
-                if _iva_mh is None:
-                    for _trib in (_resumen_mh.get("tributos") or []):
-                        if str(_trib.get("codigo")) == "20":
-                            _iva_mh = _trib.get("valor")
-                            break
+                _fovial_mh = _cotrans_mh = 0.0
+                for _trib in (_resumen_mh.get("tributos") or []):
+                    _cod_trib = str(_trib.get("codigo"))
+                    if _iva_mh is None and _cod_trib == "20":
+                        _iva_mh = _trib.get("valor")
+                    elif _cod_trib == "C3":
+                        _fovial_mh = _trib.get("valor") or 0.0
+                    elif _cod_trib == "59":
+                        _cotrans_mh = _trib.get("valor") or 0.0
                 if _grav_mh is not None:
                     gravadas = float(_grav_mh)
                 if _exe_mh is not None:
                     exentas = float(_exe_mh)
                 if _nosuj_mh is not None:
                     no_sujetas = float(_nosuj_mh)
+                # FOVIAL/COTRANS (tributos código C3/59) son componentes aparte
+                # del resumen oficial que SÍ están incluidos en totalPagar pero
+                # NO en totalExenta/totalNoSuj — sin sumarlos acá, un
+                # declarante que vende combustible dispara "Total no cuadra"
+                # en cada venta (mismo bug encontrado y corregido en compras.py
+                # con documentos reales de FERRUSAL).
+                exentas = round(exentas + float(_fovial_mh) + float(_cotrans_mh), 2)
                 if _tot_mh is not None:
                     total = float(_tot_mh)
                 if _iva_mh is not None:
