@@ -924,20 +924,39 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             # que se suman ambas en `exe`.
             if _consulta_mh:
                 _resumen_mh = (_consulta_mh.get("documento") or {}).get("resumen") or {}
-                _grav_mh  = _resumen_mh.get("totalGravada")
-                _exe_mh   = _resumen_mh.get("totalExenta")
-                _nosuj_mh = _resumen_mh.get("totalNoSuj")
-                _tot_mh   = _resumen_mh.get("totalPagar")
-                _iva_mh   = _resumen_mh.get("totalIva")
-                if _iva_mh is None:
-                    for _trib in (_resumen_mh.get("tributos") or []):
-                        if str(_trib.get("codigo")) == "20":
-                            _iva_mh = _trib.get("valor")
-                            break
+                _grav_mh    = _resumen_mh.get("totalGravada")
+                _exe_mh     = _resumen_mh.get("totalExenta")
+                _nosuj_mh   = _resumen_mh.get("totalNoSuj")
+                _tot_mh     = _resumen_mh.get("totalPagar")
+                _iva_mh     = _resumen_mh.get("totalIva")
+                _fovial_mh  = None
+                _cotrans_mh = None
+                for _trib in (_resumen_mh.get("tributos") or []):
+                    _cod_trib = str(_trib.get("codigo"))
+                    if _iva_mh is None and _cod_trib == "20":
+                        _iva_mh = _trib.get("valor")
+                    elif _cod_trib == "C3":
+                        _fovial_mh = _trib.get("valor")
+                    elif _cod_trib == "59":
+                        _cotrans_mh = _trib.get("valor")
                 if _grav_mh is not None:
                     gra = float(_grav_mh)
                 if _exe_mh is not None or _nosuj_mh is not None:
                     exe = float(_exe_mh or 0) + float(_nosuj_mh or 0)
+                # FOVIAL/COTRANS son tributos aparte en el resumen oficial de
+                # Hacienda (código C3/59) — NO forman parte de totalExenta ni
+                # totalNoSuj, pero SÍ están incluidos en totalPagar. Sin
+                # sumarlos acá, la validación gra+exe+iva=tot queda corta por
+                # exactamente el monto de FOVIAL+COTRANS y dispara "Total no
+                # cuadra" en TODA factura de combustible (confirmado con
+                # documentos reales de FERRUSAL: 14 alertas, todas por este
+                # motivo). Se usa el valor de la propia consulta si vino en
+                # tributos; si no, el ya extraído por regex del PDF más arriba.
+                if _fovial_mh is not None:
+                    fovial = float(_fovial_mh)
+                if _cotrans_mh is not None:
+                    cotrans = float(_cotrans_mh)
+                exe = round(exe + fovial + cotrans, 2)
                 if _tot_mh is not None:
                     tot = float(_tot_mh)
                 if _iva_mh is not None:
