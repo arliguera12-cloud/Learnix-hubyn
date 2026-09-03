@@ -264,7 +264,11 @@ def _build_xlsx(sheets: dict) -> bytes:
                                          min_col=num_ini, max_col=num_fin):
                     for celda in fila:
                         if isinstance(celda.value, (int, float)):
-                            celda.number_format = '#,##0.00'
+                            # Sin separador de miles: el usuario reporta que la coma
+                            # rompe la lectura del número en herramientas externas al
+                            # pasar de 1000 (ej. "1,234.56"). El valor sigue siendo
+                            # numérico nativo en la celda, solo cambia el formato visual.
+                            celda.number_format = '0.00'
             # Estilo encabezado
             try:
                 from openpyxl.styles import Font, PatternFill

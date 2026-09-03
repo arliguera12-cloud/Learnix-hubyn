@@ -109,6 +109,11 @@ const PASOS = [
   },
 ]
 
+const WHATSAPP_SOLICITAR_ACCESO =
+  'https://api.whatsapp.com/send/?phone=50377567894&text=' +
+  encodeURIComponent('Hola, quiero contratar Learnix para mi empresa.') +
+  '&type=phone_number&app_absent=0'
+
 const PRECIO_ITEMS = [
   'Extracción ilimitada de DTE — PDF y JSON firmado',
   'Los 4 anexos: Ventas, Compras, Retenciones, Sujetos Excluidos',
@@ -439,8 +444,16 @@ export default function LandingPage() {
                   $<strong className="font-black italic">15</strong>
                 </p>
                 <p className="text-[13px] text-fg-4 mt-2 mb-6">por mes · USD</p>
-                <Link to="/login" className="btn-primary py-2.5 px-6 w-full md:w-auto text-center text-[16px]">
-                  Ingresar al sistema →
+                <a
+                  href={WHATSAPP_SOLICITAR_ACCESO}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-primary py-2.5 px-6 w-full md:w-auto text-center text-[16px]"
+                >
+                  Solicitar acceso →
+                </a>
+                <Link to="/login" className="block mt-3 text-[13px] text-fg-4 hover:text-accent transition-colors">
+                  Ya tenés cuenta — iniciar sesión
                 </Link>
               </div>
             </div>

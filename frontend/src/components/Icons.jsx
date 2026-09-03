@@ -174,6 +174,37 @@ export function IconArchivo(props) {
   )
 }
 
+/** Buscar — lupa. */
+export function IconBuscar(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="M20 20l-4.5-4.5" />
+    </Svg>
+  )
+}
+
+/** Ojo — mostrar contraseña. */
+export function IconOjo(props) {
+  return (
+    <Svg {...props}>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </Svg>
+  )
+}
+
+/** Ojo tachado — ocultar contraseña. */
+export function IconOjoTachado(props) {
+  return (
+    <Svg {...props}>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M3.5 3.5l17 17" />
+    </Svg>
+  )
+}
+
 /** Cerrar sesión — salida. */
 export function IconSalir(props) {
   return (

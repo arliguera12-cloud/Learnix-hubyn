@@ -65,6 +65,11 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
     setFiles(prev => prev.filter((_, idx) => idx !== i))
   }
 
+  function limpiarArchivos() {
+    setFiles([])
+    if (inputRef.current) inputRef.current.value = ''
+  }
+
   const declaranteId = modoManual ? manualNit.trim() : (clienteActivo?.nit ?? '')
   const nombreDeclarante = modoManual ? manualNombre.trim() : (clienteActivo?.nombre_comercial ?? '')
 
@@ -170,23 +175,37 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
         )}
 
         {files.length > 0 && (
-          <ul className="mt-2 rounded-lg border border-hairline divide-y divide-hairline overflow-hidden">
-            {files.map((f, i) => (
-              <li key={`${f.name}:${f.size}:${i}`} className="flex items-center gap-2.5 px-3 py-2 bg-panel/60">
-                <IconArchivo className="w-4 h-4 text-fg-4 shrink-0" />
-                <span className="text-sm text-fg-2 truncate flex-1">{f.name}</span>
-                <span className="text-xs text-fg-5 font-mono shrink-0">{tamano(f.size)}</span>
-                <button
-                  type="button"
-                  onClick={() => quitarArchivo(i)}
-                  className="shrink-0 text-fg-4 hover:text-red-400 transition-colors"
-                  aria-label={`Quitar ${f.name}`}
-                >
-                  <IconCerrar className="w-3.5 h-3.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div className="mt-2 rounded-lg border border-hairline overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-panel2/60 border-b border-hairline">
+              <span className="text-xs text-fg-4">
+                {files.length} archivo{files.length > 1 ? 's' : ''} seleccionado{files.length > 1 ? 's' : ''}
+              </span>
+              <button
+                type="button"
+                onClick={limpiarArchivos}
+                className="text-xs text-fg-4 hover:text-red-400 underline transition-colors"
+              >
+                Limpiar
+              </button>
+            </div>
+            <ul className="divide-y divide-hairline max-h-64 overflow-y-auto">
+              {files.map((f, i) => (
+                <li key={`${f.name}:${f.size}:${i}`} className="flex items-center gap-2.5 px-3 py-2 bg-panel/60">
+                  <IconArchivo className="w-4 h-4 text-fg-4 shrink-0" />
+                  <span className="text-sm text-fg-2 truncate flex-1">{f.name}</span>
+                  <span className="text-xs text-fg-5 font-mono shrink-0">{tamano(f.size)}</span>
+                  <button
+                    type="button"
+                    onClick={() => quitarArchivo(i)}
+                    className="shrink-0 text-fg-4 hover:text-red-400 transition-colors"
+                    aria-label={`Quitar ${f.name}`}
+                  >
+                    <IconCerrar className="w-3.5 h-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 

@@ -2,10 +2,15 @@ import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { signIn, useAuth } from '../services/auth'
 import ThemeToggle from '../components/ThemeToggle'
-import { SelloCircular, IconSeccion, IconAlerta } from '../components/Icons'
+import { SelloCircular, IconSeccion, IconAlerta, IconOjo, IconOjoTachado } from '../components/Icons'
 
 const MAX_INTENTOS = 5
 const BLOQUEO_MS   = 5 * 60 * 1000 // 5 minutos
+
+const WHATSAPP_SOLICITAR_ACCESO =
+  'https://api.whatsapp.com/send/?phone=50377567894&text=' +
+  encodeURIComponent('Hola, quiero contratar Learnix para mi empresa.') +
+  '&type=phone_number&app_absent=0'
 
 const ESTADISTICAS = [
   ['13%', 'IVA El Salvador'],
@@ -19,6 +24,7 @@ export default function Login() {
 
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
+  const [mostrarPassword, setMostrarPassword] = useState(false)
   const [error,    setError]    = useState(null)
   const [loading,  setLoading]  = useState(false)
   const [intentos, setIntentos] = useState(() => Number(sessionStorage.getItem('login_intentos') || 0))
@@ -185,17 +191,28 @@ export default function Login() {
               </div>
               <div>
                 <label className="form-label" htmlFor="login-password">Contraseña</label>
-                <input
-                  id="login-password"
-                  className="input"
-                  type="password"
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  required
-                  disabled={bloqueado || loading}
-                />
+                <div className="relative">
+                  <input
+                    id="login-password"
+                    className="input pr-16"
+                    type={mostrarPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    required
+                    disabled={bloqueado || loading}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setMostrarPassword(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-xs text-fg-4 hover:text-accent transition-colors"
+                    tabIndex={-1}
+                  >
+                    {mostrarPassword ? <IconOjoTachado className="w-4 h-4" /> : <IconOjo className="w-4 h-4" />}
+                    {mostrarPassword ? 'Ocultar' : 'Mostrar'}
+                  </button>
+                </div>
               </div>
 
               {error && (
@@ -214,6 +231,18 @@ export default function Login() {
                 {loading ? 'Ingresando…' : bloqueado ? `Bloqueado (${restante}s)` : 'Entrar al sistema →'}
               </button>
             </form>
+
+            <p className="text-center text-sm text-fg-4 mt-6">
+              ¿No tenés cuenta?{' '}
+              <a
+                href={WHATSAPP_SOLICITAR_ACCESO}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent2 font-semibold hover:underline"
+              >
+                Solicitar acceso
+              </a>
+            </p>
 
             <p className="text-center text-xs text-fg-4 mt-8 tracking-wide">
               Learnix · El Salvador · {new Date().getFullYear()}

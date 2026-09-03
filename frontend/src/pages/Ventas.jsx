@@ -4,6 +4,7 @@ import { procesarVentas, procesarVentasLote, exportarExcelVentas, guardarResulta
 import {
   fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados,
   usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen,
+  SearchBar, filtrarPorTexto,
 } from '../utils/dte'
 import { IconVentas, IconExportar, IconCheck, IconAlerta } from '../components/Icons'
 
@@ -29,6 +30,7 @@ export default function Ventas() {
   const [exportando,   setExportando]   = useState(false)
   const [tab,          setTab]          = useState(0)
   const [aviso,        setAviso]        = useState(null)
+  const [busqueda,     setBusqueda]     = useState('')
   const { progress, iniciar: iniciarProgreso, avanzar: avanzarProgreso, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoLote()
 
   // Cambiar de cliente en el selector vacía la tabla de inmediato — antes
@@ -82,7 +84,14 @@ export default function Ventas() {
 
   // ── datos derivados ───────────────────────────────────────────────────────
 
-  const registros = useMemo(() => resultados.map(r => r.registro || {}), [resultados])
+  // Campos por los que se puede buscar: cliente, identificación y control interno.
+  const CAMPOS_BUSQUEDA = ['nom_cli', 'nit_cli', 'dui_cli', 'num_control', 'gen', 'sello']
+  const resultadosFiltrados = useMemo(
+    () => filtrarPorTexto(resultados, CAMPOS_BUSQUEDA, busqueda, r => r.registro || {}),
+    [resultados, busqueda],
+  )
+
+  const registros = useMemo(() => resultadosFiltrados.map(r => r.registro || {}), [resultadosFiltrados])
 
   const contrib = useMemo(() => registros.filter(r => TIPOS_CONTRIB.has(String(r.tipo))), [registros])
   const consumidor = useMemo(() => registros.filter(r => !TIPOS_CONTRIB.has(String(r.tipo))), [registros])
@@ -123,8 +132,8 @@ export default function Ventas() {
   }, [consumidor])
 
   const alertas = useMemo(
-    () => resultados.filter(r => esAlerta(r.registro?.estado)),
-    [resultados]
+    () => resultadosFiltrados.filter(r => esAlerta(r.registro?.estado)),
+    [resultadosFiltrados]
   )
 
   const resumenTipo = useMemo(() => {
@@ -229,7 +238,7 @@ export default function Ventas() {
       )}
 
       {/* Tabs */}
-      {registros.length > 0 && (
+      {resultados.length > 0 && (
         <div className="card p-0 overflow-hidden">
           {/* Tab bar */}
           <div className="flex overflow-x-auto border-b border-surface-600 bg-surface-800">
@@ -246,6 +255,16 @@ export default function Ventas() {
                 {label}
               </button>
             ))}
+          </div>
+
+          {/* Búsqueda */}
+          <div className="px-4 pt-3 flex items-center justify-between gap-3 flex-wrap">
+            <SearchBar value={busqueda} onChange={setBusqueda} />
+            {busqueda && (
+              <span className="text-xs text-fg-4">
+                {resultadosFiltrados.length} de {resultados.length} documentos
+              </span>
+            )}
           </div>
 
           <div className="p-4">
@@ -429,7 +448,7 @@ export default function Ventas() {
                     </tr>
                   </thead>
                   <tbody>
-                    {resultados.map((r, i) => {
+                    {resultadosFiltrados.map((r, i) => {
                       const d = r.registro || {}
                       const esContrib = TIPOS_CONTRIB.has(String(d.tipo))
                       return (

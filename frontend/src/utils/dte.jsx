@@ -7,7 +7,7 @@
  * copia de `fmt`/`descargarBlob`).
  */
 import { useRef, useState } from 'react'
-import { IconCheck, IconAlerta } from '../components/Icons'
+import { IconCheck, IconAlerta, IconBuscar } from '../components/Icons'
 import { obtenerEstadoLote } from '../services/api'
 
 /**
@@ -240,6 +240,47 @@ export function FuenteResumen({ fuentes }) {
           </span>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * Filtra una lista de registros por texto libre sobre un conjunto de campos
+ * (nombre/razón social, NIT/NRC, DUI, N° control, código de generación…).
+ * Búsqueda simple por substring, sin distinguir mayúsculas/acentos exactos —
+ * alcanza para ubicar un documento entre cientos sin scrollear la tabla.
+ */
+export function filtrarPorTexto(lista, campos, query, accessor = (x) => x) {
+  const q = (query || '').trim().toLowerCase()
+  if (!q) return lista
+  return lista.filter(item => {
+    const r = accessor(item)
+    return campos.some(c => String(r?.[c] ?? '').toLowerCase().includes(q))
+  })
+}
+
+/** Barra de búsqueda compartida por los módulos (Ventas/Compras/Retenciones/Sujetos Excluidos). */
+export function SearchBar({ value, onChange, placeholder = 'Buscar por nombre, NIT o N° de control…' }) {
+  return (
+    <div className="relative w-full sm:w-80">
+      <IconBuscar className="w-4 h-4 text-fg-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      <input
+        type="text"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="input pl-9 w-full"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-fg-4 hover:text-red-400 transition-colors"
+          aria-label="Limpiar búsqueda"
+        >
+          ×
+        </button>
+      )}
     </div>
   )
 }
