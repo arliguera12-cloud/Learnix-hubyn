@@ -11,6 +11,76 @@ import { IconCheck, IconAlerta, IconBuscar } from '../components/Icons'
 import { obtenerEstadoLote } from '../services/api'
 
 /**
+ * Caja de error para lotes con fallos por documento.
+ *
+ * Antes era un `<pre>` monoespaciado con `filename: mensaje\n` por línea —
+ * en lotes grandes (50+ archivos) se volvía un bloque de texto ilegible,
+ * todo del mismo color, sin separar visualmente un archivo de otro. Ahora
+ * cada línea es una fila con el nombre del archivo destacado y el motivo
+ * aparte, con un límite de filas visibles (colapsa el resto detrás de un
+ * "ver N más") para que un lote con muchos errores no tape el resto de la
+ * pantalla.
+ */
+const _MAX_ERRORES_VISIBLES = 6
+
+export function ErrorBox({ mensaje }) {
+  const [expandido, setExpandido] = useState(false)
+  if (!mensaje) return null
+
+  const lineas = mensaje.split('\n').filter(Boolean)
+  const visibles = expandido ? lineas : lineas.slice(0, _MAX_ERRORES_VISIBLES)
+  const ocultos = lineas.length - visibles.length
+
+  return (
+    <div className="card border-l-2 border-l-red-500 border-y-0 border-r-0 bg-panel">
+      <p className="text-red-400 font-semibold text-sm flex items-center gap-1.5 mb-2">
+        <IconAlerta className="w-4 h-4 shrink-0" />
+        {lineas.length > 1 ? `${lineas.length} documentos con error` : 'Error'}
+      </p>
+      <ul className="space-y-1.5">
+        {visibles.map((linea, i) => {
+          const idx = linea.indexOf(':')
+          const archivo = idx > -1 ? linea.slice(0, idx) : null
+          const detalle = idx > -1 ? linea.slice(idx + 1).trim() : linea
+          return (
+            <li key={i} className="text-sm flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+              {archivo && (
+                <span className="font-mono text-xs text-fg-3 bg-panel2 px-1.5 py-0.5 rounded truncate max-w-[280px]">
+                  {archivo}
+                </span>
+              )}
+              <span className="text-red-400/90">{detalle}</span>
+            </li>
+          )
+        })}
+      </ul>
+      {ocultos > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpandido(true)}
+          className="text-xs text-fg-4 hover:text-fg-2 underline mt-2"
+        >
+          Ver {ocultos} más
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Caja de aviso (documentos repetidos omitidos, notas informativas) — mismo lenguaje visual que ErrorBox pero en tono ámbar. */
+export function AvisoBox({ mensaje }) {
+  if (!mensaje) return null
+  return (
+    <div className="card border-l-2 border-l-amber-500 border-y-0 border-r-0 bg-panel">
+      <p className="text-amber-400 text-sm flex items-start gap-2">
+        <IconAlerta className="w-4 h-4 shrink-0 mt-0.5" />
+        <span>{mensaje}</span>
+      </p>
+    </div>
+  )
+}
+
+/**
  * Mantiene `resultados` y `declaranteId` de un extractor en sessionStorage.
  *
  * Cada página de extractor guardaba estos dos en `useState` local: al

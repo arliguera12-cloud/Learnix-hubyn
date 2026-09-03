@@ -10,7 +10,7 @@
  * extractores lo hereden sin duplicar código.
  */
 import { useState } from 'react'
-import { IconNube, IconCorreo } from './Icons'
+import { IconNube, IconCorreo, IconExportar } from './Icons'
 import { importarDriveListar, importarDriveDescargar, importarGmailBuscar } from '../services/api'
 
 function base64AFile(base64, nombre) {
@@ -21,6 +21,56 @@ function base64AFile(base64, nombre) {
   return new File([bytes], nombre, { type: tipo })
 }
 
+/** Guarda un File ya en memoria como descarga del navegador — sin ida y vuelta al backend. */
+function descargarArchivo(file) {
+  const url = URL.createObjectURL(file)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = file.name
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * Lista de archivos ya traídos de Drive/Gmail, con opción de guardarlos en
+ * el equipo además de haberlos mandado al extractor — antes solo se
+ * importaban al sistema, sin forma de quedarse con una copia local.
+ */
+function PanelDescargados({ files }) {
+  if (!files.length) return null
+  return (
+    <div className="space-y-2 border border-hairline rounded-lg p-3 bg-panel2/30">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-fg-4">
+          {files.length} archivo{files.length > 1 ? 's' : ''} importado{files.length > 1 ? 's' : ''} — también podés guardarlos:
+        </p>
+        <button
+          type="button"
+          onClick={() => files.forEach(descargarArchivo)}
+          className="text-xs text-accent hover:underline shrink-0 flex items-center gap-1"
+        >
+          <IconExportar className="w-3 h-3" /> Descargar todos
+        </button>
+      </div>
+      <ul className="max-h-32 overflow-y-auto divide-y divide-hairline text-sm">
+        {files.map((f, i) => (
+          <li key={`${f.name}-${i}`} className="flex items-center justify-between gap-2 py-1.5">
+            <span className="truncate">{f.name}</span>
+            <button
+              type="button"
+              onClick={() => descargarArchivo(f)}
+              className="shrink-0 text-fg-4 hover:text-accent transition-colors"
+              aria-label={`Descargar ${f.name}`}
+            >
+              <IconExportar className="w-3.5 h-3.5" />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function PanelDrive({ onImportar }) {
   const [apiKey, setApiKey] = useState('')
   const [url, setUrl] = useState('')
@@ -28,6 +78,7 @@ function PanelDrive({ onImportar }) {
   const [error, setError] = useState('')
   const [archivos, setArchivos] = useState([])
   const [seleccion, setSeleccion] = useState(new Set())
+  const [descargados, setDescargados] = useState([])
 
   async function listar() {
     if (!apiKey.trim() || !url.trim()) {
@@ -61,6 +112,7 @@ function PanelDrive({ onImportar }) {
       )
       const files = data.archivos.map(a => base64AFile(a.contenido_base64, a.name))
       onImportar(files)
+      setDescargados(files)
       if (data.errores?.length) {
         setError(`${data.errores.length} archivo(s) no se pudieron descargar: ${data.errores.map(e => e.name).join(', ')}`)
       }
@@ -121,6 +173,8 @@ function PanelDrive({ onImportar }) {
           </button>
         </div>
       )}
+
+      <PanelDescargados files={descargados} />
     </div>
   )
 }
@@ -135,6 +189,7 @@ function PanelGmail({ onImportar }) {
   const [error, setError] = useState('')
   const [adjuntos, setAdjuntos] = useState([])
   const [seleccion, setSeleccion] = useState(new Set())
+  const [descargados, setDescargados] = useState([])
 
   async function buscar() {
     if (!email.trim() || !appPassword.trim()) {
@@ -165,6 +220,7 @@ function PanelGmail({ onImportar }) {
     if (!elegidos.length) return
     const files = elegidos.map(a => base64AFile(a.contenido_base64, a.filename))
     onImportar(files)
+    setDescargados(files)
     setAdjuntos([])
   }
 
@@ -242,6 +298,8 @@ function PanelGmail({ onImportar }) {
           </button>
         </div>
       )}
+
+      <PanelDescargados files={descargados} />
     </div>
   )
 }
