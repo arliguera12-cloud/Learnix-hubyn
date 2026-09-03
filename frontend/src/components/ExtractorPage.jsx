@@ -5,9 +5,9 @@ import { exportarExcel, guardarResultados } from '../services/api'
 import {
   fmt, descargarBlob, fusionarSinDuplicados, avisoDuplicados, nivelEstado,
   usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA,
-  SearchBar, filtrarPorTexto,
+  SearchBar, filtrarPorTexto, ErrorBox, AvisoBox,
 } from '../utils/dte'
-import { IconExportar, IconAlerta } from './Icons'
+import { IconExportar } from './Icons'
 
 const FILTROS = [
   ['todos',   'Todos'],
@@ -216,24 +216,10 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
       )}
 
       {/* Error */}
-      {error && (
-        <div className="card border-red-800 bg-red-900/20">
-          <p className="text-red-400 font-semibold text-sm flex items-center gap-1.5">
-            <IconAlerta className="w-4 h-4" /> Error
-          </p>
-          <pre className="text-red-300 text-sm mt-1 whitespace-pre-wrap font-sans">{error}</pre>
-        </div>
-      )}
+      <ErrorBox mensaje={error} />
 
       {/* Documentos repetidos omitidos */}
-      {aviso && (
-        <div className="card border-amber-800 bg-amber-900/15">
-          <p className="text-amber-400 text-sm flex items-start gap-2">
-            <IconAlerta className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>{aviso}</span>
-          </p>
-        </div>
-      )}
+      <AvisoBox mensaje={aviso} />
 
       {/* Resumen del lote */}
       {exitosos > 0 && totales && (
