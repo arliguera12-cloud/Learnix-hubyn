@@ -150,7 +150,7 @@ export default function Compras() {
   ]
 
   return (
-    <div className="max-w-6xl mx-auto space-y-5">
+    <div className="max-w-[100rem] mx-auto space-y-5">
       {/* Cabecera */}
       <div>
         <p className="text-[0.65rem] uppercase tracking-[0.18em] text-fg-4 font-semibold mb-1">
