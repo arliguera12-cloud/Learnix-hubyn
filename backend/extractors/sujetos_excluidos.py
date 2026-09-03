@@ -210,10 +210,18 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             base = 0.0
             ret  = 0.0
 
-            # Retención Renta — etiqueta explícita
-            m_ret_renta = re.search(
-                r"[Rr]etenci[oó]n\s+[Rr]enta\s*[:\-]?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)",
-                t_clean
+            # Retención Renta — etiqueta explícita. La tasa legal es siempre
+            # 10%, así que el texto real casi siempre trae la etiqueta como
+            # "Retención Renta 10%: $X.XX" — el patrón anterior capturaba
+            # ese "10" (de "10%") como si fuera el monto, en vez del monto
+            # real después del $ (mismo tipo de bug ya encontrado y
+            # corregido en FOVIAL/COTRANS de compras.py: la tarifa/tasa
+            # pegada a la etiqueta se colaba como si fuera el valor).
+            # Confirmado reproduciendo con texto real: "Retención Renta 10%:
+            # $5.00" capturaba "10" en vez de "5.00".
+            m_ret_renta = (
+                re.search(r"[Rr]etenci[oó]n\s+[Rr]enta[^\n]*\$\s*(\d[\d,.]*)", t_clean)
+                or re.search(r"[Rr]etenci[oó]n\s+[Rr]enta\s*[:\-]?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)", t_clean)
             )
             if m_ret_renta:
                 ret = limpiar_monto(m_ret_renta.group(1))
