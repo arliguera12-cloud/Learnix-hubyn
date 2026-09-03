@@ -993,6 +993,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             # la confianza con lo que ya se tiene (regex + QR + Hacienda) y solo
             # se gasta una llamada a Visión si el documento sigue incompleto.
             _campos_pre_vision = {
+                "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_prov": nom_prov, "gra": gra, "tot": tot,
                 # iva/exe no cuentan para el % de completitud, pero hacen falta
@@ -1034,6 +1035,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
 
             # ── Escalar a IA textual solo si la confianza está en zona gris ───────
             _campos_pre_ia = {
+                "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_prov": nom_prov, "gra": gra, "tot": tot,
                 "iva": iva, "exe": exe,
@@ -1076,6 +1078,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                     fuentes["tot"] = "ia"
 
             _campos_finales = {
+                "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_prov": nom_prov, "gra": round(gra, 2), "iva": round(iva, 2),
                 "tot": round(tot, 2), "exe": round(exe, 2),
