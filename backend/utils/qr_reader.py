@@ -219,13 +219,22 @@ def extraer_datos_qr(pdf_bytes: bytes) -> dict:
     if not pdf_bytes or len(pdf_bytes) < 512:
         return {}
 
+    # Diagnóstico por método — antes cada fallo intermedio se tragaba con
+    # log.debug(), invisible con el nivel INFO configurado en main.py, así
+    # que un lote con muchos QR sin leer no dejaba ningún rastro de POR QUÉ
+    # (¿falta una librería? ¿el decoder no encontró nada? ¿el PDF→imagen
+    # falló?). Se arma un resumen y se loguea como WARNING solo si al final
+    # no se encontró nada — para no ensuciar el log en el caso normal (OK).
+    _diag: dict[str, str] = {}
+
     # Convertir a imágenes (solo falla si fitz/PIL no están instalados)
     images: list = []
     try:
         images = _pdf_to_pil_images(pdf_bytes)
-    except ImportError:
-        log.debug("QR: fitz/PIL no disponible")
+    except ImportError as exc:
+        _diag["pdf_a_imagen"] = f"fitz/PIL no disponible: {exc}"
     except Exception as exc:
+        _diag["pdf_a_imagen"] = f"error: {exc}"
         log.warning("QR: PDF→imagen: %s", exc)
 
     # Decodificar QR en cascada
@@ -236,17 +245,23 @@ def extraer_datos_qr(pdf_bytes: bytes) -> dict:
                 break
             try:
                 qr_texts = fn(images)
-            except ImportError:
-                log.debug("QR: %s no disponible", name)
+                if not qr_texts:
+                    _diag[name] = "sin resultados"
+            except ImportError as exc:
+                _diag[name] = f"no disponible: {exc}"
             except Exception as exc:
-                log.debug("QR: %s: %s", name, exc)
+                _diag[name] = f"error: {exc}"
+    elif "pdf_a_imagen" not in _diag:
+        _diag["imagenes"] = "PDF→imagen no produjo páginas"
 
     # Fallback texto (sin imagen)
     if not qr_texts:
         try:
             qr_texts = _dec_pdfplumber_text(pdf_bytes)
-        except ImportError:
-            pass
+            if not qr_texts:
+                _diag["texto"] = "sin URL de QR en el texto del PDF"
+        except ImportError as exc:
+            _diag["texto"] = f"no disponible: {exc}"
 
     # Parsear y devolver el primero que tenga UUID válido
     for text in qr_texts:
@@ -255,4 +270,5 @@ def extraer_datos_qr(pdf_bytes: bytes) -> dict:
             log.info("QR OK: %s…", parsed["codigo_generacion"][:13])
             return parsed
 
+    log.warning("QR: no se encontró código válido — %s", _diag or "sin datos de diagnóstico")
     return {}
