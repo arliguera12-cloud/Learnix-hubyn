@@ -64,11 +64,18 @@ _FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 # pero sin este límite el comportamiento real es justo una ráfaga concurrente
 # — el patrón que el aviso de Hacienda sobre uso restringido de endpoints
 # apunta a frenar, y candidato directo a disparar un tope de tasa en su lado.
-# _MAX_CONCURRENTES=5 (mitad de una tanda) es un punto medio: sigue evitando
-# la ráfaga de 10 a la vez, pero con el circuit breaker de abajo el caso
-# realmente costoso (Hacienda caída) ya no depende de este número — se
-# resuelve dejando de intentar del todo tras unos pocos fallos.
-_MAX_CONCURRENTES = 5
+#
+# _MAX_CONCURRENTES=5 no fue suficiente en la práctica: con logs reales de un
+# lote de 96 PDFs (con jitter + reintento de 429 ya activos) se confirmó que
+# ni siquiera el reintento (2.5s de espera) recuperaba los 429 — de 15
+# documentos que recibieron tope de tasa, los 15 volvieron a fallar en el
+# reintento, y el circuit breaker terminó bloqueando 66/96 documentos por el
+# resto del lote. Eso apunta a que el bloqueo real de Hacienda dura más que
+# unos pocos segundos, no que sea solo una ráfaga instantánea — bajar la
+# concurrencia real (menos peticiones en vuelo a la vez, sea cual sea la
+# ventana de tiempo que Hacienda mida) es el único control que de verdad
+# reduce la probabilidad de disparar el tope, a costa de más tiempo total.
+_MAX_CONCURRENTES = 2
 _semaforo = threading.Semaphore(_MAX_CONCURRENTES)
 
 # ── Jitter de arranque ──────────────────────────────────────────────────────
