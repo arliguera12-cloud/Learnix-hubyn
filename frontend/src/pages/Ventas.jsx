@@ -41,6 +41,14 @@ export default function Ventas() {
     setResultados([]); setError(null); setAviso(null)
   }
 
+  function handleLimpiar() {
+    setResultados([])
+    setError(null)
+    setAviso(null)
+    setBusqueda('')
+    limpiarProgreso()
+  }
+
   // ── upload ───────────────────────────────────────────────────────────────
 
   async function handleUpload(filesOrFile, dId) {
@@ -260,11 +268,20 @@ export default function Ventas() {
           {/* Búsqueda */}
           <div className="px-4 pt-3 flex items-center justify-between gap-3 flex-wrap">
             <SearchBar value={busqueda} onChange={setBusqueda} />
-            {busqueda && (
-              <span className="text-xs text-fg-4">
-                {resultadosFiltrados.length} de {resultados.length} documentos
-              </span>
-            )}
+            <div className="flex items-center gap-3">
+              {busqueda && (
+                <span className="text-xs text-fg-4">
+                  {resultadosFiltrados.length} de {resultados.length} documentos
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={handleLimpiar}
+                className="btn-ghost text-xs px-3 py-1.5 text-slate-400 hover:text-red-400"
+              >
+                Limpiar
+              </button>
+            </div>
           </div>
 
           <div className="p-4">
