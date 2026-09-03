@@ -62,6 +62,33 @@ def validar_montos_ventas(campos: dict) -> list[str]:
     total    = _monto(campos.get("total") if campos.get("total") is not None else campos.get("tot"))
     exentas  = _monto(campos.get("exentas") if campos.get("exentas") is not None else campos.get("exe"))
     no_suj   = _monto(campos.get("no_sujetas"))
+    tipo     = str(campos.get("tipo") or "")
+
+    # DTE-01 (Factura, consumidor final): por ley salvadoreña el precio al
+    # consumidor final YA INCLUYE el IVA — el documento no muestra una línea
+    # de IVA aparte (confirmado con un DTE-01 real: "Sub-Total: 57.00" /
+    # "Total a Pagar: 57.00" sin ningún renglón de IVA en el PDF), y Hacienda
+    # reporta totalIva como el impuesto YA EMBEBIDO en totalGravada
+    # (57 - 57/1.13 = 6.56, no un monto adicional). La fórmula
+    # base+iva=total (correcta para CCF/DTE-03, donde el IVA sí es aparte)
+    # duplicaba el IVA acá y disparaba "Total no cuadra" en toda factura de
+    # consumidor final.
+    if tipo == "01":
+        if gravadas > 0 and iva > 0:
+            iva_incluido = round(gravadas - gravadas / 1.13, 2)
+            if abs(iva - iva_incluido) > 0.05:
+                alertas.append(
+                    f"IVA no coincide: documento=${iva:.2f}, "
+                    f"IVA incluido en ${gravadas:.2f}=${iva_incluido:.2f}"
+                )
+        if total > 0:
+            suma = round(gravadas + exentas + no_suj, 2)  # IVA ya incluido en gravadas, no se suma aparte
+            if suma > 0 and abs(total - suma) > 0.10:
+                alertas.append(
+                    f"Total no cuadra: documento=${total:.2f}, "
+                    f"suma de componentes=${suma:.2f}"
+                )
+        return alertas
 
     if gravadas > 0 and iva > 0:
         iva_calc = round(gravadas * 0.13, 2)

@@ -104,23 +104,38 @@ def _registrar_resultado(ok: bool) -> None:
             )
 
 
-# Único estado "sano" que devuelve Hacienda para un DTE aceptado. Cualquier
-# otro valor no vacío (Rechazado, Invalidado, Anulado, ...) es una alerta real
-# que el usuario iría a buscar manualmente escaneando el QR.
-_ESTADO_DOC_SANO = "PROCESADO"
+# Hacienda usa varios textos distintos para "documento aceptado" según el
+# tipo de DTE/consulta — confirmado con logs reales de producción:
+# "Transmitido Satisfactoriamente" es el estado SANO más común (no
+# "Procesado" como se asumió al principio sin verificar contra datos reales;
+# ese supuesto causó que TODO documento aceptado se marcara como alerta
+# falsa — 15/96 documentos terminaron en REVISION_MANUAL con un mensaje que
+# literalmente decía "documento TRANSMITIDO SATISFACTORIAMENTE" como si
+# fuera un problema). En vez de adivinar la lista completa de estados
+# "buenos" (arriesgado: un valor sano no contemplado volvería a producir
+# falsos positivos), se usa una lista de palabras clave que SÍ son
+# inequívocamente un problema — cualquier otra cosa (incluida cualquier
+# variante de "sano" no vista todavía) no genera alerta.
+_ESTADO_DOC_PROBLEMA = ("RECHAZ", "INVALID", "ANULA")
 
 
 def estado_doc_alerta(consulta_mh: dict | None) -> str | None:
     """
-    Si la consulta MH trae un estadoDoc distinto de "Procesado" (Rechazado,
-    Invalidado, Anulado, etc.), arma un mensaje de alerta listo para
+    Si la consulta MH trae un estadoDoc que indica un problema real
+    (Rechazado, Invalidado, Anulado — por prefijo, tolera variantes como
+    "Rechazado por Contingencia"), arma un mensaje de alerta listo para
     gemini_correcciones/detalle_confianza. None si no hay nada que alertar
-    (sin consulta, o estadoDoc vacío/"Procesado").
+    (sin consulta, estadoDoc vacío, o cualquier estado que no matchee un
+    problema conocido — incluye "Transmitido Satisfactoriamente" y
+    cualquier otro estado sano no listado explícitamente).
     """
     if not consulta_mh:
         return None
     estado = str(consulta_mh.get("estadoDoc") or "").strip()
-    if not estado or estado.upper() == _ESTADO_DOC_SANO:
+    if not estado:
+        return None
+    estado_up = estado.upper()
+    if not any(palabra in estado_up for palabra in _ESTADO_DOC_PROBLEMA):
         return None
     detalle = str(consulta_mh.get("descripcionEstado") or "").strip()
     return f"documento {estado.upper()} ante Hacienda" + (f" — {detalle}" if detalle else "")

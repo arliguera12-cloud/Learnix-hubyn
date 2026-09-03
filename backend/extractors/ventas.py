@@ -801,6 +801,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             # la confianza con lo que ya se tiene (regex + QR + Hacienda) y solo
             # se gasta una llamada a Visión si el documento sigue incompleto.
             _campos_pre_vision = {
+                "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_cli": nom_cli, "gravadas": gravadas, "total": total,
                 # debito/exentas/no_sujetas no cuentan para el % de completitud
@@ -857,6 +858,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
 
             # ── Escalar a IA textual solo si la confianza está en zona gris ───────
             _campos_pre_ia = {
+                "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_cli": nom_cli, "gravadas": gravadas, "total": total,
                 "debito": debito, "exentas": exentas, "no_sujetas": no_sujetas,
@@ -890,6 +892,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     dui_cli = _corr_dict["dui_cli"]
 
             _campos_finales = {
+                "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_cli": nom_cli, "gravadas": round(gravadas, 2), "debito": round(debito, 2),
                 "total": round(total, 2), "exentas": round(exentas, 2), "no_sujetas": round(no_sujetas, 2),
