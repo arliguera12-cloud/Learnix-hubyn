@@ -156,10 +156,10 @@ export default function LandingPage() {
   const ref = useReveal()
 
   return (
-    <div ref={ref} className="min-h-screen bg-paper text-fg-3 paper-grain">
+    <div ref={ref} className="landing-page min-h-screen bg-paper text-fg-3 paper-grain">
       {/* ═══ Masthead ═══ */}
       <div className="border-b border-hairline bg-panel">
-        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-2 flex items-center justify-between text-[11px]
+        <div className="max-w-[87.5rem] mx-auto px-8 py-2 flex items-center justify-between text-[11px]
                         uppercase tracking-[0.16em] text-fg-4 font-mono">
           <span className="shrink-0">№ 001 · Edición del sistema</span>
           <span className="hidden sm:block shrink-0">Publicado en El Salvador</span>
@@ -169,7 +169,7 @@ export default function LandingPage() {
 
       {/* ═══ Nav ═══ */}
       <header className="sticky top-0 z-30 border-b border-hairline bg-paper/95 backdrop-blur-sm">
-        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-4 flex items-center justify-between gap-4">
+        <div className="max-w-[87.5rem] mx-auto px-8 py-4 flex items-center justify-between gap-4">
           <div className="flex items-baseline gap-2 shrink-0">
             <IconSeccion className="text-[30px] text-accent" />
             <span className="font-display italic font-black text-[30px] text-fg leading-none">Learnix</span>
@@ -193,11 +193,18 @@ export default function LandingPage() {
       </header>
 
       {/* ═══ Hero ═══ */}
-      <section className="max-w-[100rem] mx-auto px-5 lg:px-12 pt-16 pb-16 md:pt-24 md:pb-24">
-        <div className="grid md:grid-cols-[1.15fr_1fr] gap-10 md:gap-12 items-start">
+      <section className="relative max-w-[87.5rem] mx-auto px-8 pt-16 pb-16 md:pt-24 md:pb-24">
+        <div
+          className="hidden md:block absolute text-accent/45"
+          style={{ top: '60px', right: '40px', width: '180px', height: '180px', transform: 'rotate(-8deg)' }}
+        >
+          <SelloCircular />
+        </div>
+
+        <div className="grid md:grid-cols-[1.4fr_1fr] gap-10 md:gap-[60px] items-start">
           {/* Titular */}
-          <h1 className="animate-rise text-fg tracking-[-0.045em] leading-[0.9]"
-              style={{ fontSize: 'clamp(52px, 7.4vw, 128px)' }}>
+          <h1 className="animate-rise text-fg tracking-[-0.045em] leading-[0.92]"
+              style={{ fontSize: 'clamp(56px, 9vw, 140px)', fontWeight: 300 }}>
             Tus DTE,
             <span className="block font-display italic font-black text-accent2">
               por fin,
@@ -206,11 +213,7 @@ export default function LandingPage() {
           </h1>
 
           {/* Manifiesto */}
-          <div className="animate-fade md:border-l md:border-hairline md:pl-10 relative">
-            <div className="hidden md:block absolute top-0 right-0 w-20 h-20 text-accent/45">
-              <SelloCircular />
-            </div>
-
+          <div className="animate-fade md:border-l md:border-hairline md:pl-10 md:pr-[220px]">
             <p className="text-[11px] uppercase tracking-[0.2em] text-fg-4 font-semibold mb-4">
               Manifiesto
             </p>
@@ -268,8 +271,8 @@ export default function LandingPage() {
       </section>
 
       {/* ═══ Producto — índice de características ═══ */}
-      <section id="producto" className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 md:py-24 scroll-mt-16">
-        <div className="reveal grid md:grid-cols-[220px_1fr] gap-6 items-end pb-10 border-b border-hairline">
+      <section id="producto" className="max-w-[87.5rem] mx-auto px-8 py-20 md:py-24 scroll-mt-16">
+        <div className="reveal grid md:grid-cols-[220px_1fr] gap-6 md:gap-[60px] items-end pb-10 border-b border-hairline">
           <span className="font-display italic text-[42px] md:text-[56px] text-accent leading-none">§ 01</span>
           <div>
             <p className="text-[13px] uppercase tracking-[0.16em] text-accent font-semibold mb-2">
@@ -305,7 +308,7 @@ export default function LandingPage() {
 
       {/* ═══ Cifras destacadas ═══ */}
       <section className="forest-block">
-        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 grid grid-cols-2 md:grid-cols-4 gap-8">
+        <div className="max-w-[87.5rem] mx-auto px-8 py-20 grid grid-cols-2 md:grid-cols-4 gap-10">
           {STATS.map(([valor, detalle, enfasis]) => (
             <div key={detalle} className="reveal pt-4 border-t border-sb-hair">
               <p className={`font-display text-[64px] md:text-[72px] leading-none mb-3 ${enfasis ? 'italic font-black text-accent' : 'text-sb-txt-hi'}`}>
@@ -318,7 +321,7 @@ export default function LandingPage() {
       </section>
 
       {/* ═══ Módulos ═══ */}
-      <section id="modulos" className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 md:py-24 scroll-mt-16">
+      <section id="modulos" className="max-w-[87.5rem] mx-auto px-8 py-20 md:py-24 scroll-mt-16">
         <div className="mb-10 reveal grid md:grid-cols-[auto_1fr] md:items-end gap-4">
           <div>
             <p className="text-[13px] uppercase tracking-[0.16em] text-accent font-semibold mb-2">
@@ -382,8 +385,8 @@ export default function LandingPage() {
 
       {/* ═══ Cómo funciona ═══ */}
       <section id="procedimiento" className="border-t border-hairline scroll-mt-16">
-        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 md:py-24">
-          <div className="mb-14 reveal grid md:grid-cols-[220px_1fr] gap-6 items-end">
+        <div className="max-w-[87.5rem] mx-auto px-8 py-20 md:py-24">
+          <div className="mb-14 reveal grid md:grid-cols-[220px_1fr] gap-6 md:gap-[60px] items-end">
             <span className="font-display italic text-[42px] md:text-[56px] text-accent leading-none">§ 02</span>
             <div>
               <p className="text-[13px] uppercase tracking-[0.16em] text-accent font-semibold mb-2">
@@ -409,8 +412,8 @@ export default function LandingPage() {
 
       {/* ═══ Precio ═══ */}
       <section id="precio" className="border-t border-hairline scroll-mt-16">
-        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-20 md:py-24">
-          <div className="mb-14 reveal grid md:grid-cols-[220px_1fr] gap-6 items-end">
+        <div className="max-w-[87.5rem] mx-auto px-8 py-20 md:py-24">
+          <div className="mb-14 reveal grid md:grid-cols-[220px_1fr] gap-6 md:gap-[60px] items-end">
             <span className="font-display italic text-[42px] md:text-[56px] text-accent leading-none">§ 03</span>
             <div>
               <p className="text-[13px] uppercase tracking-[0.16em] text-accent font-semibold mb-2">
@@ -424,7 +427,7 @@ export default function LandingPage() {
             <span className="price-badge border border-hairline text-[11px] uppercase tracking-[0.18em] text-accent font-semibold">
               Plan único
             </span>
-            <div className="grid md:grid-cols-[1.2fr_1fr] gap-10 md:gap-12">
+            <div className="grid md:grid-cols-[1.2fr_1fr] gap-10 md:gap-[60px]">
               <div>
                 <h3 className="font-display text-[26px] text-fg mb-5">Suscripción Learnix</h3>
                 <ul className="space-y-0">
@@ -463,7 +466,7 @@ export default function LandingPage() {
 
       {/* ═══ CTA final ═══ */}
       <section className="forest-block">
-        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-24 md:py-32 text-center reveal">
+        <div className="max-w-[87.5rem] mx-auto px-8 py-24 md:py-32 text-center reveal">
           <div className="w-24 h-24 mx-auto mb-6 text-sb-txt-mute">
             <SelloCircular />
           </div>
@@ -486,7 +489,7 @@ export default function LandingPage() {
 
       {/* ═══ Footer ═══ */}
       <footer className="forest-block-deep">
-        <div className="max-w-[100rem] mx-auto px-5 lg:px-12 py-6 flex flex-wrap items-center justify-between gap-2 text-[13px]">
+        <div className="max-w-[87.5rem] mx-auto px-8 py-6 flex flex-wrap items-center justify-between gap-2 text-[13px]">
           <span className="font-display italic text-[18px]">§ Learnix</span>
           <span className="uppercase tracking-[0.12em] opacity-80">
             El Salvador · {new Date().getFullYear()} · Todos los derechos reservados

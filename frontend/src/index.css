@@ -119,6 +119,14 @@
     background: var(--panel-2);
     color: var(--ink);
   }
+  /* Landing editorial: esquinas casi rectas en vez del rounded-lg del resto
+     de la app (dashboard/módulos) — coincide con la ficha de diseño de
+     referencia (radio 2px en CTA). Solo la landing, no se toca el global. */
+  .landing-page .btn-primary,
+  .landing-page .btn-ghost,
+  .landing-page a.rounded-lg {
+    border-radius: 2px;
+  }
   .input {
     @apply focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:italic
            rounded-lg px-3 py-2 w-full outline-none transition-colors duration-150;
