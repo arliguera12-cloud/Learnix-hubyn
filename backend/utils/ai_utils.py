@@ -44,6 +44,21 @@ _BACKOFF_DELAYS    = [2, 4, 8]
 # intento fallido de qwen3.8-27b arriba.
 _GROQ_TIMEOUT_SEGUNDOS = 30
 
+# El SDK de Groq reintenta 429/5xx INTERNAMENTE por default (max_retries=2,
+# con su propio backoff) antes de siquiera devolvernos la excepción — confirmado
+# con inspect.signature(Groq.__init__): max_retries=2. Eso duplica (en
+# realidad multiplica) el retry-con-backoff que _llamar_groq/_llamar_groq_vision
+# ya hacen ellos mismos: cada uno de nuestros `attempt` podía absorber 2
+# reintentos ocultos del SDK con esperas de hasta ~40s cada uno (visto en
+# logs reales: "Retrying request... in 39.000000 seconds" repetido en
+# cascada), antes de que nuestro propio bucle viera el error y esperara otra
+# vez. Con un lote de 10 documentos compitiendo por el rate limit de Groq,
+# esto convertía un problema de segundos en uno de varios MINUTOS por
+# documento — confirmado en producción: 0/96 procesados tras 3+ minutos.
+# max_retries=0 deja que SOLO nuestro bucle (con su propio backoff, logueado
+# y acotado) maneje los reintentos.
+_GROQ_MAX_RETRIES_SDK = 0
+
 # Un lote corre hasta 10 documentos en paralelo (_MAX_LOTE_ARCHIVOS en
 # procesamiento.py), y cada uno llama a Groq (texto y/o visión) — sin límite,
 # las 10 llamadas salían disparadas juntas y chocaban contra el rate limit de
@@ -784,7 +799,7 @@ def _llamar_groq(prompt: str) -> dict | None:
         log.warning("Groq call blocked by circuit breaker")
         return None
 
-    client = Groq(api_key=api_key, timeout=_GROQ_TIMEOUT_SEGUNDOS)
+    client = Groq(api_key=api_key, timeout=_GROQ_TIMEOUT_SEGUNDOS, max_retries=_GROQ_MAX_RETRIES_SDK)
 
     # Limita cuántas llamadas a Groq (texto + visión) corren en simultáneo
     # en todo el proceso — ver _GROQ_CONCURRENCIA. Se mantiene tomado durante
@@ -1385,7 +1400,7 @@ def _llamar_groq_vision(prompt: str, img_b64: str) -> dict | None:
         _ultimo_error_vision = "Visión suspendida (circuit breaker abierto)."
         return None
 
-    client  = Groq(api_key=api_key, timeout=_GROQ_TIMEOUT_SEGUNDOS)
+    client  = Groq(api_key=api_key, timeout=_GROQ_TIMEOUT_SEGUNDOS, max_retries=_GROQ_MAX_RETRIES_SDK)
     mensajes = [{
         "role": "user",
         "content": [
