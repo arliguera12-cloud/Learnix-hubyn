@@ -5,6 +5,7 @@ import { exportarExcel, guardarResultados } from '../services/api'
 import {
   fmt, descargarBlob, fusionarSinDuplicados, avisoDuplicados, nivelEstado,
   usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA,
+  SearchBar, filtrarPorTexto,
 } from '../utils/dte'
 import { IconExportar, IconAlerta } from './Icons'
 
@@ -21,6 +22,14 @@ const CAMPOS_FINANCIEROS = {
   compras:           { gravadas: 'gra',      iva: 'iva',     total: 'tot'   },
   retenciones:       { gravadas: 'base',     iva: 'ret',     total: 'base'  },
   sujetos_excluidos: { gravadas: 'base',     iva: 'ret',     total: 'base'  },
+}
+
+// Campos por los que se puede buscar texto libre, según el tipo de extractor.
+const CAMPOS_BUSQUEDA = {
+  ventas:            ['nom_cli',    'nit_cli',  'dui_cli',    'num_control', 'gen', 'sello'],
+  compras:           ['nom_prov',   'nit_prov', 'dui_prov',   'num_control', 'gen', 'sello'],
+  retenciones:       ['nit_prov',   'dui_agente', 'gen',      'sello'],
+  sujetos_excluidos: ['nom_sujeto', 'id_sujeto', 'gen',       'sello'],
 }
 
 function calcularTotales(tipo, resultados) {
@@ -42,6 +51,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
   const [exportando,   setExportando]   = useState(false)
   const [aviso,        setAviso]        = useState(null)
   const [filtro,       setFiltro]       = useState('todos')
+  const [busqueda,     setBusqueda]     = useState('')
   const { progress, iniciar: iniciarProgreso, avanzar: avanzarProgreso, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoLote()
 
   // Cambiar de cliente en el selector vacía la tabla de inmediato — antes
@@ -154,12 +164,16 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
     return c
   }, [resultados])
 
+  const resultadosBuscados = useMemo(
+    () => filtrarPorTexto(resultados, CAMPOS_BUSQUEDA[tipo] || [], busqueda, r => r.registro || {}),
+    [resultados, tipo, busqueda],
+  )
+
   const resultadosFiltrados = useMemo(() => {
-    if (filtro === 'todos') return resultados.map((r, i) => [r, i])
-    return resultados
-      .map((r, i) => [r, i])
-      .filter(([r]) => nivelEstado(r.registro?.estado) === filtro)
-  }, [resultados, filtro])
+    const conIndice = resultadosBuscados.map(r => [r, resultados.indexOf(r)])
+    if (filtro === 'todos') return conIndice
+    return conIndice.filter(([r]) => nivelEstado(r.registro?.estado) === filtro)
+  }, [resultadosBuscados, resultados, filtro])
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -283,9 +297,10 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
         </div>
       )}
 
-      {/* Filtros por estado — clave para encontrar las alertas en un lote grande */}
+      {/* Búsqueda + filtros por estado — clave para ubicar documentos en un lote grande */}
       {exitosos > 1 && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <SearchBar value={busqueda} onChange={setBusqueda} />
           {FILTROS.map(([valor, label]) => {
             const n = conteos[valor]
             if (valor !== 'todos' && n === 0) return null

@@ -4,6 +4,7 @@ import { procesarCompras, procesarComprasLote, exportarExcelCompras, guardarResu
 import {
   fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados,
   usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen,
+  SearchBar, filtrarPorTexto,
 } from '../utils/dte'
 import { IconCompras, IconExportar, IconCheck, IconAlerta } from '../components/Icons'
 
@@ -18,6 +19,7 @@ export default function Compras() {
   const [exportando,   setExportando]   = useState(false)
   const [tab,          setTab]          = useState(0)
   const [aviso,        setAviso]        = useState(null)
+  const [busqueda,     setBusqueda]     = useState('')
   const { progress, iniciar: iniciarProgreso, avanzar: avanzarProgreso, terminar: terminarProgreso, limpiar: limpiarProgreso } = useProgresoLote()
 
   // Cambiar de cliente en el selector vacía la tabla de inmediato — antes
@@ -71,7 +73,13 @@ export default function Compras() {
 
   // ── datos derivados ───────────────────────────────────────────────────────
 
-  const registros = useMemo(() => resultados.map(r => r.registro || {}), [resultados])
+  const CAMPOS_BUSQUEDA = ['nom_prov', 'nit_prov', 'dui_prov', 'num_control', 'gen', 'sello']
+  const resultadosFiltrados = useMemo(
+    () => filtrarPorTexto(resultados, CAMPOS_BUSQUEDA, busqueda, r => r.registro || {}),
+    [resultados, busqueda],
+  )
+
+  const registros = useMemo(() => resultadosFiltrados.map(r => r.registro || {}), [resultadosFiltrados])
 
   const totales = useMemo(() => {
     let exe = 0, gra = 0, iva = 0, tot = 0
@@ -83,8 +91,8 @@ export default function Compras() {
   }, [registros])
 
   const alertas = useMemo(
-    () => resultados.filter(r => esAlerta(r.registro?.estado)),
-    [resultados]
+    () => resultadosFiltrados.filter(r => esAlerta(r.registro?.estado)),
+    [resultadosFiltrados]
   )
 
   const percepciones = useMemo(() =>
@@ -204,7 +212,7 @@ export default function Compras() {
       )}
 
       {/* Tabs (solo si hay resultados) */}
-      {registros.length > 0 && (
+      {resultados.length > 0 && (
         <div className="card p-0 overflow-hidden">
           {/* Tab bar */}
           <div className="flex overflow-x-auto border-b border-surface-600 bg-surface-800">
@@ -221,6 +229,16 @@ export default function Compras() {
                 {label}
               </button>
             ))}
+          </div>
+
+          {/* Búsqueda */}
+          <div className="px-4 pt-3 flex items-center justify-between gap-3 flex-wrap">
+            <SearchBar value={busqueda} onChange={setBusqueda} placeholder="Buscar por proveedor, NIT o N° de control…" />
+            {busqueda && (
+              <span className="text-xs text-fg-4">
+                {resultadosFiltrados.length} de {resultados.length} documentos
+              </span>
+            )}
           </div>
 
           <div className="p-4">
@@ -312,7 +330,7 @@ export default function Compras() {
                     </tr>
                   </thead>
                   <tbody>
-                    {resultados.map((r, i) => {
+                    {resultadosFiltrados.map((r, i) => {
                       const d = r.registro || {}
                       return (
                         <tr key={i} className="hover:bg-surface-700/40 transition-colors">
