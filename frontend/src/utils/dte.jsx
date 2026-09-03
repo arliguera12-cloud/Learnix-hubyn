@@ -69,13 +69,48 @@ export function ErrorBox({ mensaje }) {
 
 /** Caja de aviso (documentos repetidos omitidos, notas informativas) — mismo lenguaje visual que ErrorBox pero en tono ámbar. */
 export function AvisoBox({ mensaje }) {
+  const [expandido, setExpandido] = useState(false)
   if (!mensaje) return null
+
+  const [resumen, ...detalle] = mensaje.split('\n').filter(Boolean)
+
+  // Sin detalle (caso de un solo duplicado): un párrafo simple alcanza.
+  if (!detalle.length) {
+    return (
+      <div className="card border-l-2 border-l-amber-500 border-y-0 border-r-0 bg-panel">
+        <p className="text-amber-400 text-sm flex items-start gap-2">
+          <IconAlerta className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{resumen}</span>
+        </p>
+      </div>
+    )
+  }
+
+  // Con detalle (varios duplicados): resumen siempre visible, la lista de
+  // nombres colapsa detrás de "Ver N más" en vez de volcarse toda de una.
+  const visibles = expandido ? detalle : detalle.slice(0, _MAX_ERRORES_VISIBLES)
+  const ocultos = detalle.length - visibles.length
+
   return (
     <div className="card border-l-2 border-l-amber-500 border-y-0 border-r-0 bg-panel">
-      <p className="text-amber-400 text-sm flex items-start gap-2">
+      <p className="text-amber-400 text-sm flex items-start gap-2 mb-2">
         <IconAlerta className="w-4 h-4 shrink-0 mt-0.5" />
-        <span>{mensaje}</span>
+        <span>{resumen}</span>
       </p>
+      <ul className="space-y-1 pl-6">
+        {visibles.map((nombre, i) => (
+          <li key={i} className="text-xs font-mono text-fg-4 truncate">{nombre}</li>
+        ))}
+      </ul>
+      {ocultos > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpandido(true)}
+          className="text-xs text-fg-4 hover:text-fg-2 underline mt-2 ml-6"
+        >
+          Ver {ocultos} más
+        </button>
+      )}
     </div>
   )
 }
@@ -415,9 +450,12 @@ export function fusionarSinDuplicados(previos, nuevos) {
 export function avisoDuplicados(duplicados) {
   if (!duplicados.length) return null
   const n = duplicados.length
-  return n === 1
-    ? `«${duplicados[0]}» ya estaba en la lista: es el mismo DTE y no se agregó.`
-    : `${n} documentos ya estaban en la lista y no se agregaron: ${duplicados.join(', ')}`
+  if (n === 1) return `«${duplicados[0]}» ya estaba en la lista: es el mismo DTE y no se agregó.`
+  // Primera línea = resumen, el resto = un nombre de archivo por línea — así
+  // AvisoBox puede mostrar el resumen y colapsar la lista larga en vez de
+  // volcar todos los nombres en un solo párrafo (que es lo que hacía ruido
+  // en lotes de 20+ duplicados).
+  return [`${n} documentos ya estaban en la lista y no se agregaron:`, ...duplicados].join('\n')
 }
 
 /**

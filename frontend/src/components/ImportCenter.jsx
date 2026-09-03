@@ -10,6 +10,7 @@
  * extractores lo hereden sin duplicar código.
  */
 import { useState } from 'react'
+import JSZip from 'jszip'
 import { IconNube, IconCorreo, IconExportar } from './Icons'
 import { importarDriveListar, importarDriveDescargar, importarGmailBuscar } from '../services/api'
 
@@ -32,12 +33,44 @@ function descargarArchivo(file) {
 }
 
 /**
+ * "Descargar todos" como .zip único.
+ *
+ * Disparar un `<a download>` por archivo en un lote grande (40+) no
+ * funciona: Chrome bloquea las descargas después de las primeras ~10-15
+ * cuando no vienen de un solo gesto del usuario espaciado, así que en la
+ * práctica solo se guardaban algunos y el resto se perdía en silencio.
+ * Empaquetar todo en un .zip es una sola descarga real, sin ese límite.
+ */
+async function descargarTodosComoZip(files, nombreZip) {
+  const zip = new JSZip()
+  for (const f of files) zip.file(f.name, f)
+  const blob = await zip.generateAsync({ type: 'blob' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = nombreZip
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/**
  * Lista de archivos ya traídos de Drive/Gmail, con opción de guardarlos en
  * el equipo además de haberlos mandado al extractor — antes solo se
  * importaban al sistema, sin forma de quedarse con una copia local.
  */
 function PanelDescargados({ files }) {
+  const [comprimiendo, setComprimiendo] = useState(false)
   if (!files.length) return null
+
+  async function handleDescargarTodos() {
+    setComprimiendo(true)
+    try {
+      await descargarTodosComoZip(files, `learnix_importados_${Date.now()}.zip`)
+    } finally {
+      setComprimiendo(false)
+    }
+  }
+
   return (
     <div className="space-y-2 border border-hairline rounded-lg p-3 bg-panel2/30">
       <div className="flex items-center justify-between">
@@ -46,10 +79,11 @@ function PanelDescargados({ files }) {
         </p>
         <button
           type="button"
-          onClick={() => files.forEach(descargarArchivo)}
-          className="text-xs text-accent hover:underline shrink-0 flex items-center gap-1"
+          onClick={handleDescargarTodos}
+          disabled={comprimiendo}
+          className="text-xs text-accent hover:underline shrink-0 flex items-center gap-1 disabled:opacity-50"
         >
-          <IconExportar className="w-3 h-3" /> Descargar todos
+          <IconExportar className="w-3 h-3" /> {comprimiendo ? 'Comprimiendo…' : 'Descargar todos (.zip)'}
         </button>
       </div>
       <ul className="max-h-32 overflow-y-auto divide-y divide-hairline text-sm">
