@@ -570,8 +570,19 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             if m_exe:
                 exentas = limpiar_monto(m_exe.group(1))
 
+            # "Otros montos no afectos" es la misma columna del Anexo 1 que
+            # "No Sujetas", solo con otro rótulo — no está EXENTA (la ley no
+            # la exonera puntualmente, sigue siendo un hecho fuera del
+            # ámbito del IVA, típico en un cobro de flete/gestión que el
+            # emisor solo traslada) sino NO SUJETA (fuera del ámbito de la
+            # ley desde el inicio). Antes solo se reconocía el rótulo "No
+            # Sujetas" — un documento con este otro rótulo dejaba no_sujetas
+            # en 0, y sin un "Sub-Total" explícito la resta de respaldo más
+            # abajo seguía inflando las gravadas por exactamente ese monto.
             m_ns = re.search(
-                r"(?:No\s+Sujetas?|Ventas?\s+No\s+Sujetas?)[^\d]{0,30}"
+                r"(?:No\s+Sujetas?|Ventas?\s+No\s+Sujetas?|"
+                r"Otros?\s+[Mm]ontos?\s+[Nn]o\s+[Aa]fectos?|"
+                r"[Mm]ontos?\s+[Nn]o\s+[Aa]fectos?)[^\d]{0,30}"
                 r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
                 t_clean, re.I
             )

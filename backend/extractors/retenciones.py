@@ -232,11 +232,26 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 r"[^\d$]{0,30}\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+)",
                 t_clean, re.I
             )
-            m_ret = re.search(
-                r"(?:[Tt]otal\s+IVA\s+[Rr]etenido|[Tt]otal\s+IVA\s+[Rr]eteni"
-                r"|[Ii]mpuesto\s+[Rr]etenido|[Rr]etenci[oó]n\s+1%|[Mm]onto\s+[Rr]etenci[oó]n)"
-                r"[^\d$]{0,30}\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+)",
-                t_clean, re.I
+            # "Impuesto Retenido 1%: $X.XX" y "Monto Retención 1%: $X.XX"
+            # (a diferencia de "Retención 1%:", que consume el "1%" como
+            # parte de la etiqueta): el "[^\d$]{0,30}" no puede saltar el
+            # dígito "1" de "1%" porque excluye dígitos, así que capturaba
+            # "1" en vez del monto real tras el $ — mismo bug confirmado y
+            # corregido en sujetos_excluidos.py (Retención Renta 10%). Se
+            # prueba primero la variante anclada al $ (toma lo que sea que
+            # venga después del último $ en la misma línea de la etiqueta).
+            m_ret = (
+                re.search(
+                    r"(?:[Tt]otal\s+IVA\s+[Rr]etenido|[Ii]mpuesto\s+[Rr]etenido|"
+                    r"[Rr]etenci[oó]n\s+1%|[Mm]onto\s+[Rr]etenci[oó]n)[^\n]*\$\s*(\d[\d,.]*)",
+                    t_clean, re.I,
+                )
+                or re.search(
+                    r"(?:[Tt]otal\s+IVA\s+[Rr]etenido|[Tt]otal\s+IVA\s+[Rr]eteni"
+                    r"|[Ii]mpuesto\s+[Rr]etenido|[Rr]etenci[oó]n\s+1%|[Mm]onto\s+[Rr]etenci[oó]n)"
+                    r"[^\d$]{0,30}\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+)",
+                    t_clean, re.I
+                )
             )
 
             if m_base:

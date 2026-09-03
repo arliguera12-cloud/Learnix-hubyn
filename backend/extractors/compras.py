@@ -690,12 +690,21 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             fovial_cotrans = round(fovial + cotrans, 2)
 
             # ── Exentas / No Sujetas ───────────────────────────────────────────────
+            # "Otros montos no afectos" es la misma columna combinada
+            # Exentas/No Sujetas del Anexo 3, con otro rótulo — no está
+            # EXENTA (exoneración puntual de la ley) sino NO SUJETA (fuera
+            # del ámbito del IVA desde el inicio, típico en un flete/gestión
+            # que el proveedor solo traslada) — mismo ajuste que en
+            # ventas.py, y acá cae igual en `exe` porque el Anexo 3 no
+            # separa ambas columnas.
             exe = 0.0
             for pat in [
                 r'[Vv]tas?\.?\s+[Ee]xentas?\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'[Vv]entas?\s+[Ee]xentas?\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'[Tt]otal\s+[Ee]xento\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'\b[Ee]xentas?\s*:?\s*\$?\s*(\d[\d,.]+)',
+                r'[Oo]tros?\s+[Mm]ontos?\s+[Nn]o\s+[Aa]fectos?\s*:?\s*\$?\s*(\d[\d,.]+)',
+                r'\b[Mm]ontos?\s+[Nn]o\s+[Aa]fectos?\s*:?\s*\$?\s*(\d[\d,.]+)',
             ]:
                 m_exe = re.search(pat, t_clean)
                 if m_exe:
