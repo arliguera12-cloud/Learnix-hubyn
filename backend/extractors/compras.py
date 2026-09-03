@@ -124,6 +124,23 @@ def cargar_proveedores_json() -> dict:
         return {}
 
 
+def _mismo_nombre(a: str, b: str) -> bool:
+    """
+    ¿`a` y `b` son el mismo nombre, sin importar el orden de las palabras?
+
+    Los DTE no siempre imprimen el nombre en el mismo orden en cada
+    documento ("JONATHAN RUIZ" vs "RUIZ JONATHAN") — una comparación
+    literal (`a == b` / `a.startswith(b)`) no detecta esa variante y deja
+    colarse el nombre del receptor (tu cliente) como si fuera el proveedor.
+    Comparar como conjunto de palabras es invariante al orden.
+    """
+    palabras_a = set(safe_str(a).upper().split())
+    palabras_b = set(safe_str(b).upper().split())
+    if not palabras_a or not palabras_b:
+        return False
+    return palabras_a == palabras_b
+
+
 def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> str:
     """
     Extrae el nombre del EMISOR (proveedor) del DTE.
@@ -168,7 +185,7 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
         T = safe_str(s).strip().upper()
         if len(T) < 4 or len(T) > 90:
             return False
-        if receptor_up and (T == receptor_up or T.startswith(receptor_up[:12])):
+        if receptor_up and (T == receptor_up or T.startswith(receptor_up[:12]) or _mismo_nombre(T, receptor_up)):
             return False
         if any(b in T for b in BASURA_ESTRICTA):
             return False
