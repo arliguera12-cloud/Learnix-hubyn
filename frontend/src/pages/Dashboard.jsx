@@ -73,7 +73,7 @@ export default function Dashboard() {
   const totalDTE = Object.values(stats).reduce((s, v) => s + v, 0)
 
   return (
-    <div className="max-w-5xl mx-auto space-y-7">
+    <div className="max-w-[90rem] mx-auto space-y-7">
 
       {/* Cabecera editorial */}
       <div className="flex items-end justify-between border-b border-hairline pb-4">

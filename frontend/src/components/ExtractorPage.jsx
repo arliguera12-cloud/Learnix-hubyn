@@ -176,7 +176,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
   }, [resultadosBuscados, resultados, filtro])
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-[90rem] mx-auto space-y-6">
       {/* Cabecera */}
       <div>
         <p className="text-[0.65rem] uppercase tracking-[0.18em] text-fg-4 font-semibold mb-1">

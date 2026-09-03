@@ -98,7 +98,7 @@ export default function Clientes() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-[90rem] mx-auto space-y-5">
       <div>
         <h2 className="text-2xl text-fg flex items-center gap-2.5">
           <IconClientes className="w-6 h-6 text-accent" />
