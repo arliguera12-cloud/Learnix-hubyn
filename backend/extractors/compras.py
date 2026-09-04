@@ -44,13 +44,6 @@ _log = logging.getLogger(__name__)
 # este patrón, el corte de sección no ocurría y el nombre del receptor
 # (frecuentemente el propio declarante) se colaba como "sufijo legal"
 # válido (S.A. DE C.V.) antes de llegar al del emisor real.
-#
-# NO incluye "EMISOR RECEPTOR" (encabezado de dos columnas, ambas palabras
-# juntas en una sola línea, sin nada más entre medio): en la plantilla
-# oficial de dos columnas ese encabezado antecede TODO el contenido — tanto
-# el del emisor como el del receptor — así que cortar ahí descartaba
-# también los datos del propio emisor, dejando nit_prov vacío en cualquier
-# DTE con ese layout (encontrado con documentos reales de ECSA y CADELU).
 PATRONES_CORTE_RECEPTOR = [
     r'(?i)DATOS\s+DEL\s+RECEPTOR',
     r'(?i)DATOS\s+DEL\s+CLIENTE',
@@ -58,6 +51,50 @@ PATRONES_CORTE_RECEPTOR = [
     r'(?i)\bRECEPTOR\b',
     r'(?i)\bCLIENTE\b',
 ]
+
+
+def _cortar_antes_de_receptor(texto: str, estricto: bool = False) -> str | None:
+    """
+    Devuelve la porción de `texto` anterior a la sección RECEPTOR/CLIENTE
+    según PATRONES_CORTE_RECEPTOR.
+
+    Ignora un match de "RECEPTOR"/"CLIENTE" que sea en realidad la segunda
+    palabra del encabezado de dos columnas "EMISOR RECEPTOR" en una sola
+    línea, sin nada más entre medio (frecuente en la plantilla oficial de
+    Hacienda) — ese encabezado antecede TODO el contenido de la tabla
+    (tanto el del emisor como el del receptor), así que cortar ahí
+    descartaba también los datos del propio emisor, dejando nit_prov/
+    dui_prov vacíos en cualquier DTE con ese layout (encontrado con
+    documentos reales de ECSA, CADELU y una factura de Baldizón).
+
+    `estricto=True`: si no se encuentra un límite confiable, retorna None
+    en vez del texto completo sin cortar. Lo usan las búsquedas "amplias"
+    (p. ej. Estrategia -1, que acepta cualquier línea con sufijo legal)
+    donde buscar en TODO el documento sin acotar es peligroso — en un
+    layout de dos columnas por fila sin ningún límite textual real (ambas
+    columnas comparten cada línea, como ECSA/CADELU/Baldizón), ese
+    documento entero incluye tanto el bloque del emisor como el del
+    receptor Y la sección de totales, así que una búsqueda amplia agarraba
+    literalmente cualquier frase con forma de razón social ("Monto Global
+    Desc., Rebajas y Otros a...", "Otros Documentos AS...") en vez de
+    fallar limpio y dejar que una estrategia más conservadora (que valida
+    línea por línea) lo resuelva.
+    """
+    for pat in PATRONES_CORTE_RECEPTOR:
+        for m in re.finditer(pat, texto, re.I):
+            inicio_linea = texto.rfind('\n', 0, m.start()) + 1
+            antes = texto[inicio_linea:m.start()]
+            # Dos falsos límites, ninguno marca el inicio real del bloque
+            # receptor: el encabezado "EMISOR RECEPTOR" (ya explicado
+            # arriba) y la línea de firma "Responsable por parte del
+            # Receptor:" del pie del documento — sin excluir esta segunda,
+            # "RECEPTOR" ahí era la ÚNICA ocurrencia no-header y quedaba
+            # como límite "válido", pero tan al final que el corte incluía
+            # igualmente toda la sección de totales de en medio.
+            if re.search(r'(?:^\s*EMISOR|RESPONSABLE\s+POR\s+PARTE\s+DEL)\s*$', antes, re.I):
+                continue
+            return texto[:m.start()]
+    return None if estricto else texto
 
 PALABRAS_BASURA_NOMBRE = [
     "DOCUMENTO", "TRIBUTARIO", "ELECTRONICO", "ELECTRÓNICO",
@@ -210,9 +247,23 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
         # detectó separación de columna) — sin este segundo patrón, el
         # nombre del receptor quedaba pegado al del emisor con la etiqueta
         # "NOMBRE:" en medio, sin cortar.
+        # "RAZ[OÓ]N\s*SOCIAL" cubre el caso "NOMBRE: EMISOR RAZÓN SOCIAL:
+        # RECEPTOR" (misma fila, cada parte con su propia etiqueta corta
+        # distinta — no "Nombre o Razón Social" combinado) — sin él, la
+        # etiqueta del receptor quedaba colgando tras quitarle su nombre y
+        # el candidato entero se rechazaba en validación por parecer
+        # metadata. re.I agregado: sin él, "NOMBRE"/"RECEPTOR" en
+        # mayúsculas (el caso real más común) no coincidían con los
+        # patrones en minúscula/con `[Nn]` inicial únicamente.
+        # (?<![Oo]\s) evita que "RAZ[OÓ]N SOCIAL" dispare DENTRO de la
+        # propia etiqueta compuesta "Nombre o Razón Social" (el espacio
+        # entre "o" y "Razón" también satisface el `\s+` compartido) —
+        # sin esta exclusión, un documento que SÍ usa la etiqueta larga
+        # para ambas partes se cortaba a la mitad de su propia etiqueta,
+        # antes de llegar al nombre real (caso FERRUSAL).
         partes = re.split(
-            r'\s+(?:[Nn]ombre\s+[Oo]\s+[Rr]az|[Nn]ombre\s*:|RECEPTOR\b|CLIENTE\b)',
-            s, maxsplit=1,
+            r'\s+(?:[Nn]ombre\s+[Oo]\s+[Rr]az|[Nn]ombre\s*:|(?<![Oo]\s)RAZ[OÓ]N\s*SOCIAL|RECEPTOR\b|CLIENTE\b)',
+            s, maxsplit=1, flags=re.I,
         )
         s = partes[0]
         # Quitar etiquetas de campo al inicio
@@ -268,10 +319,23 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
     # El EMISOR (proveedor) SIEMPRE es la columna IZQUIERDA. Esto funciona
     # también para personas naturales (sin sufijo legal) y evita confundir el
     # nombre del cliente (columna derecha) o truncar la razón social.
-    _lineas_vis = texto.split('\n')
+    #
+    # GUARD: se busca solo antes del receptor. Sin este corte, un layout de
+    # UNA sola columna (emisor primero, receptor después, cada uno con su
+    # propia etiqueta "Nombre o Razón social:") encontraba la etiqueta del
+    # RECEPTOR (la única con ese texto exacto) y tomaba como "nombre" la
+    # línea siguiente — que en un nombre de receptor envuelto en dos líneas
+    # podía ser solo el segundo apellido ("AMAYA" en vez de "OSCAR EDUARDO
+    # VALDIZON AMAYA"), mientras el nombre real del emisor (sin esa
+    # etiqueta, justo debajo de "DATOS DEL EMISOR") se ignoraba por completo.
+    _lineas_vis = _cortar_antes_de_receptor(texto).split('\n')
     for _i, _ln in enumerate(_lineas_vis):
+        # "Nombre/Razón Social" (con slash, sin espacios) es una variante
+        # real tan común como "Nombre o Razón Social" — sin cubrirla, este
+        # layout de dos columnas caía a estrategias más débiles que no
+        # distinguen emisor de receptor (caso ESAU HERIBERTO ESCOBAR RAMOS).
         _labels = [m.start() for m in re.finditer(
-            r'[Nn]ombre\s+[Oo]\s+[Rr]az[oó]n\s+[Ss]ocial', _ln)]
+            r'[Nn]ombre\s*(?:[Oo]|/)\s*[Rr]az[oó]n\s+[Ss]ocial', _ln)]
         if not _labels:
             continue
         # Línea de nombres = siguiente línea no vacía
@@ -320,30 +384,80 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
     # Las razones sociales salvadoreñas casi siempre terminan en una forma
     # jurídica (S.A. DE C.V., S.A., LTDA, etc.). La metadata del DTE nunca.
     # GUARD: solo busca en la sección EMISOR (antes de RECEPTOR/CLIENTE).
-    _texto_emisor_sl = texto
-    for _pat_sl in PATRONES_CORTE_RECEPTOR:
-        _parts_sl = re.split(_pat_sl, texto, maxsplit=1)
-        if len(_parts_sl) >= 2:
-            _texto_emisor_sl = _parts_sl[0]
-            break
+    _texto_emisor_sl = _cortar_antes_de_receptor(texto)
     _SUFIJO_LEGAL = re.compile(
         r'([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9&.,\- ]{2,70}?,?\s*'
-        r'(?:S\.?\s*A\.?\s+DE\s+C\.?\s*V\.?|'          # S.A. DE C.V.
-        r'S\.?\s*A\.?\s*S\.?|'                          # S.A.S.
-        r'S\.?\s*A\.?(?![A-Z])|'                        # S.A.
+        r'(?:SOCIEDAD\s+AN[OÓ]NIMA\s+DE\s+CAPITAL\s+VARIABLE|'  # SOCIEDAD ANONIMA DE CAPITAL VARIABLE
+        r'S\.?\s*A\.?\s+DE\s+C\.?\s*V\.?|'          # S.A. DE C.V.
+        # S.A.S.: se exige el punto tras la primera S (S\. en vez de S\.?)
+        # — sin él, cualquier "s a s" suelto en prosa normal (p. ej. "...
+        # documentos asociados...", donde "s aso" calza con S-A-S) también
+        # matcheaba, igual que el caso "S.A." bare de abajo.
+        r'S\.\s*A\.?\s*S\.?|'                           # S.A.S.
+        # "S.A." con al menos un punto de los dos (ambos opcionales a la vez
+        # — "S\.?\s*A\.?" sin punto alguno — hacía que CUALQUIER "s a"
+        # suelto en prosa normal ("...otros a ventas...", "...menos a
+        # cubrir...") calzara como razón social, agarrando fragmentos de
+        # la sección de totales en vez de fallar limpio).
+        r'(?:S\.A\.?|S\.?A\.)(?![A-Za-z])|'             # S.A. / S.A / SA.
         r'S\.?\s+DE\s+R\.?\s*L\.?(?:\s+DE\s+C\.?\s*V\.?)?|'  # S. DE R.L. (DE C.V.)
         r'LTDA\.?|'                                     # LTDA
         r'S\.?\s+EN\s+C\.?))',                          # S. EN C.
         re.I,
     )
-    for _ln in _texto_emisor_sl.split('\n'):
-        m_sl = _SUFIJO_LEGAL.search(_ln)
-        if not m_sl:
-            continue
-        candidato = limpiar(m_sl.group(1))
-        if valido(candidato) and len(candidato) >= 6:
-            _log.debug("extraer_nombre_emisor: estrategia=-1 (sufijo legal) → %s", candidato)
-            return candidato
+    # Muchas plantillas repiten la etiqueta "Nombre:"/"Nombre Comercial:"
+    # una vez por parte, en líneas separadas y SIN ningún separador de
+    # RECEPTOR entre medio (p. ej. "Nombre: EMISOR" ... más abajo,
+    # "Nombre Comercial: EMISOR" ... "Nombre Comercial: RECEPTOR") — la
+    # 2ª aparición de esa etiqueta ya es del receptor. Sin cortar ahí, la
+    # búsqueda de sufijo legal seguía de largo y alcanzaba el nombre (o su
+    # línea de envoltura) del receptor.
+    _NOMBRE_LABEL = re.compile(
+        r'^\s*Nombre(?:\s+Comercial|\s+[Oo]\s+Raz[oó]n\s+[Ss]ocial)?\s*:', re.I,
+    )
+    if _texto_emisor_sl is not None:
+        _lineas_sl = []
+        _vistas = 0
+        for _ln in _texto_emisor_sl.split('\n'):
+            if _NOMBRE_LABEL.match(_ln):
+                _vistas += 1
+                if _vistas > 2:
+                    break
+            _lineas_sl.append(_ln)
+        _texto_emisor_sl = '\n'.join(_lineas_sl)
+
+    if _texto_emisor_sl is not None:
+        for _ln in _texto_emisor_sl.split('\n'):
+            m_sl = _SUFIJO_LEGAL.search(_ln)
+            if not m_sl:
+                continue
+            # Un salto de 3+ espacios dentro de lo capturado es un gap de
+            # columna (EMISOR|RECEPTOR lado a lado), no parte real de una
+            # razón social — sin este guard, cuando el nombre del emisor
+            # se envuelve a una 2ª línea que además comparte fila con la
+            # 2ª línea del receptor, el prefijo no-codicioso terminaba
+            # cruzando el gap para alcanzar el sufijo legal del RECEPTOR,
+            # devolviendo un texto mitad-emisor mitad-receptor.
+            if re.search(r'\s{3,}', m_sl.group(1)):
+                continue
+            # Cuando el gap de columna no sobrevive a la normalización de
+            # texto_lineal (queda un solo espacio, no 3+), el guard de
+            # arriba no alcanza — pero el fragmento que cruza igual
+            # arranca con la cola de una forma jurídica ("Sociedad
+            # Anónima de Capital Variable", "Sociedad de Responsabilidad
+            # Limitada") que nunca es la PRIMERA palabra real de un
+            # nombre de empresa. Si el candidato empieza así, es la
+            # continuación envuelta de la línea anterior fusionada con la
+            # fila del receptor, no un nombre válido.
+            if re.match(
+                r'\s*(?:AN[OÓ]NIMA|VARIABLE|LIMITADA|RESPONSABILIDAD|CAPITAL)\b',
+                m_sl.group(1), re.I,
+            ):
+                continue
+            candidato = limpiar(m_sl.group(1))
+            if valido(candidato) and len(candidato) >= 6:
+                _log.debug("extraer_nombre_emisor: estrategia=-1 (sufijo legal) → %s", candidato)
+                return candidato
 
     # ── Estrategia 0: sección explícita [EMISOR] … [RECEPTOR] ────────────────
     # Busca un bloque etiquetado "EMISOR" y extrae el nombre dentro de él
@@ -369,7 +483,7 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
     # ── Estrategia 1: etiqueta "Nombre o Razón Social:" (primer match = emisor)
     # CORREGIDO: tomamos group(1) directamente sin re-split innecesario
     for m_nom in re.finditer(
-        r'[Nn]ombre\s+[Oo]\s+[Rr]az[oó]n\s+[Ss]ocial\s*:\s*([^\n]{4,120})',
+        r'[Nn]ombre\s*(?:[Oo]|/)\s*[Rr]az[oó]n\s+[Ss]ocial\s*:\s*([^\n]{4,120})',
         texto,
     ):
         # Ignorar si el contexto anterior indica que es sección RECEPTOR
@@ -382,12 +496,7 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
             return candidato
 
     # ── Estrategia 2: texto antes del receptor ───────────────────────────────
-    parte_emisor = texto
-    for pat in PATRONES_CORTE_RECEPTOR:
-        parts = re.split(pat, texto, maxsplit=1)
-        if len(parts) >= 2:
-            parte_emisor = parts[0]
-            break
+    parte_emisor = _cortar_antes_de_receptor(texto)
 
     # ── Estrategia 3: palabras comerciales en bloque emisor ──────────────────
     for linea in parte_emisor.split('\n'):
@@ -649,12 +758,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 proveedores_db = cargar_proveedores_json()
 
             # Separar sección EMISOR del texto
-            parte_emisor = texto_lineal
-            for pat in PATRONES_CORTE_RECEPTOR:
-                parts = re.split(pat, texto_lineal, maxsplit=1)
-                if len(parts) >= 2:
-                    parte_emisor = parts[0]
-                    break
+            parte_emisor = _cortar_antes_de_receptor(texto_lineal)
 
             PATRON_NIT = re.compile(
                 r'N\.?\s*I\.?\s*T\.?\s*[:\s]\s*'
@@ -831,14 +935,25 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 perc = limpiar_monto(m_perc.group(1))
 
             # ── Total a Pagar ──────────────────────────────────────────────────────
+            # Facturas de servicios (energía, agua, telecom) con mora: el
+            # "Total a Pagar" incluye el saldo pendiente de PERÍODOS
+            # ANTERIORES, ajeno a la base imponible de ESTE documento — el
+            # crédito fiscal declarable es el de "Total del Mes" (o
+            # equivalente), no el monto combinado con la deuda vieja. Si el
+            # documento trae ambos rótulos, se prioriza el del mes.
             tot = 0.0
-            for pat in [
+            _patrones_tot = [
                 r'[Tt]otal\s+a\s+[Pp]agar\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'[Tt]otal\s+[Pp]agar\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'[Mm]onto\s+[Tt]otal\s+de\s+la\s+[Oo]peraci[oó]n\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'[Vv]alor\s+[Tt]otal\s+a\s+[Pp]agar\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'[Tt]OTAL\s*:?\s*\$?\s*(\d[\d,.]+)',
-            ]:
+            ]
+            if re.search(r'[Tt]otal\s+del\s+[Mm]es', t_clean):
+                _patrones_tot = [
+                    r'[Tt]otal\s+del\s+[Mm]es\s*:?\s*\$?\s*(\d[\d,.]+)',
+                ] + _patrones_tot
+            for pat in _patrones_tot:
                 m_tot = re.search(pat, t_clean)
                 if m_tot:
                     tot = limpiar_monto(m_tot.group(1))
