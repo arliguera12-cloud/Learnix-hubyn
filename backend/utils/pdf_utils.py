@@ -140,11 +140,15 @@ def extraer_nombre_receptor_columna(file_bytes: bytes) -> str:
             div = ((emisor_x1 + recep["x0"]) / 2) if emisor_x1 else (W / 2)
             div = min(div, W / 2)
 
-            # Primera etiqueta NIT del receptor: delimita el bloque del nombre
+            # Primera etiqueta NIT/DUI del receptor: delimita el bloque del
+            # nombre. En Factura de Consumidor Final el receptor se
+            # identifica por DUI, no por NIT — buscar solo "NIT" dejaba caer
+            # el corte al valor por defecto (más abajo de la cuenta) e
+            # incluía la línea "DUI: ... NRC" dentro del nombre capturado.
             nit_top = None
             for w in sorted(words, key=lambda x: x["top"]):
                 if (w["top"] > hdr_top + 4 and w["x0"] >= div
-                        and re.match(r"(?i)^NIT", w["text"])):
+                        and re.match(r"(?i)^(?:NIT|DUI)", w["text"])):
                     nit_top = w["top"]
                     break
             if nit_top is None:
@@ -164,6 +168,10 @@ def extraer_nombre_receptor_columna(file_bytes: bytes) -> str:
                 " ", txt,
             )
             txt = re.sub(r"(?i)\braz[oó]n\s+social\s*:?", " ", txt)
+            # Red de seguridad: si el recorte se pasó de largo e incluyó la
+            # línea de identificación (NIT/DUI/NRC), cortar ahí en vez de
+            # devolver el nombre pegado a esos datos.
+            txt = re.split(r"(?i)\b(?:NIT|DUI|NRC)\s*:", txt, maxsplit=1)[0]
             txt = re.sub(r"\s+", " ", txt).strip(" :,-")
             return txt.upper()
     except Exception:
