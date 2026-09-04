@@ -615,6 +615,29 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     if debito > 0:
                         break
 
+            # IVA retenido/percibido — el comprador designado agente de
+            # retención descuenta 1% del "Total a Pagar" (o el vendedor
+            # percibe un extra); sin esto, validar_montos_ventas compara el
+            # total del documento (ya neto de la retención) contra
+            # gravadas+iva y dispara "Total no cuadra" en cada CCF con
+            # retención aunque el documento esté matemáticamente correcto.
+            ret  = 0.0
+            perc = 0.0
+            for pat in [
+                r'[Ii][Vv][Aa]\s+[Rr]etenido\s*:?\s*\$?\s*(\d[\d,.]+)',
+                r'[Rr]etenci[oó]n\s+[Ii][Vv][Aa]\s*:?\s*\$?\s*(\d[\d,.]+)',
+            ]:
+                m_ret = re.search(pat, t_clean)
+                if m_ret:
+                    ret = limpiar_monto(m_ret.group(1))
+                    if ret > 0:
+                        break
+            m_perc = re.search(
+                r'[Ii][Vv][Aa]\s+[Pp]ercibido\s*:?\s*\$?\s*(\d[\d,.]+)', t_clean
+            )
+            if m_perc:
+                perc = limpiar_monto(m_perc.group(1))
+
             # Ventas gravadas
             _PATS_GRAVADAS = [
                 r"Ventas?\s+Gravadas?\s+Locales?[^\d]{0,30}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,2})",
@@ -815,13 +838,15 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_cli": nom_cli, "gravadas": gravadas, "total": total,
-                # debito/exentas/no_sujetas no cuentan para el % de completitud
-                # (calcular_confianza solo mira los 7 campos de arriba), pero
-                # SÍ hacen falta aquí para que validar_montos_ventas concilie
-                # bien el total — sin ellos "total ≠ gravadas" siempre dispara
-                # una alerta falsa y tapa el score en 60, forzando Visión
-                # aunque el documento ya esté completo.
+                # debito/exentas/no_sujetas/ret/perc no cuentan para el % de
+                # completitud (calcular_confianza solo mira los 7 campos de
+                # arriba), pero SÍ hacen falta aquí para que
+                # validar_montos_ventas concilie bien el total — sin ellos
+                # "total ≠ gravadas" siempre dispara una alerta falsa y tapa
+                # el score en 60, forzando Visión aunque el documento ya
+                # esté completo.
                 "debito": debito, "exentas": exentas, "no_sujetas": no_sujetas,
+                "ret": ret, "perc": perc,
             }
             _confianza_pre_vision = calcular_confianza(_campos_pre_vision, "ventas")
             if _confianza_pre_vision["score"] < 85 and vision_disponible():
@@ -873,6 +898,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_cli": nom_cli, "gravadas": gravadas, "total": total,
                 "debito": debito, "exentas": exentas, "no_sujetas": no_sujetas,
+                "ret": ret, "perc": perc,
             }
             _confianza_pre = calcular_confianza(_campos_pre_ia, "ventas")
             if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
@@ -907,6 +933,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_cli": nom_cli, "gravadas": round(gravadas, 2), "debito": round(debito, 2),
                 "total": round(total, 2), "exentas": round(exentas, 2), "no_sujetas": round(no_sujetas, 2),
+                "ret": round(ret, 2), "perc": round(perc, 2),
             }
             _confianza = calcular_confianza(_campos_finales, "ventas")
             if _confianza["score"] >= 85:

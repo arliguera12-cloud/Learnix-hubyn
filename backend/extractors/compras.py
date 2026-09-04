@@ -34,6 +34,31 @@ MAX_VALORES_LOOP = MAX_VALORES_LOOP_COMPRAS
 
 _log = logging.getLogger(__name__)
 
+# Patrones que marcan dónde termina la sección EMISOR y empieza la del
+# RECEPTOR/CLIENTE — usados para no confundir el nombre del proveedor con
+# el del propio declarante. Algunas plantillas (p. ej. gasolineras emitidas
+# por powercloud.com.sv) nunca imprimen literalmente "RECEPTOR" ni
+# "CLIENTE": el emisor va sin etiqueta al inicio del documento y la única
+# marca antes del bloque del receptor es el pie de verificación "Portal
+# Hacienda / Código generación / Sello recibido / Número de control" — sin
+# este patrón, el corte de sección no ocurría y el nombre del receptor
+# (frecuentemente el propio declarante) se colaba como "sufijo legal"
+# válido (S.A. DE C.V.) antes de llegar al del emisor real.
+#
+# NO incluye "EMISOR RECEPTOR" (encabezado de dos columnas, ambas palabras
+# juntas en una sola línea, sin nada más entre medio): en la plantilla
+# oficial de dos columnas ese encabezado antecede TODO el contenido — tanto
+# el del emisor como el del receptor — así que cortar ahí descartaba
+# también los datos del propio emisor, dejando nit_prov vacío en cualquier
+# DTE con ese layout (encontrado con documentos reales de ECSA y CADELU).
+PATRONES_CORTE_RECEPTOR = [
+    r'(?i)DATOS\s+DEL\s+RECEPTOR',
+    r'(?i)DATOS\s+DEL\s+CLIENTE',
+    r'(?i)Portal\s+Hacienda',
+    r'(?i)\bRECEPTOR\b',
+    r'(?i)\bCLIENTE\b',
+]
+
 PALABRAS_BASURA_NOMBRE = [
     "DOCUMENTO", "TRIBUTARIO", "ELECTRONICO", "ELECTRÓNICO",
     "REPRESENTACIÓN", "REPRESENTACION", "EMISOR", "FACTURA",
@@ -157,9 +182,27 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
     # ── Función interna de limpieza (CORREGIDA) ──────────────────────────────
     def limpiar(s: str) -> str:
         s = safe_str(s)
-        # Quitar nombre del receptor si se coló
+        # Quitar nombre del receptor si se coló. Tolerante a variantes de
+        # puntuación en las siglas legales ("S.A." vs "S.A", frecuente
+        # cuando el PDF real omite un punto que sí trae el nombre guardado
+        # en la base del declarante) — sin esto, un layout donde emisor y
+        # receptor caen en la misma línea (misma altura de fila, p. ej.
+        # "CADELU, S.A. DE C.V. INDUSTRIAS FULLCHEM, S.A DE C.V") dejaba el
+        # nombre del receptor pegado al del proveedor porque la comparación
+        # exacta nunca encontraba ese ".", literal en un lado y ausente en
+        # el otro.
         if receptor_up and len(receptor_up) > 3:
-            s = re.compile(re.escape(receptor_up), re.I).sub("", s)
+            # Se escapa palabra por palabra (no la cadena completa) y se
+            # unen con "\s+": re.escape ya escapa el espacio como "\ ", y
+            # reemplazar espacios sueltos por "\s+" DESPUÉS de escapar
+            # corrompe ese "\ " en "\\s+" (escapa el propio backslash), que
+            # ya no matchea nada — de ahí que un simple re.escape+replace
+            # nunca lograra quitar el nombre del receptor de la línea.
+            _tokens_receptor = [
+                re.escape(tok).replace(r'\.', r'\.?') for tok in receptor_up.split()
+            ]
+            _patron_receptor = re.compile(r'\s+'.join(_tokens_receptor), re.I)
+            s = _patron_receptor.sub("", s)
         # Cortar en segunda ocurrencia de una etiqueta de nombre (layout
         # columnar): cubre tanto "Nombre o Razón Social" como el "Nombre:"
         # corto que usan varios DTE reales (caso PIPSA — "Nombre: EMISOR
@@ -278,8 +321,7 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
     # jurídica (S.A. DE C.V., S.A., LTDA, etc.). La metadata del DTE nunca.
     # GUARD: solo busca en la sección EMISOR (antes de RECEPTOR/CLIENTE).
     _texto_emisor_sl = texto
-    for _pat_sl in [r'(?i)\bEMISOR\s+RECEPTOR\b', r'(?i)DATOS\s+DEL\s+RECEPTOR',
-                    r'(?i)DATOS\s+DEL\s+CLIENTE', r'(?i)\bRECEPTOR\b', r'(?i)\bCLIENTE\b']:
+    for _pat_sl in PATRONES_CORTE_RECEPTOR:
         _parts_sl = re.split(_pat_sl, texto, maxsplit=1)
         if len(_parts_sl) >= 2:
             _texto_emisor_sl = _parts_sl[0]
@@ -341,13 +383,7 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
 
     # ── Estrategia 2: texto antes del receptor ───────────────────────────────
     parte_emisor = texto
-    for pat in [
-        r'(?i)\bEMISOR\s+RECEPTOR\b',
-        r'(?i)DATOS\s+DEL\s+RECEPTOR',
-        r'(?i)DATOS\s+DEL\s+CLIENTE',
-        r'(?i)\bRECEPTOR\b',
-        r'(?i)\bCLIENTE\b',
-    ]:
+    for pat in PATRONES_CORTE_RECEPTOR:
         parts = re.split(pat, texto, maxsplit=1)
         if len(parts) >= 2:
             parte_emisor = parts[0]
@@ -614,13 +650,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
 
             # Separar sección EMISOR del texto
             parte_emisor = texto_lineal
-            for pat in [
-                r'(?i)\bEMISOR\s+RECEPTOR\b',
-                r'(?i)DATOS\s+DEL\s+RECEPTOR',
-                r'(?i)DATOS\s+DEL\s+CLIENTE',
-                r'(?i)\bRECEPTOR\b',
-                r'(?i)\bCLIENTE\b',
-            ]:
+            for pat in PATRONES_CORTE_RECEPTOR:
                 parts = re.split(pat, texto_lineal, maxsplit=1)
                 if len(parts) >= 2:
                     parte_emisor = parts[0]
@@ -653,6 +683,44 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 for m in re.finditer(
                     r'\b(\d{4}[\s\-]\d{6}[\s\-]\d{3}[\s\-]\d)\b', texto_completo
                 ):
+                    nit_cand = re.sub(r'[^0-9]', '', m.group(1))
+                    if nit_cand not in excluir_nits and len(nit_cand) == 14:
+                        nit_prov = nit_cand
+                        break
+
+            # Fallback: NIT "huérfano" (sin etiqueta "NIT:" adyacente) seguido
+            # de un NRC de 6-7 dígitos en la misma línea. Ocurre en plantillas
+            # de dos columnas EMISOR|RECEPTOR cuando una sección tiene más
+            # líneas que la otra (p. ej. el emisor con dirección de 2 líneas):
+            # las filas de pdfplumber quedan desalineadas entre columnas, la
+            # etiqueta "NIT: NRC:" del emisor termina fusionada con la fila de
+            # VALORES del receptor, y los valores del emisor quedan huérfanos
+            # — sin su propia etiqueta — en la línea siguiente. También cubre
+            # el caso "NIT: NRC: NIT: NRC:" (ambas etiquetas en una sola línea,
+            # sin dígitos) seguido de los 4 valores en la línea de abajo.
+            _PATRON_NIT_HUERFANO = re.compile(
+                r'(?m)^\s*(\d{4}[\s\-]?\d{6}[\s\-]?\d{3}[\s\-]?\d|\d{14})\s+(\d{6,7})\b'
+            )
+            if not nit_prov:
+                for m in _PATRON_NIT_HUERFANO.finditer(parte_emisor):
+                    nit_cand = re.sub(r'[^0-9]', '', m.group(1))
+                    if nit_cand not in excluir_nits and len(nit_cand) == 14:
+                        nit_prov = nit_cand
+                        break
+
+            # Mismo fallback pero sobre texto_visual (preserva la posición
+            # horizontal con espacios — layout=True de pdfplumber). Cubre el
+            # caso en que "EMISOR" y "RECEPTOR" comparten una sola línea de
+            # encabezado ("EMISOR          RECEPTOR"): ahí no hay forma de
+            # cortar texto_lineal en una sección solo-emisor porque cada fila
+            # trae ambas columnas concatenadas en una sola línea de texto, y
+            # el patrón huérfano de arriba (sobre parte_emisor/texto_lineal)
+            # no tiene forma de distinguir la columna izquierda de la
+            # derecha. En texto_visual sí — el ancla "^\s*" solo coincide si
+            # los dígitos arrancan la línea, que es siempre la columna
+            # izquierda (el emisor, por convención del DTE salvadoreño).
+            if not nit_prov:
+                for m in _PATRON_NIT_HUERFANO.finditer(texto_visual):
                     nit_cand = re.sub(r'[^0-9]', '', m.group(1))
                     if nit_cand not in excluir_nits and len(nit_cand) == 14:
                         nit_prov = nit_cand
@@ -1032,11 +1100,11 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_prov": nom_prov, "gra": gra, "tot": tot,
-                # iva/exe no cuentan para el % de completitud, pero hacen falta
-                # para que validar_montos_ventas concilie el total — sin ellos
-                # "total ≠ gravadas" dispara una alerta falsa y tapa el score
-                # en 60, forzando Visión aunque el documento ya esté completo.
-                "iva": iva, "exe": exe,
+                # iva/exe/ret/perc no cuentan para el % de completitud, pero hacen
+                # falta para que validar_montos_ventas concilie el total — sin
+                # ellos "total ≠ gravadas" dispara una alerta falsa y tapa el
+                # score en 60, forzando Visión aunque el documento ya esté completo.
+                "iva": iva, "exe": exe, "ret": ret, "perc": perc,
             }
             _confianza_pre_vision = calcular_confianza(_campos_pre_vision, "compras")
             if _confianza_pre_vision["score"] < 85:
@@ -1074,7 +1142,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_prov": nom_prov, "gra": gra, "tot": tot,
-                "iva": iva, "exe": exe,
+                "iva": iva, "exe": exe, "ret": ret, "perc": perc,
             }
             _confianza_pre = calcular_confianza(_campos_pre_ia, "compras")
             if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
@@ -1118,6 +1186,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_prov": nom_prov, "gra": round(gra, 2), "iva": round(iva, 2),
                 "tot": round(tot, 2), "exe": round(exe, 2),
+                "ret": round(ret, 2), "perc": round(perc, 2),
             }
             _confianza = calcular_confianza(_campos_finales, "compras")
             if _confianza["score"] >= 85:
