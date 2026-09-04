@@ -57,10 +57,16 @@ def _row_compras(r: dict, tipo_op="1", clasif="2", sector="4",
                  tipo_cg="2", periodo_feb2024=True) -> dict:
     gra = _f(r.get("gra")); exe = _f(r.get("exe")); iva = _f(r.get("iva"))
     tot = _f(r.get("tot")) or (exe + gra)
-    q = tipo_op if periodo_feb2024 else "0"
-    s = sector   if periodo_feb2024 else "0"
-    rc = clasif  if periodo_feb2024 else "0"
-    tc = tipo_cg if periodo_feb2024 else "0"
+    # Clasificación sugerida por IA para ESTE documento (extractors/compras.py)
+    # tiene prioridad sobre el valor fijo que se aplicaba a todo el lote —
+    # el fijo queda como respaldo si la IA no estuvo disponible para este
+    # documento en particular.
+    q  = _s(r.get("tipo_operacion"))   or tipo_op
+    rc = _s(r.get("clasificacion"))    or clasif
+    s  = _s(r.get("sector"))           or sector
+    tc = _s(r.get("tipo_costo_gasto")) or tipo_cg
+    if not periodo_feb2024:
+        q = rc = s = tc = "0"
     return {
         "A. Fecha Emisión":          _s(r.get("fecha")),
         "B. Clase Documento":        "4",

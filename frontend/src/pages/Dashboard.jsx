@@ -30,6 +30,48 @@ const STATS_CONFIG = [
   { key: 'sujetos',     tabla: 'db_sujetos',     label: 'Sujetos Excluidos', Icon: IconSujetos },
 ]
 
+// Calendario tributario (aproximado): reglas generales de vencimiento de
+// El Salvador (Ministerio de Hacienda) — declaraciones mensuales el día 10
+// (IVA F-07, Pago a Cuenta/Retención Renta F-14) o 15 (Informe mensual de
+// retenciones/percepciones/anticipos IVA, F-930) del mes siguiente al
+// período que declaran, y Declaración de Renta anual el 30 de abril. Cuando
+// esa fecha cae en fin de semana o feriado, Hacienda la corre al siguiente
+// día hábil — ese ajuste exacto no se calcula acá (requeriría el calendario
+// oficial de feriados), así que la fecha mostrada es una aproximación:
+// siempre hay que confirmar la fecha límite real en mh.gob.sv antes de
+// declarar.
+const OBLIGACIONES_BASE = [
+  { formulario: 'F-07',  nombre: 'Declaración de IVA',                                   dia: 10 },
+  { formulario: 'F-14',  nombre: 'Pago a Cuenta / Retención Renta',                       dia: 10 },
+  { formulario: 'F-930', nombre: 'Informe mensual de retenciones/percepciones IVA',       dia: 15 },
+]
+
+function proximaFecha(dia, mesOffset = 0) {
+  const hoy = new Date()
+  const fecha = new Date(hoy.getFullYear(), hoy.getMonth() + mesOffset, dia)
+  fecha.setHours(23, 59, 59, 999)
+  return fecha
+}
+
+function calcularObligaciones() {
+  const hoy = new Date()
+  const obligaciones = OBLIGACIONES_BASE.map(({ formulario, nombre, dia }) => {
+    let fecha = proximaFecha(dia, 0)
+    if (fecha < hoy) fecha = proximaFecha(dia, 1)
+    return { formulario, nombre, fecha }
+  })
+
+  // Declaración de Renta anual — 30 de abril
+  const anioActual = hoy.getFullYear()
+  let fechaRenta = new Date(anioActual, 3, 30, 23, 59, 59, 999)
+  if (fechaRenta < hoy) fechaRenta = new Date(anioActual + 1, 3, 30, 23, 59, 59, 999)
+  obligaciones.push({ formulario: 'Renta', nombre: 'Declaración de Renta anual', fecha: fechaRenta })
+
+  return obligaciones
+    .map((o) => ({ ...o, diasRestantes: Math.ceil((o.fecha - hoy) / 86400000) }))
+    .sort((a, b) => a.fecha - b.fecha)
+}
+
 export default function Dashboard() {
   const { session } = useAuth()
   const [stats,    setStats]    = useState({ ventas: 0, compras: 0, retenciones: 0, sujetos: 0 })
@@ -71,6 +113,7 @@ export default function Dashboard() {
 
   const email    = session?.user?.email ?? 'usuario'
   const totalDTE = Object.values(stats).reduce((s, v) => s + v, 0)
+  const obligaciones = calcularObligaciones()
 
   return (
     <div className="max-w-[90rem] mx-auto space-y-7">
@@ -136,6 +179,36 @@ export default function Dashboard() {
             <span className="text-xs text-fg-3">Vertex AI Gemini</span>
             <span className="badge-warn">configurable</span>
           </div>
+        </div>
+      </div>
+
+      {/* Calendario tributario */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[0.65rem] font-semibold text-fg-4 uppercase tracking-[0.16em]">
+            Próximas obligaciones fiscales
+          </h3>
+          <span className="text-[0.6rem] text-fg-5">fechas aproximadas · verificá en mh.gob.sv</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-hairline border border-hairline rounded-xl overflow-hidden">
+          {obligaciones.map(({ formulario, nombre, fecha, diasRestantes }) => (
+            <div key={formulario} className="bg-panel p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-[0.65rem] uppercase tracking-wider text-fg-4">
+                  {formulario}
+                </span>
+                <span className={
+                  diasRestantes <= 3 ? 'badge-err' : diasRestantes <= 7 ? 'badge-warn' : 'badge-ok'
+                }>
+                  {diasRestantes === 0 ? 'hoy' : diasRestantes === 1 ? '1 día' : `${diasRestantes} días`}
+                </span>
+              </div>
+              <p className="text-sm text-fg leading-snug">{nombre}</p>
+              <p className="text-xs text-fg-4 mt-1.5">
+                {fecha.toLocaleDateString('es-SV', { day: '2-digit', month: 'long', year: 'numeric' })}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
 

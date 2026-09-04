@@ -270,8 +270,10 @@ export default function Compras() {
 
                 {/* Nota Q-T */}
                 <div className="bg-amber-900/20 border border-amber-800/50 rounded-lg px-4 py-2.5 text-xs text-amber-300">
-                  ℹ️ Columnas Q–T tienen valores por defecto (Tipo Op=1, Clasif=2, Sector=4, Tipo C/G=2).
-                  Ajústalos según la naturaleza del gasto antes de subir a Hacienda.
+                  ℹ️ Columnas Q–T (Tipo Op., Clasificación, Sector, Tipo C/G): la IA sugiere una
+                  clasificación por documento según el proveedor y el detalle de la compra: si no
+                  pudo decidir, usa el valor por defecto (Tipo Op=1, Clasif=2, Sector=4, Tipo C/G=2).
+                  Revisalas antes de subir a Hacienda — es una sugerencia, no una certeza fiscal.
                 </div>
 
                 {/* Tabla */}
