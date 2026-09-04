@@ -159,8 +159,17 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
         # Quitar nombre del receptor si se coló
         if receptor_up and len(receptor_up) > 3:
             s = re.compile(re.escape(receptor_up), re.I).sub("", s)
-        # Cortar en segunda ocurrencia de "Nombre o Razón" (layout columnar)
-        partes = re.split(r'\s+[Nn]ombre\s+[Oo]\s+[Rr]az', s, maxsplit=1)
+        # Cortar en segunda ocurrencia de una etiqueta de nombre (layout
+        # columnar): cubre tanto "Nombre o Razón Social" como el "Nombre:"
+        # corto que usan varios DTE reales (caso PIPSA — "Nombre: EMISOR
+        # ... Nombre: RECEPTOR" en una sola línea porque pdfplumber no
+        # detectó separación de columna) — sin este segundo patrón, el
+        # nombre del receptor quedaba pegado al del emisor con la etiqueta
+        # "NOMBRE:" en medio, sin cortar.
+        partes = re.split(
+            r'\s+(?:[Nn]ombre\s+[Oo]\s+[Rr]az|[Nn]ombre\s*:|RECEPTOR\b|CLIENTE\b)',
+            s, maxsplit=1,
+        )
         s = partes[0]
         # Quitar etiquetas de campo al inicio
         # El orden importa: la alternancia se resuelve con la primera que encaja,
