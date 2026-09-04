@@ -455,9 +455,14 @@ export default function Compras() {
                         />
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-white truncate">
-                            {d.nom_prov || d.nit_prov || r.filename || `Doc #${i + 1}`}
+                            {d.nom_prov || d.nit_prov || `Doc #${i + 1}`}
                           </p>
-                          <p className="text-xs text-slate-400 mt-0.5">
+                          {r.filename && (
+                            <p className="font-mono text-[0.65rem] text-slate-400 bg-surface-800 inline-block px-1.5 py-0.5 rounded mt-1 truncate max-w-full">
+                              {r.filename}
+                            </p>
+                          )}
+                          <p className="text-xs text-slate-400 mt-1">
                             {d.estado}{d.confianza != null && ` · confianza ${d.confianza}%`}
                           </p>
                           {d.detalle_confianza && (
