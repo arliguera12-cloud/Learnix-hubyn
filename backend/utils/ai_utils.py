@@ -878,6 +878,82 @@ def _llamar_groq(prompt: str) -> dict | None:
     return None
 
 
+# ─── Clasificación fiscal de compras (Anexo 3 / F-14, columnas S-V) ──────────
+# Catálogo oficial: Manual de Usuario para la Carga de Archivo del Anexo de
+# Retenciones de ISR — F-14 v16 (Ministerio de Hacienda, octubre 2025), p.5.
+_CATALOGO_TIPO_OPERACION = {"1": "Gravada", "2": "No Gravada", "3": "Excluido o no Constituye Renta", "4": "Mixta"}
+_CATALOGO_CLASIFICACION  = {"1": "Costo", "2": "Gasto"}
+_CATALOGO_SECTOR         = {"1": "Industria", "2": "Comercio", "3": "Agropecuaria", "4": "Servicios, Profesiones, Artes y Oficios"}
+_CATALOGO_TIPO_CG_COSTO  = {"4": "Costo artículos producidos/comprados — importación", "5": "Costo artículos producidos/comprados — interno", "6": "Costos indirectos de fabricación", "7": "Mano de obra"}
+_CATALOGO_TIPO_CG_GASTO  = {"1": "Gastos de venta sin donación", "2": "Gastos de administración sin donación", "3": "Gastos financieros sin donación"}
+
+
+def clasificar_gasto_con_ia(nom_prov: str, texto_pdf: str, monto: float) -> dict | None:
+    """
+    Sugiere la clasificación fiscal de una compra para las columnas Q-T del
+    Anexo 3 (Tipo de Operación, Clasificación, Sector, Tipo de Costo/Gasto),
+    según el catálogo oficial del Manual F-14 v16.
+
+    Antes se aplicaba un único valor fijo (Gravada/Gasto/Servicios/
+    Administración) a TODO un lote exportado sin importar el proveedor o
+    el tipo de gasto real de cada documento — el usuario tenía que revisar
+    y corregir a mano cada fila antes de declarar.
+
+    Retorna None si Groq no está disponible, si la respuesta no valida
+    contra el catálogo oficial, o ante cualquier error — el llamador
+    conserva entonces el valor por defecto fijo anterior, sin degradar
+    nada respecto al comportamiento previo.
+    """
+    if not gemini_disponible():
+        return None
+
+    extracto = ("" if texto_pdf is None else str(texto_pdf))[:2500]
+    prompt = f"""Clasificá esta compra de una empresa salvadoreña según el catálogo oficial del Ministerio de Hacienda (Manual F-14) para las columnas del Anexo 3 de compras.
+
+Proveedor: {nom_prov or "desconocido"}
+Monto: ${monto:.2f}
+Texto del documento (para ver la descripción de lo comprado):
+{extracto}
+
+Catálogo (elegí un código de cada uno):
+- tipo_operacion: "1"=Gravada, "2"=No Gravada, "3"=Excluido o no Constituye Renta, "4"=Mixta
+- clasificacion: "1"=Costo, "2"=Gasto
+- sector: "1"=Industria, "2"=Comercio, "3"=Agropecuaria, "4"=Servicios/Profesiones/Artes/Oficios
+- tipo_costo_gasto:
+  si clasificacion="1" (Costo): "4"=Costo import./internación, "5"=Costo interno, "6"=Costos indirectos de fabricación, "7"=Mano de obra
+  si clasificacion="2" (Gasto): "1"=Gastos de venta, "2"=Gastos de administración, "3"=Gastos financieros
+
+Guía de sentido común:
+- La mayoría de compras de una empresa de servicios/comercio (papelería, combustible, mantenimiento, cuotas, servicios profesionales) son Gravada + Gasto + Gastos de administración.
+- Es Costo solo si el detalle indica claramente materia prima, insumos para producir, o mercancía comprada para revender.
+- Es Gasto financiero si es interés, comisión bancaria o similar. Es Gasto de venta si es publicidad, comisión de venta, flete de venta.
+- Si el texto no da información suficiente para decidir con confianza, usá el default: tipo_operacion="1", clasificacion="2", sector="4", tipo_costo_gasto="2".
+
+Respondé SOLO con JSON: {{"tipo_operacion": "1", "clasificacion": "2", "sector": "4", "tipo_costo_gasto": "2"}}"""
+
+    resultado = _llamar_groq(prompt)
+    if not resultado:
+        return None
+
+    tipo_op = str(resultado.get("tipo_operacion", "")).strip()
+    clasif  = str(resultado.get("clasificacion", "")).strip()
+    sector  = str(resultado.get("sector", "")).strip()
+    tipo_cg = str(resultado.get("tipo_costo_gasto", "")).strip()
+
+    if tipo_op not in _CATALOGO_TIPO_OPERACION or clasif not in _CATALOGO_CLASIFICACION or sector not in _CATALOGO_SECTOR:
+        return None
+    catalogo_cg = _CATALOGO_TIPO_CG_COSTO if clasif == "1" else _CATALOGO_TIPO_CG_GASTO
+    if tipo_cg not in catalogo_cg:
+        return None
+
+    return {
+        "tipo_operacion": tipo_op,
+        "clasificacion": clasif,
+        "sector": sector,
+        "tipo_costo_gasto": tipo_cg,
+    }
+
+
 # ─── Normalización de montos ──────────────────────────────────────────────────
 
 def normalizar_monto_ia(raw) -> float | None:

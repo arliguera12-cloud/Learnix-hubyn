@@ -36,6 +36,17 @@ class DTEIdentificacion(_ModeloDTE):
     codigoGeneracion: str = ""
     fecEmi: str = ""
     horEmi: str = ""
+    # Normativa de Cumplimiento DTE 2.0 (obligatoria desde el 01/12/2026):
+    # el número de control pasa a ser consecutivo por establecimiento/punto
+    # de venta en vez de un único correlativo global. Estos campos ya
+    # existen en el JSON de Hacienda hoy (identifican dónde se emitió el
+    # documento) pero no se leían — se agregan tolerantes (no rompen nada
+    # si faltan) para no tener que tocar el schema de nuevo cuando 2.0 sea
+    # obligatorio. Aún no se usan en ningún cálculo del pipeline.
+    codEstableMH: str = ""
+    codEstable: str = ""
+    codPuntoVentaMH: str = ""
+    codPuntoVenta: str = ""
 
 
 class DTEEmisor(_ModeloDTE):
@@ -67,6 +78,14 @@ class DTEResumen(_ModeloDTE):
     totalIva: float = 0.0
     totalPagar: float = 0.0
     tributos: list[DTETributo] = Field(default_factory=list)
+    # DTE 2.0: desglose de forma de pago y saldo a favor. `pagos` trae
+    # forma de pago/monto/referencia por Hacienda; se captura como lista
+    # de dicts sin tipar cada campo (no hay un uso todavía en el pipeline,
+    # y tipar de más algo que no se usa es más riesgo de romper el parseo
+    # que beneficio).
+    pagos: list[dict] = Field(default_factory=list)
+    saldoFavor: float = 0.0
+    numPagoElectronico: str = ""
 
 
 class DTESujetoExcluido(_ModeloDTE):
@@ -83,3 +102,9 @@ class DTEDocumento(_ModeloDTE):
     receptor: DTEReceptor = Field(default_factory=DTEReceptor)
     resumen: DTEResumen = Field(default_factory=DTEResumen)
     sujetoExcluido: DTESujetoExcluido | None = None
+    # DTE 2.0: campos nuevos del esquema, capturados de forma tolerante.
+    # numeroDocumento reemplaza/acompaña al numeroControl en ciertos tipos;
+    # placaVehiculo aplica a documentos de transporte de carga.
+    numeroDocumento: str = ""
+    observaciones: str = ""
+    placaVehiculo: str = ""

@@ -19,6 +19,7 @@ from utils.ai_utils import (
     procesar_dte_con_gemini,
     es_nombre_sospechoso,
     verificar_compra_con_gemini,
+    clasificar_gasto_con_ia,
 )
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
@@ -1132,6 +1133,21 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 estado = "REVISION_MANUAL"
                 _detalle_confianza = f"Hacienda: {_mh_alerta}. " + _detalle_confianza
 
+            # Clasificación fiscal (Anexo 3, columnas Q-T) sugerida por IA a
+            # partir del proveedor y el detalle del documento — reemplaza el
+            # valor fijo único que antes se aplicaba a todo el lote al
+            # exportar (ver routers/exportar.py). Si Groq no está disponible
+            # o la clasificación no valida, se deja sin valor y el exportador
+            # sigue usando el default fijo — mismo comportamiento de antes.
+            _clasificacion_ia = clasificar_gasto_con_ia(nom_prov, texto_completo, tot)
+            tipo_operacion = clasificacion = sector = tipo_costo_gasto = ""
+            if _clasificacion_ia:
+                tipo_operacion   = _clasificacion_ia["tipo_operacion"]
+                clasificacion    = _clasificacion_ia["clasificacion"]
+                sector           = _clasificacion_ia["sector"]
+                tipo_costo_gasto = _clasificacion_ia["tipo_costo_gasto"]
+                fuentes["clasificacion_gasto"] = "ia"
+
             return {
                 "fecha"          : fecha,
                 "tipo"           : tipo,
@@ -1152,6 +1168,10 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 "tot"            : round(tot,  2),
                 "fovial"         : round(fovial,  2),
                 "cotrans"        : round(cotrans, 2),
+                "tipo_operacion"  : tipo_operacion,
+                "clasificacion"   : clasificacion,
+                "sector"          : sector,
+                "tipo_costo_gasto": tipo_costo_gasto,
                 "estado"              : estado,
                 "confianza"           : _confianza["score"],
                 "campos_faltantes"    : _confianza["campos_faltantes"],
