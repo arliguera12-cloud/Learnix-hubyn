@@ -62,6 +62,14 @@ def validar_montos_ventas(campos: dict) -> list[str]:
     total    = _monto(campos.get("total") if campos.get("total") is not None else campos.get("tot"))
     exentas  = _monto(campos.get("exentas") if campos.get("exentas") is not None else campos.get("exe"))
     no_suj   = _monto(campos.get("no_sujetas"))
+    # IVA retenido/percibido (1% al comprador designado agente de retención,
+    # o percepción al vendedor) reducen o aumentan el "Total a Pagar" del
+    # documento por debajo/encima de gravadas+exentas+no_suj+iva — sin
+    # restarlos/sumarlos acá, cualquier CCF con retención (frecuente:
+    # grandes contribuyentes comprándole a un contribuyente normal) dispara
+    # "Total no cuadra" aunque el documento esté matemáticamente correcto.
+    ret      = _monto(campos.get("ret"))
+    perc     = _monto(campos.get("perc"))
     tipo     = str(campos.get("tipo") or "")
 
     # DTE-01 (Factura, consumidor final): por ley salvadoreña el precio al
@@ -99,7 +107,7 @@ def validar_montos_ventas(campos: dict) -> list[str]:
             )
 
     if total > 0:
-        suma = round(gravadas + exentas + no_suj + iva, 2)
+        suma = round(gravadas + exentas + no_suj + iva - ret + perc, 2)
         if suma > 0 and abs(total - suma) > 0.10:
             alertas.append(
                 f"Total no cuadra: documento=${total:.2f}, "

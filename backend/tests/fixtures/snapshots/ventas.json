@@ -18,6 +18,25 @@
     "tipo": "01",
     "total": 57.0
   },
+  "FULLCHEM_ccf_con_retencion.pdf": {
+    "confianza": 100,
+    "deb_terc": 0.0,
+    "debito": 127.4,
+    "dui_cli": "",
+    "estado": "OK",
+    "exentas": 0.0,
+    "fecha": "03/08/2026",
+    "gen": "9CC63E96-76E6-4202-B81E-673636877A0E",
+    "gravadas": 980.0,
+    "nit_cli": "06141412921024",
+    "no_sujetas": 0.0,
+    "nom_cli": "INVERSIONES VIDA S.A. DE C.V.",
+    "num_control": "DTE03M001P001000000000000032",
+    "sello": "2026536A18FFB2324DD2A9A7A97DF272BEEBQGNU",
+    "terceros": 0.0,
+    "tipo": "03",
+    "total": 1107.4
+  },
   "agosto_venta_01.pdf": {
     "confianza": 100,
     "deb_terc": 0.0,
