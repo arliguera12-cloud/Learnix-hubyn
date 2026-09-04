@@ -213,7 +213,7 @@ export default function LandingPage() {
           </h1>
 
           {/* Manifiesto */}
-          <div className="animate-fade md:border-l md:border-hairline md:pl-10 md:pr-[220px]">
+          <div className="animate-fade md:border-l md:border-hairline md:pl-10">
             <p className="text-[11px] uppercase tracking-[0.2em] text-fg-4 font-semibold mb-4">
               Manifiesto
             </p>
