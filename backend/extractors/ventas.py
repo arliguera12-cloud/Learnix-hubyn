@@ -828,6 +828,18 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     fuentes["sello"] = "hacienda"
                 gemini_correcciones.append("Hacienda: montos verificados con la consulta pública")
 
+            # ── Total del Anexo: bruto, no neto de retención ───────────────────────
+            # El Anexo 1/2 de ventas declara gravadas+exentas+no_sujetas+IVA (lo que
+            # el emisor facturó) — el 1% de IVA retenido por un comprador designado
+            # agente de retención (o el percibido) es una cifra APARTE que se declara
+            # en su propio anexo/casilla, no algo que reste del total de esta venta.
+            # Tanto el regex ("Total a Pagar" se prioriza sobre "Monto Total de la
+            # Operación") como Hacienda (resumen.totalPagar) traen el monto NETO —
+            # sin este ajuste, el total de la venta quedaba de menos por el monto
+            # exacto de la retención.
+            if ret > 0 or perc > 0:
+                total = round(gravadas + exentas + no_sujetas + debito + perc, 2)
+
             # ── Visión SOLO si Hacienda + regex no alcanzan ───────────────────────
             # Antes Visión se lanzaba SIEMPRE en paralelo para cada documento del
             # lote, sin importar si ya había datos suficientes — eso saturaba el
@@ -846,7 +858,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 # el score en 60, forzando Visión aunque el documento ya
                 # esté completo.
                 "debito": debito, "exentas": exentas, "no_sujetas": no_sujetas,
-                "ret": ret, "perc": perc,
+                "perc": perc,  # ret NO se pasa: total ya es bruto (ver arriba), restarlo de nuevo duplicaría el ajuste
             }
             _confianza_pre_vision = calcular_confianza(_campos_pre_vision, "ventas")
             if _confianza_pre_vision["score"] < 85 and vision_disponible():
@@ -898,7 +910,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_cli": nom_cli, "gravadas": gravadas, "total": total,
                 "debito": debito, "exentas": exentas, "no_sujetas": no_sujetas,
-                "ret": ret, "perc": perc,
+                "perc": perc,  # ret NO se pasa: total ya es bruto (ver arriba), restarlo de nuevo duplicaría el ajuste
             }
             _confianza_pre = calcular_confianza(_campos_pre_ia, "ventas")
             if 50 <= _confianza_pre["score"] < 85 and gemini_disponible():
@@ -933,7 +945,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
                 "nom_cli": nom_cli, "gravadas": round(gravadas, 2), "debito": round(debito, 2),
                 "total": round(total, 2), "exentas": round(exentas, 2), "no_sujetas": round(no_sujetas, 2),
-                "ret": round(ret, 2), "perc": round(perc, 2),
+                "perc": round(perc, 2),
             }
             _confianza = calcular_confianza(_campos_finales, "ventas")
             if _confianza["score"] >= 85:
@@ -967,6 +979,11 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "terceros"      : round(terceros, 2),
                 "deb_terc"      : round(deb_terc, 2),
                 "total"         : round(total, 2),
+                # Informativos — NO están restados/sumados en "total" (ver nota
+                # más arriba): el anexo de ventas declara el monto bruto de la
+                # operación, la retención/percepción de IVA se declara aparte.
+                "ret"           : round(ret, 2),
+                "perc"          : round(perc, 2),
                 "estado"              : estado,
                 "confianza"           : _confianza["score"],
                 "campos_faltantes"    : _confianza["campos_faltantes"],
