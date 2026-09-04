@@ -45,14 +45,33 @@ def normalizar_unicode(texto: str) -> str:
     return texto
 
 
+# Un "palabrón" de 25+ letras seguidas sin espacio/dígito/puntuación en
+# medio no ocurre en un DTE real (nombres, direcciones, giros — todo trae
+# espacios) — es la firma de un PDF cuyo font/kerning hace que el
+# x_tolerance por defecto de pdfplumber (3) fusione palabras adyacentes en
+# una sola ("ESAUHERIBERTOESCOBARRAMOS OSCAREDUARDOVALDIZONAMAYA" en vez de
+# "ESAU HERIBERTO ESCOBAR RAMOS OSCAR EDUARDO VALDIZON AMAYA") — sin
+# separación entre nombres, ninguna regex de emisor/receptor puede
+# distinguirlos.
+_PALABRON_FUSIONADO = re.compile(r"[A-Za-zÁÉÍÓÚÑÜáéíóúñü]{25,}")
+
+
 def safe_extract_text(page, layout: bool = False) -> str:
     try:
-        return safe_str(page.extract_text(layout=layout))
+        texto = safe_str(page.extract_text(layout=layout))
     except Exception:
         try:
             return safe_str(page.extract_text())
         except Exception:
             return ""
+    if _PALABRON_FUSIONADO.search(texto):
+        try:
+            texto_ajustado = safe_str(page.extract_text(layout=layout, x_tolerance=1))
+            if not _PALABRON_FUSIONADO.search(texto_ajustado):
+                return texto_ajustado
+        except Exception:
+            pass
+    return texto
 
 
 # ──────────────────────────────────────────────
