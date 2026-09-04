@@ -35,7 +35,7 @@ export function ErrorBox({ mensaje }) {
     <div className="card border-l-2 border-l-red-500 border-y-0 border-r-0 bg-panel">
       <p className="text-red-400 font-semibold text-sm flex items-center gap-1.5 mb-2">
         <IconAlerta className="w-4 h-4 shrink-0" />
-        {lineas.length > 1 ? `${lineas.length} documentos con error` : 'Error'}
+        {lineas.length > 1 ? `${lineas.length} documentos no procesados` : 'Documento no procesado'}
       </p>
       <ul className="space-y-1.5">
         {visibles.map((linea, i) => {
