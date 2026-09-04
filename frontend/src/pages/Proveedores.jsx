@@ -14,6 +14,9 @@ export default function Proveedores() {
   const [organizacionId, setOrganizacionId] = useState(null)
   const [guardando,      setGuardando]      = useState(false)
   const [aviso,          setAviso]          = useState(null)
+  const [seleccion,      setSeleccion]      = useState(new Set())
+  const [eliminando,     setEliminando]     = useState(false)
+  const [soloDuplicados, setSoloDuplicados] = useState(false)
 
   const [form, setForm] = useState({ nit: '', nombre: '', nrc: '' })
 
@@ -34,10 +37,38 @@ export default function Proveedores() {
     })
   }, [])
 
+  // Posibles duplicados: mismo nombre comercial normalizado. El NIT ya es
+  // único a nivel de base de datos, así que un duplicado real solo puede
+  // darse por el nombre — dos registros para el mismo proveedor con NIT
+  // distinto (typo, sucursal cargada aparte, etc.).
+  const nombreNormalizado = p => (p.nombre_comercial || '').trim().toUpperCase().replace(/\s+/g, ' ')
+  const conteoPorNombre = todos.reduce((acc, p) => {
+    const k = nombreNormalizado(p)
+    if (k) acc[k] = (acc[k] || 0) + 1
+    return acc
+  }, {})
+  const idsDuplicados = new Set(todos.filter(p => conteoPorNombre[nombreNormalizado(p)] > 1).map(p => p.id))
+  const gruposDuplicados = new Set(Object.entries(conteoPorNombre).filter(([, n]) => n > 1).map(([k]) => k)).size
+
   const filtrados = todos.filter(p =>
-    p.nombre_comercial?.toLowerCase().includes(busqueda.toLowerCase()) ||
-    p.nit?.includes(busqueda)
+    (p.nombre_comercial?.toLowerCase().includes(busqueda.toLowerCase()) ||
+     p.nit?.includes(busqueda)) &&
+    (!soloDuplicados || idsDuplicados.has(p.id))
   )
+
+  function alternarSeleccion(id) {
+    setSeleccion(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function alternarSeleccionTodos() {
+    setSeleccion(prev =>
+      prev.size === filtrados.length ? new Set() : new Set(filtrados.map(p => p.id))
+    )
+  }
 
   async function agregar(e) {
     e.preventDefault()
@@ -89,7 +120,33 @@ export default function Proveedores() {
       setAviso({ tipo: 'error', texto: 'Solo un administrador de la organización puede eliminar proveedores.' })
     } else {
       setTodos(prev => prev.filter(p => p.id !== proveedor.id))
+      setSeleccion(prev => { const n = new Set(prev); n.delete(proveedor.id); return n })
     }
+  }
+
+  async function eliminarSeleccionados() {
+    const ids = [...seleccion]
+    if (!ids.length) return
+    if (!window.confirm(
+      `¿Eliminar ${ids.length} proveedor${ids.length > 1 ? 'es' : ''} seleccionado${ids.length > 1 ? 's' : ''}? Esta acción no se puede deshacer.`
+    )) return
+
+    setEliminando(true)
+    const { error, count } = await supabase.from('proveedores').delete({ count: 'exact' }).in('id', ids)
+    setEliminando(false)
+
+    if (error) {
+      setAviso({ tipo: 'error', texto: error.message })
+      return
+    }
+    setTodos(prev => prev.filter(p => !seleccion.has(p.id)))
+    setSeleccion(new Set())
+    setAviso({
+      tipo: 'ok',
+      texto: count === ids.length
+        ? `${count} proveedor${count > 1 ? 'es' : ''} eliminado${count > 1 ? 's' : ''}.`
+        : `${count} de ${ids.length} eliminados — los demás requieren permisos de administrador.`,
+    })
   }
 
   return (
@@ -128,14 +185,48 @@ export default function Proveedores() {
         </form>
       </div>
 
-      <div>
+      <div className="flex items-center gap-3 flex-wrap">
         <input
           className="input max-w-xs"
           placeholder="Buscar por nombre o NIT…"
           value={busqueda}
           onChange={e => setBusqueda(e.target.value)}
         />
+        {gruposDuplicados > 0 && (
+          <button
+            type="button"
+            onClick={() => setSoloDuplicados(v => !v)}
+            className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+              soloDuplicados
+                ? 'bg-amber-500/20 border-amber-500 text-amber-400'
+                : 'border-hairline text-fg-4 hover:text-fg-2'
+            }`}
+          >
+            {soloDuplicados ? 'Viendo' : 'Ver'} posibles duplicados ({gruposDuplicados})
+          </button>
+        )}
       </div>
+
+      {seleccion.size > 0 && (
+        <div className="card border-l-2 border-l-accent border-y-0 border-r-0 bg-panel flex items-center justify-between gap-3 py-3">
+          <p className="text-sm text-fg-2">
+            {seleccion.size} proveedor{seleccion.size > 1 ? 'es' : ''} seleccionado{seleccion.size > 1 ? 's' : ''}
+          </p>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setSeleccion(new Set())} className="btn-ghost text-xs px-3 py-1.5 text-fg-4">
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={eliminarSeleccionados}
+              disabled={eliminando}
+              className="btn-ghost text-xs px-3 py-1.5 text-red-400 hover:text-red-300 border border-red-800/50"
+            >
+              {eliminando ? 'Eliminando…' : `Eliminar seleccionados`}
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <p className="text-red-400 text-sm">{error}</p>}
 
@@ -151,6 +242,14 @@ export default function Proveedores() {
             <table className="w-full">
               <thead>
                 <tr>
+                  <th className="table-head text-left w-8">
+                    <input
+                      type="checkbox"
+                      checked={filtrados.length > 0 && seleccion.size === filtrados.length}
+                      onChange={alternarSeleccionTodos}
+                      aria-label="Seleccionar todos"
+                    />
+                  </th>
                   {['NIT', 'Nombre', 'NRC', ''].map(h => (
                     <th key={h} className="table-head text-left">{h}</th>
                   ))}
@@ -158,9 +257,29 @@ export default function Proveedores() {
               </thead>
               <tbody>
                 {filtrados.map(p => (
-                  <tr key={p.id} className="hover:bg-surface-700/50 transition-colors">
+                  <tr
+                    key={p.id}
+                    className={`hover:bg-surface-700/50 transition-colors ${
+                      idsDuplicados.has(p.id) ? 'bg-amber-500/5' : ''
+                    }`}
+                  >
+                    <td className="table-cell">
+                      <input
+                        type="checkbox"
+                        checked={seleccion.has(p.id)}
+                        onChange={() => alternarSeleccion(p.id)}
+                        aria-label={`Seleccionar ${p.nombre_comercial}`}
+                      />
+                    </td>
                     <td className="table-cell font-mono text-xs text-slate-300">{p.nit}</td>
-                    <td className="table-cell font-medium text-slate-100">{p.nombre_comercial}</td>
+                    <td className="table-cell font-medium text-slate-100">
+                      {p.nombre_comercial}
+                      {idsDuplicados.has(p.id) && (
+                        <span className="ml-2 text-[0.65rem] text-amber-400 font-semibold uppercase tracking-wide">
+                          posible duplicado
+                        </span>
+                      )}
+                    </td>
                     <td className="table-cell font-mono text-xs">{p.nrc || '—'}</td>
                     <td className="table-cell text-right">
                       <button onClick={() => eliminar(p)} className="btn-ghost text-xs text-red-400 hover:text-red-300 px-2 py-1">
