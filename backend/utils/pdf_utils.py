@@ -115,6 +115,37 @@ def extraer_texto_pdf(file_bytes: bytes) -> tuple:
     return normalizar_unicode(texto_lineal), normalizar_unicode(texto_visual)
 
 
+def extraer_texto_fitz(file_bytes: bytes) -> str:
+    """
+    Extracción de respaldo con PyMuPDF (fitz), para cuando pdfplumber
+    produce texto incompleto/desordenado en un PDF con layout inusual
+    (texto superpuesto o posicionado de forma no estándar).
+
+    Caso real: una factura de servicios (DELSUR) donde pdfplumber nunca
+    llegaba a extraer la línea "Total del Mes" (el monto correcto,
+    excluyendo saldo pendiente de meses anteriores) por más que el resto
+    del documento sí se leyera — quedaba fuera del orden de lectura que
+    pdfplumber reconstruye. fitz usa un algoritmo de extracción distinto y
+    sí la capturaba.
+
+    Nunca lanza excepción — si fitz no está instalado o falla con este
+    PDF en particular, retorna "" y el llamador sigue solo con
+    pdfplumber (comportamiento actual, sin regresión).
+    """
+    try:
+        import fitz
+    except Exception:
+        return ""
+    try:
+        texto = ""
+        with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+            for page in doc:
+                texto += page.get_text() + "\n"
+        return normalizar_unicode(texto)
+    except Exception:
+        return ""
+
+
 # ──────────────────────────────────────────────
 # NOMBRE DEL RECEPTOR POR COLUMNAS (anti-entrelazado)
 # ──────────────────────────────────────────────

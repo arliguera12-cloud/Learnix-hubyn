@@ -242,6 +242,27 @@
     "tipo": "03",
     "tot": 430.74
   },
+  "OSCAR_delsur_saldo_pendiente.pdf": {
+    "confianza": 100,
+    "cotrans": 0.0,
+    "dui_prov": "",
+    "error_tipo": null,
+    "estado": "OK",
+    "exe": 0.0,
+    "fecha": "05/08/2026",
+    "fovial": 0.0,
+    "gen": "2BC5A33B-872F-4D6D-919B-4C439B07F005",
+    "gra": 224.34,
+    "iva": 29.16,
+    "nit_prov": "06141611951013",
+    "nom_prov": "DISTRIBUIDORA DE ELECTRICIDAD DEL SUR, S.A. DE C.V",
+    "num_control": "DTE03M001P001000000000075373",
+    "perc": 0.0,
+    "ret": 0.0,
+    "sello": "20266F27A6B5E0F742C79089094D4035ABA06ZTQ",
+    "tipo": "03",
+    "tot": 253.5
+  },
   "OSCAR_distribuidora_axben.pdf": {
     "confianza": 100,
     "cotrans": 0.0,
