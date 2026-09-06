@@ -21,19 +21,17 @@ from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
 from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta
 from utils.qa_utils import calcular_confianza
-from utils.local_db import cargar_proveedores_combinados
 
 
 
-def cargar_proveedores_json() -> dict:
+def cargar_proveedores_json(organizacion_id: str) -> dict:
     """
-    Retorna dict combinado {nit: {nombre, nrc}}:
-    - Catálogo global (proveedores_globales) como base
-    - Catálogo privado de la org encima con prioridad
+    Retorna dict combinado {nit: {nombre, nrc}} del catálogo privado de la
+    organización.
     """
     try:
         from utils.local_db import cargar_proveedores_combinados
-        return cargar_proveedores_combinados()
+        return cargar_proveedores_combinados(organizacion_id)
     except Exception:
         return {}
 
@@ -204,7 +202,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             ids_limp   = list(dict.fromkeys(re.sub(r'[^0-9]', '', n) for n in ids_raw))
             candidatos = [n for n in ids_limp if n != nit_cliente and len(n) == 14]
 
-            proveedores_db = cargar_proveedores_json()
+            proveedores_db = cargar_proveedores_json(cliente_activo.get("organizacion_id", ""))
             for n in candidatos:
                 if n in proveedores_db:
                     nit_prov = n

@@ -404,15 +404,34 @@ export function descargarBlob(blobData, nombre) {
  *
  * El código de generación (UUID que asigna Hacienda) es único por documento:
  * el mismo DTE subido como PDF y como JSON trae el mismo código. Si falta, se
- * recurre al número de control, que también es irrepetible por emisor.
+ * recurre al número de control, que también es irrepetible por emisor, y
+ * después al sello de recepción de Hacienda.
+ *
+ * Cuando no hay ninguno de los tres —extracciones parciales de un PDF
+ * escaneado, sobre todo— se arma una clave con los datos que identifican la
+ * operación (fecha, contraparte, tipo e importe). Es más débil que un UUID,
+ * pero antes esos documentos no se comparaban con nada: subir dos veces el
+ * mismo archivo mal extraído sumaba las dos copias al anexo y duplicaba el
+ * crédito fiscal, que es justo lo que la deduplicación existe para evitar.
  */
 function claveDocumento(registro) {
   const r = registro || {}
-  const gen = String(r.gen || r.gen_sin_guiones || '').replace(/-/g, '').toUpperCase()
+  const limpio = (v) => String(v ?? '').replace(/-/g, '').toUpperCase().trim()
+
+  const gen = limpio(r.gen || r.gen_sin_guiones)
   if (gen) return `gen:${gen}`
-  const ctrl = String(r.num_control || r.num_control_raw || '').replace(/-/g, '').toUpperCase()
+  const ctrl = limpio(r.num_control || r.num_control_raw)
   if (ctrl) return `ctrl:${ctrl}`
-  return '' // Sin identificador no se puede afirmar que sea repetido.
+  const sello = limpio(r.sello)
+  if (sello) return `sello:${sello}`
+
+  const fecha = limpio(r.fecha)
+  const contraparte = limpio(r.nit_prov || r.nit_cli || r.dui_prov || r.dui_cli)
+  const importe = limpio(r.tot ?? r.total)
+  if (fecha && contraparte && importe) {
+    return `op:${fecha}|${contraparte}|${limpio(r.tipo)}|${importe}`
+  }
+  return '' // Sin ningún dato identificador no se puede afirmar que sea repetido.
 }
 
 /**
@@ -421,8 +440,9 @@ function claveDocumento(registro) {
  * Es habitual subir el mismo DTE dos veces —el PDF y el JSON del mismo
  * documento, o un lote que se solapa con otro anterior— y cada copia sumaba
  * otra fila: los totales del anexo salían inflados y el crédito fiscal se
- * contaba doble. Un documento sin código de generación ni número de control no
- * se descarta, porque ahí no hay forma de afirmar que sea el mismo.
+ * contaba doble. Un documento del que no se pudo extraer ningún dato
+ * identificador (ver claveDocumento) no se descarta, porque ahí no hay forma
+ * de afirmar que sea el mismo.
  *
  * Devuelve `{ lista, agregados, duplicados }`: la lista fusionada, los
  * documentos realmente incorporados —que son los que deben persistirse— y los

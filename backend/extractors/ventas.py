@@ -89,11 +89,11 @@ def es_linea_direccion(texto: str) -> bool:
 
 
 
-def cargar_clientes_json() -> dict:
-    """Carga los clientes desde almacenamiento local y los retorna como dict{nit: {...}}."""
+def cargar_clientes_json(organizacion_id: str) -> dict:
+    """Carga los clientes de una organización y los retorna como dict{nit: {...}}."""
     try:
         from utils.local_db import cargar_clientes_db
-        lista = cargar_clientes_db()
+        lista = cargar_clientes_db(organizacion_id)
         return {
             c["nit"]: {
                 "nombre":    c.get("nombre_comercial", ""),
@@ -413,7 +413,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             es_nuevo    = True
             pos_nit_rec = -1
             if clientes_db is None:
-                clientes_db = cargar_clientes_json()
+                clientes_db = cargar_clientes_json(cliente_activo.get("organizacion_id", ""))
 
             # Separar sección del receptor del texto
             # El encabezado del receptor no siempre lleva dos puntos: los DTE de

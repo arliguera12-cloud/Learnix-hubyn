@@ -19,6 +19,7 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
   const inputRef = useRef(null)
   const [files, setFiles] = useState([])
   const [dragging, setDragging] = useState(false)
+  const [avisoArchivos, setAvisoArchivos] = useState(null)
 
   const { clienteActivo, setClienteActivo } = useClienteActivo()
   const [modoManual, setModoManual] = useState(false)
@@ -33,11 +34,29 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clienteActivo?.nit])
 
+  // Espejo de los límites que aplica el backend (routers/procesamiento.py).
+  // Acá solo se filtra para dar aviso inmediato en vez de esperar el error del
+  // servidor: la validación que cuenta es la del backend, que además comprueba
+  // que el contenido sea realmente un PDF y no solo que el nombre lo diga.
+  const LIMITES_MB = { pdf: 10, json: 2 }
+
   function handleFiles(selected) {
+    const rechazados = []
     const validos = Array.from(selected).filter(f => {
-      const name = f.name.toLowerCase()
-      return name.endsWith('.pdf') || name.endsWith('.json')
+      const ext = f.name.toLowerCase().endsWith('.pdf') ? 'pdf'
+        : f.name.toLowerCase().endsWith('.json') ? 'json'
+        : null
+      if (!ext) {
+        rechazados.push(`«${f.name}»: solo se aceptan archivos PDF o JSON.`)
+        return false
+      }
+      if (f.size > LIMITES_MB[ext] * 1024 * 1024) {
+        rechazados.push(`«${f.name}» supera los ${LIMITES_MB[ext]} MB permitidos.`)
+        return false
+      }
+      return true
     })
+    setAvisoArchivos(rechazados.join('\n') || null)
     setFiles(validos)
   }
 
@@ -67,6 +86,7 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
 
   function limpiarArchivos() {
     setFiles([])
+    setAvisoArchivos(null)
     if (inputRef.current) inputRef.current.value = ''
   }
 
@@ -166,6 +186,12 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
             onChange={e => handleFiles(e.target.files)}
           />
         </div>
+
+        {avisoArchivos && (
+          <p className="mt-2 text-xs text-amber-400 whitespace-pre-line" role="alert">
+            {avisoArchivos}
+          </p>
+        )}
 
         {loteGrande && (
           <p className="mt-2 text-xs text-fg-4">

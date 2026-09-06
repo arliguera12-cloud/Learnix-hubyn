@@ -12,13 +12,19 @@ descarga, expuesta ahora como API para el frontend React.
 Las credenciales (API Key de Drive, contraseña de aplicación de Gmail) solo
 viven en memoria durante el request; no se persisten ni se registran en
 logs.
+
+Estos endpoints prueban credenciales de terceros contra Google, así que
+llevan un límite propio por usuario además del límite general por IP: sin él,
+el backend servía de proxy para intentar contraseñas de aplicación de Gmail
+o API keys de Drive a ritmo de IP rotada.
 """
 from __future__ import annotations
 
 import base64
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from middleware.rate_limit import consumir_cupo
 from schemas.importar import (
     DriveDescargarRequest,
     DriveListarRequest,
@@ -30,9 +36,23 @@ from utils.gmail_utils import GmailError, buscar_adjuntos
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
+# Un usuario legítimo conecta su Drive o Gmail unas pocas veces por minuto;
+# probar credenciales requiere órdenes de magnitud más.
+_INTENTOS_POR_MINUTO = 10
+
+
+def _limitar_por_usuario(operacion: str, user: dict) -> None:
+    if not consumir_cupo(f"{operacion}:{user['user_id']}", _INTENTOS_POR_MINUTO):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Demasiados intentos de conexión — espera un minuto",
+            headers={"Retry-After": "60"},
+        )
+
 
 @router.post("/drive/listar")
-def drive_listar(datos: DriveListarRequest):
+def drive_listar(datos: DriveListarRequest, user: dict = Depends(get_current_user)):
+    _limitar_por_usuario("drive", user)
     try:
         archivos = listar_archivos(
             datos.api_key,
@@ -46,7 +66,8 @@ def drive_listar(datos: DriveListarRequest):
 
 
 @router.post("/drive/descargar")
-def drive_descargar(datos: DriveDescargarRequest):
+def drive_descargar(datos: DriveDescargarRequest, user: dict = Depends(get_current_user)):
+    _limitar_por_usuario("drive", user)
     items = [item.model_dump() for item in datos.archivos]
     archivos_ok, errores = descargar_como_drivefiles(datos.api_key, items)
     return {
@@ -63,7 +84,8 @@ def drive_descargar(datos: DriveDescargarRequest):
 
 
 @router.post("/gmail/buscar")
-def gmail_buscar(datos: GmailBuscarRequest):
+def gmail_buscar(datos: GmailBuscarRequest, user: dict = Depends(get_current_user)):
+    _limitar_por_usuario("gmail", user)
     try:
         adjuntos = buscar_adjuntos(
             datos.email,

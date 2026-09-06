@@ -6,15 +6,14 @@ Reemplaza el almacenamiento anterior en JSON sobre el filesystem del backend
 (backend/data/*.json), que se perdía en cada redeploy de Railway (filesystem
 efímero).
 
-Compatibilidad: todas las funciones mantienen la misma firma e interfaz que
-la versión JSON (mismos nombres, mismos tipos de retorno) para no romper a
-los extractors/routers que ya las importan. Se agregó un parámetro opcional
-`organizacion_id` al final de cada función — por defecto None, que preserva
-el comportamiento histórico (un directorio compartido, sin distinción de
-organización, igual que el JSON plano de antes). Los llamadores actuales
-(extractors, /procesar/declarantes) no pasan este parámetro; queda disponible
-para cuando se enhebre el contexto de organización/usuario a través de esas
-rutas, lo cual está fuera de alcance de esta migración.
+Aislamiento entre organizaciones: `organizacion_id` es obligatorio en todas
+las funciones. El backend habla con Supabase con la service key, que bypassa
+RLS, así que las políticas por organización de db/06 no se aplican acá — el
+filtro tiene que hacerlo este módulo. Antes el parámetro era opcional y todos
+los llamadores lo omitían, con lo que las filas quedaban con
+`organizacion_id IS NULL` y cualquier usuario autenticado leía, sobrescribía
+y borraba el directorio de cualquier otro tenant. Las filas legadas sin
+organización se reasignan con db/08_org_scope_directorio.sql.
 """
 from __future__ import annotations
 
@@ -47,10 +46,10 @@ _CACHE_PROVEEDORES_COMBINADOS = "proveedores_combinados"
 # servir datos desactualizados si alguien edita el directorio entre subidas.
 _TTL_SEGUNDOS = 30
 _cache_lock = threading.Lock()
-_cache: dict[tuple[str, str | None], tuple[float, object]] = {}
+_cache: dict[tuple[str, str], tuple[float, object]] = {}
 
 
-def _cache_get_or_load(clave_cache: str, organizacion_id: str | None, cargar):
+def _cache_get_or_load(clave_cache: str, organizacion_id: str, cargar):
     clave = (clave_cache, organizacion_id)
     ahora = time.monotonic()
     with _cache_lock:
@@ -63,16 +62,22 @@ def _cache_get_or_load(clave_cache: str, organizacion_id: str | None, cargar):
     return valor
 
 
-def _org_eq(query, organizacion_id: str | None):
-    """Filtra por organizacion_id, o por filas sin organización (legado) si es None."""
-    if organizacion_id is None:
-        return query.is_("organizacion_id", "null")
+def _org_eq(query, organizacion_id: str):
+    """Restringe la consulta a una organización. Nunca acepta un scope vacío:
+    sin `organizacion_id` la consulta abarcaría el directorio de todos los
+    tenants, así que es un error de programación, no un caso a tolerar."""
+    _exigir_org(organizacion_id)
     return query.eq("organizacion_id", organizacion_id)
+
+
+def _exigir_org(organizacion_id: str) -> None:
+    if not organizacion_id:
+        raise ValueError("organizacion_id es obligatorio para operar sobre el directorio")
 
 
 # ── Clientes ──────────────────────────────────────────────────────────────────
 
-def _cargar_clientes_db_sin_cache(organizacion_id: str | None) -> list[dict]:
+def _cargar_clientes_db_sin_cache(organizacion_id: str) -> list[dict]:
     try:
         query = get_supabase().table(_CLIENTES_TABLE).select("*")
         resp = _org_eq(query, organizacion_id).order("nombre_comercial").execute()
@@ -82,7 +87,8 @@ def _cargar_clientes_db_sin_cache(organizacion_id: str | None) -> list[dict]:
         return []
 
 
-def cargar_clientes_db(organizacion_id: str | None = None) -> list[dict]:
+def cargar_clientes_db(organizacion_id: str) -> list[dict]:
+    _exigir_org(organizacion_id)
     return _cache_get_or_load(
         _CACHE_CLIENTES, organizacion_id, lambda: _cargar_clientes_db_sin_cache(organizacion_id)
     )
@@ -91,11 +97,12 @@ def cargar_clientes_db(organizacion_id: str | None = None) -> list[dict]:
 def guardar_cliente_db(
     nit: str,
     nombre: str,
+    organizacion_id: str,
     nrc: str = "",
     dui: str = "",
     actividad: str = "",
-    organizacion_id: str | None = None,
 ) -> tuple[bool, str]:
+    _exigir_org(organizacion_id)
     try:
         row = {
             "nit":              nit,
@@ -121,10 +128,16 @@ def guardar_cliente_db(
         return False, str(exc)
 
 
-def eliminar_cliente_db(cliente_id: str, organizacion_id: str | None = None) -> bool:
+def eliminar_cliente_db(cliente_id: str, organizacion_id: str) -> bool:
+    _exigir_org(organizacion_id)
     try:
         sb = get_supabase()
-        resp = sb.table(_CLIENTES_TABLE).delete().eq("id", cliente_id).execute()
+        # El borrado por `id` también se restringe a la organización: el id es
+        # un UUID que llega del cliente y, sin este filtro, valía para borrar
+        # la fila de cualquier otro tenant que lo conociera.
+        resp = _org_eq(
+            sb.table(_CLIENTES_TABLE).delete().eq("id", cliente_id), organizacion_id
+        ).execute()
         if not resp.data:
             _org_eq(
                 sb.table(_CLIENTES_TABLE).delete().eq("nit", cliente_id), organizacion_id
@@ -139,7 +152,8 @@ def eliminar_cliente_db(cliente_id: str, organizacion_id: str | None = None) -> 
 
 # ── Proveedores ───────────────────────────────────────────────────────────────
 
-def cargar_proveedores_db(organizacion_id: str | None = None) -> list[dict]:
+def cargar_proveedores_db(organizacion_id: str) -> list[dict]:
+    _exigir_org(organizacion_id)
     try:
         query = get_supabase().table(_PROVEEDORES_TABLE).select("*")
         resp = _org_eq(query, organizacion_id).order("nombre_comercial").execute()
@@ -150,8 +164,9 @@ def cargar_proveedores_db(organizacion_id: str | None = None) -> list[dict]:
 
 
 def guardar_proveedor_db(
-    nit: str, nombre: str, nrc: str = "", organizacion_id: str | None = None
+    nit: str, nombre: str, organizacion_id: str, nrc: str = ""
 ) -> bool:
+    _exigir_org(organizacion_id)
     try:
         row = {
             "nit":              nit,
@@ -175,10 +190,13 @@ def guardar_proveedor_db(
         return False
 
 
-def eliminar_proveedor_db(proveedor_id: str, organizacion_id: str | None = None) -> bool:
+def eliminar_proveedor_db(proveedor_id: str, organizacion_id: str) -> bool:
+    _exigir_org(organizacion_id)
     try:
         sb = get_supabase()
-        resp = sb.table(_PROVEEDORES_TABLE).delete().eq("id", proveedor_id).execute()
+        resp = _org_eq(
+            sb.table(_PROVEEDORES_TABLE).delete().eq("id", proveedor_id), organizacion_id
+        ).execute()
         if not resp.data:
             _org_eq(
                 sb.table(_PROVEEDORES_TABLE).delete().eq("nit", proveedor_id), organizacion_id
@@ -191,7 +209,8 @@ def eliminar_proveedor_db(proveedor_id: str, organizacion_id: str | None = None)
         return False
 
 
-def buscar_proveedor_por_nit(nit: str, organizacion_id: str | None = None) -> dict | None:
+def buscar_proveedor_por_nit(nit: str, organizacion_id: str) -> dict | None:
+    _exigir_org(organizacion_id)
     if not nit:
         return None
     try:
@@ -207,8 +226,9 @@ def buscar_proveedor_por_nit(nit: str, organizacion_id: str | None = None) -> di
 
 
 def auto_registrar_proveedor(
-    nit: str, nombre: str, nrc: str = "", organizacion_id: str | None = None
+    nit: str, nombre: str, organizacion_id: str, nrc: str = ""
 ) -> bool:
+    _exigir_org(organizacion_id)
     if not nit or not nombre.strip():
         return False
     if buscar_proveedor_por_nit(nit, organizacion_id):
@@ -216,7 +236,7 @@ def auto_registrar_proveedor(
     return guardar_proveedor_db(nit=nit, nombre=nombre, nrc=nrc, organizacion_id=organizacion_id)
 
 
-def _cargar_proveedores_combinados_sin_cache(organizacion_id: str | None) -> dict:
+def _cargar_proveedores_combinados_sin_cache(organizacion_id: str) -> dict:
     try:
         query = get_supabase().table(_PROVEEDORES_TABLE).select("nit,nombre_comercial,nrc")
         resp = _org_eq(query, organizacion_id).execute()
@@ -229,7 +249,8 @@ def _cargar_proveedores_combinados_sin_cache(organizacion_id: str | None) -> dic
         return {}
 
 
-def cargar_proveedores_combinados(organizacion_id: str | None = None) -> dict:
+def cargar_proveedores_combinados(organizacion_id: str) -> dict:
+    _exigir_org(organizacion_id)
     return _cache_get_or_load(
         _CACHE_PROVEEDORES_COMBINADOS,
         organizacion_id,
