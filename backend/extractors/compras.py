@@ -13,6 +13,7 @@ from utils.pdf_utils import (
     limpiar_monto,
     extraer_y_formatear_fecha,
     extraer_texto_pdf,
+    extraer_texto_fitz,
 )
 from utils.ai_utils import (
     gemini_disponible,
@@ -92,6 +93,14 @@ def _cortar_antes_de_receptor(texto: str, estricto: bool = False) -> str | None:
             # como límite "válido", pero tan al final que el corte incluía
             # igualmente toda la sección de totales de en medio.
             if re.search(r'(?:^\s*EMISOR|RESPONSABLE\s+POR\s+PARTE\s+DEL)\s*$', antes, re.I):
+                continue
+            # "Estimado Cliente:" es un saludo de atención al cliente (común
+            # en facturas de servicios), no el inicio de una sección de
+            # datos del receptor — sin esta excepción, cortaba ahí en
+            # facturas de DELSUR donde la info de la cuenta del cliente
+            # viene ANTES que los datos legales del propio emisor, dejando
+            # fuera del corte justamente la sección que se necesitaba.
+            if re.search(r'ESTIMADO\s*$', antes, re.I):
                 continue
             return texto[:m.start()]
     return None if estricto else texto
@@ -850,6 +859,22 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 nombre_encontrado = extraer_nombre_emisor(texto_lineal, nit_prov, nom_receptor)
                 if not nombre_encontrado:
                     nombre_encontrado = extraer_nombre_emisor(texto_visual, nit_prov, nom_receptor)
+                # Facturas de servicios (energía/agua) con mora: el layout
+                # trae la info de cuenta/contrato del RECEPTOR primero y los
+                # datos legales del EMISOR después, en una sección que
+                # pdfplumber suele desordenar junto con avisos de cobranza —
+                # las dos extracciones de arriba SÍ encuentran "un" nombre
+                # (no quedan vacías), pero de la sección de cuenta del
+                # receptor, no del emisor real. fitz sí conserva el orden
+                # correcto; se prioriza su resultado sobre el de
+                # texto_lineal/visual solo con la misma señal barata usada
+                # para el total ("saldo pendiente"), no en cada documento.
+                if re.search(r'[Ss]aldo\s+pendiente', texto_completo, re.I):
+                    _nombre_fitz = extraer_nombre_emisor(
+                        extraer_texto_fitz(file_bytes), nit_prov, nom_receptor
+                    )
+                    if _nombre_fitz:
+                        nombre_encontrado = _nombre_fitz
                 nom_prov = nombre_encontrado if nombre_encontrado else ""
 
             # ── Guard: emisor no puede ser el mismo que el receptor ──────────────
@@ -948,12 +973,40 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 r'[Vv]alor\s+[Tt]otal\s+a\s+[Pp]agar\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'[Tt]OTAL\s*:?\s*\$?\s*(\d[\d,.]+)',
             ]
-            if re.search(r'[Tt]otal\s+del\s+[Mm]es', t_clean):
+            _t_clean_tot = t_clean
+            if re.search(r'[Ss]aldo\s+pendiente', t_clean, re.I) and not re.search(r'[Tt]otal\s+del\s+[Mm]es', t_clean, re.I):
+                # pdfplumber a veces pierde por completo la línea "Total del
+                # Mes" en facturas de servicios con layout inusual (texto
+                # superpuesto) — pasó con una factura real de DELSUR, donde
+                # el resto del documento se leía bien pero esa línea nunca
+                # aparecía. fitz (PyMuPDF) usa otro algoritmo de extracción
+                # y sí la captura; se intenta solo en este caso puntual
+                # (saldo pendiente presente = candidato a "Total a Pagar"
+                # inflado con deuda vieja) para no gastar el costo extra en
+                # el resto de documentos, que ya funcionan bien.
+                _texto_fitz = extraer_texto_fitz(file_bytes)
+                if re.search(r'[Tt]otal\s+del\s+[Mm]es', _texto_fitz, re.I):
+                    _t_clean_tot = re.sub(r'[ \t]+', ' ', _texto_fitz)
+                    # También se agrega al t_clean general (no se reemplaza,
+                    # solo se suma) para que la búsqueda de gravadas/IVA más
+                    # abajo —incluida la reconciliación matemática, que
+                    # escanea TODOS los montos de t_clean— vea también los
+                    # montos ya limpios de fitz en vez de solo los de
+                    # pdfplumber (que en este mismo documento venían
+                    # desordenados por el layout inusual).
+                    t_clean = t_clean + "\n" + _t_clean_tot
+            if re.search(r'[Tt]otal\s+del\s+[Mm]es', _t_clean_tot, re.I):
+                # (?i:...) en vez de re.I en la búsqueda del loop de abajo —
+                # los demás patrones de _patrones_tot NO son insensibles a
+                # mayúsculas (solo la primera letra de cada palabra lo es,
+                # p. ej. "[Tt]otal"), así que agregar re.I al loop entero
+                # cambiaría también su comportamiento en cualquier otro
+                # documento; el flag inline deja esto acotado a este patrón.
                 _patrones_tot = [
-                    r'[Tt]otal\s+del\s+[Mm]es\s*:?\s*\$?\s*(\d[\d,.]+)',
+                    r'(?i:[Tt]otal\s+del\s+[Mm]es)\s*:?\s*\$?\s*(\d[\d,.]+)',
                 ] + _patrones_tot
             for pat in _patrones_tot:
-                m_tot = re.search(pat, t_clean)
+                m_tot = re.search(pat, _t_clean_tot)
                 if m_tot:
                     tot = limpiar_monto(m_tot.group(1))
                     if tot > 0:
