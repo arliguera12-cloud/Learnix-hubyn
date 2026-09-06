@@ -1,9 +1,21 @@
 import axios from 'axios'
 import { supabase } from './supabase'
 
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000',
-})
+// En un build de producción sin VITE_API_URL, el fallback a localhost dejaba
+// la app apuntando a un backend inexistente y fallando de forma confusa en vez
+// de señalar la variable que falta. Y como por acá viajan el token de sesión y
+// las credenciales de Drive/Gmail, un endpoint sin cifrar tampoco es
+// aceptable: se exige HTTPS salvo en desarrollo local.
+const baseURL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '')
+
+if (!baseURL) {
+  throw new Error('VITE_API_URL no está definida — configúrala en el entorno del build.')
+}
+if (!import.meta.env.DEV && !baseURL.startsWith('https://')) {
+  throw new Error(`VITE_API_URL debe usar https:// en producción (recibido: ${baseURL})`)
+}
+
+const api = axios.create({ baseURL })
 
 api.interceptors.request.use(async (config) => {
   const { data: { session } } = await supabase.auth.getSession()

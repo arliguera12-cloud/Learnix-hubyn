@@ -40,15 +40,22 @@ _lock = threading.Lock()
 _jobs: dict[str, dict] = {}
 
 
-def crear_job(total: int) -> dict:
+def crear_job(total: int, organizacion_id: str) -> dict:
     """Crea el job en memoria y devuelve su snapshot (para respaldarlo en
-    Supabase — ver guardar_snapshot)."""
+    Supabase — ver guardar_snapshot).
+
+    `organizacion_id` queda grabado en el job porque el resultado contiene los
+    datos fiscales completos del lote: quien lo consulte después tiene que
+    pertenecer a la misma organización (ver obtener_job)."""
+    if not organizacion_id:
+        raise ValueError("organizacion_id es obligatorio para crear un job")
     job_id = uuid.uuid4().hex
     ahora = time.time()
     with _lock:
         _limpiar_viejos(ahora)
         _jobs[job_id] = {
             "job_id": job_id,
+            "organizacion_id": organizacion_id,
             "status": "processing",  # processing | done | error
             "total": total,
             "procesados": 0,
@@ -107,12 +114,17 @@ def marcar_error_job(job_id: str, mensaje: str) -> dict | None:
         return dict(job)
 
 
-def obtener_job(job_id: str) -> dict | None:
+def obtener_job(job_id: str, organizacion_id: str) -> dict | None:
     """Solo memoria — rápido. Si el proceso se reinició y el job ya no está
-    acá, el llamador debe intentar cargar_de_supabase() como respaldo."""
+    acá, el llamador debe intentar cargar_de_supabase() como respaldo.
+
+    Un job de otra organización se trata como inexistente, no como prohibido:
+    así la respuesta no confirma que ese job_id exista."""
     with _lock:
         job = _jobs.get(job_id)
-        return dict(job) if job else None
+        if not job or job.get("organizacion_id") != organizacion_id:
+            return None
+        return dict(job)
 
 
 # ─── Respaldo en Supabase (bloqueante — envolver en run_in_threadpool) ────
@@ -125,40 +137,53 @@ def guardar_snapshot(job: dict) -> None:
     try:
         from utils.supabase_admin import get_supabase
         row = {
-            "job_id":       job["job_id"],
-            "status":       job["status"],
-            "total":        job["total"],
-            "procesados":   job["procesados"],
-            "resultados":   job["resultados"],
-            "errores":      job["errores"],
-            "error_fatal":  job["error_fatal"],
-            "terminado_en": _iso(job["terminado_en"]),
+            "job_id":          job["job_id"],
+            "organizacion_id": job["organizacion_id"],
+            "status":          job["status"],
+            "total":           job["total"],
+            "procesados":      job["procesados"],
+            "resultados":      job["resultados"],
+            "errores":         job["errores"],
+            "error_fatal":     job["error_fatal"],
+            "terminado_en":    _iso(job["terminado_en"]),
         }
         get_supabase().table(_TABLA).upsert(row).execute()
     except Exception as exc:
         log.warning("No se pudo respaldar el job %s en Supabase: %s", job.get("job_id"), exc)
 
 
-def cargar_de_supabase(job_id: str) -> dict | None:
+def cargar_de_supabase(job_id: str, organizacion_id: str) -> dict | None:
     """Recupera un job desde Supabase cuando ya no está en memoria (p. ej.
     tras un redeploy). No lo vuelve a poner en memoria — la respuesta del
-    endpoint alcanza con este dict."""
+    endpoint alcanza con este dict.
+
+    El filtro por organización va en la consulta: el backend usa la service
+    key y bypassa RLS, así que sin esto la fila de cualquier tenant sería
+    legible con solo conocer el job_id."""
+    if not organizacion_id:
+        return None
     try:
         from utils.supabase_admin import get_supabase
-        resp = get_supabase().table(_TABLA).select("*").eq("job_id", job_id).limit(1).execute()
+        resp = (
+            get_supabase().table(_TABLA).select("*")
+            .eq("job_id", job_id)
+            .eq("organizacion_id", organizacion_id)
+            .limit(1).execute()
+        )
         if not resp.data:
             return None
         row = resp.data[0]
         return {
-            "job_id":       row["job_id"],
-            "status":       row["status"],
-            "total":        row["total"],
-            "procesados":   row["procesados"],
-            "resultados":   row.get("resultados") or [],
-            "errores":      row.get("errores") or [],
-            "error_fatal":  row.get("error_fatal"),
-            "creado_en":    row.get("creado_en"),
-            "terminado_en": row.get("terminado_en"),
+            "job_id":          row["job_id"],
+            "organizacion_id": row["organizacion_id"],
+            "status":          row["status"],
+            "total":           row["total"],
+            "procesados":      row["procesados"],
+            "resultados":      row.get("resultados") or [],
+            "errores":         row.get("errores") or [],
+            "error_fatal":     row.get("error_fatal"),
+            "creado_en":       row.get("creado_en"),
+            "terminado_en":    row.get("terminado_en"),
         }
     except Exception as exc:
         log.warning("No se pudo recuperar el job %s de Supabase: %s", job_id, exc)

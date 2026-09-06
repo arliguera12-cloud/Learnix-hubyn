@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from utils.auth_dependency import get_current_user
 
@@ -294,7 +294,11 @@ class ExportarRequest(BaseModel):
     tipo: str
     declarante_id: str
     periodo: Optional[str] = None
-    registros: List[Dict[str, Any]]
+    # El anexo se arma entero en memoria antes de responder, así que el tamaño
+    # del lote tiene que estar acotado: sin tope, una sola petición podía
+    # reservar toda la memoria del contenedor. 20.000 filas cubren de sobra un
+    # período fiscal completo.
+    registros: List[Dict[str, Any]] = Field(max_length=20_000)
     # Compras Q-T
     tipo_op:        str  = "1"
     clasif:         str  = "2"

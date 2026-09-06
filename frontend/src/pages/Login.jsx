@@ -4,6 +4,11 @@ import { signIn, useAuth } from '../services/auth'
 import ThemeToggle from '../components/ThemeToggle'
 import { SelloCircular, IconSeccion, IconAlerta, IconOjo, IconOjoTachado } from '../components/Icons'
 
+// Freno de cortesía, no un control de seguridad: vive en sessionStorage del
+// navegador y se esquiva borrándolo, abriendo otra pestaña o llamando a la API
+// de Supabase directo. Está para que quien se equivoca de contraseña deje de
+// reintentar a ciegas. El límite real contra fuerza bruta lo aplica Supabase
+// Auth del lado del servidor, que es el único que ve todos los intentos.
 const MAX_INTENTOS = 5
 const BLOQUEO_MS   = 5 * 60 * 1000 // 5 minutos
 

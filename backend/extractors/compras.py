@@ -173,16 +173,15 @@ SKIP_LINEAS = re.compile(
 
 
 
-def cargar_proveedores_json() -> dict:
+def cargar_proveedores_json(organizacion_id: str) -> dict:
     """
-    Retorna dict combinado {nit: {nombre, nrc}} para el motor de extracción:
-      - Catálogo global (proveedores_globales) como base
-      - Catálogo privado de la org encima con prioridad máxima
+    Retorna dict combinado {nit: {nombre, nrc}} para el motor de extracción,
+    restringido al catálogo privado de la organización.
     Compatible con el formato interno dict{nit:{nombre,nrc}} del extractor.
     """
     try:
         from utils.local_db import cargar_proveedores_combinados
-        return cargar_proveedores_combinados()
+        return cargar_proveedores_combinados(organizacion_id)
     except Exception:
         return {}
 
@@ -755,7 +754,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             nom_prov     = ""
             es_nuevo     = True
             if proveedores_db is None:
-                proveedores_db = cargar_proveedores_json()
+                proveedores_db = cargar_proveedores_json(cliente_activo.get("organizacion_id", ""))
 
             # Separar sección EMISOR del texto
             parte_emisor = _cortar_antes_de_receptor(texto_lineal)

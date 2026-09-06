@@ -49,6 +49,16 @@ def _get_allowed_origins() -> list[str]:
     ]
     if os.environ.get("ENVIRONMENT", "production") != "production":
         origins += ["http://localhost:5173", "http://localhost:3000"]
+
+    # `allow_credentials=True` junto a un origen comodín deja que cualquier
+    # sitio haga peticiones autenticadas en nombre del usuario. Starlette lo
+    # ignora en silencio y responde con el Origin recibido, así que el error de
+    # configuración no se nota hasta que alguien lo explota: mejor no arrancar.
+    if "*" in origins:
+        raise RuntimeError(
+            "ALLOWED_ORIGINS no puede ser '*': el backend envía credenciales. "
+            "Enumera los orígenes exactos separados por coma."
+        )
     return origins
 
 
