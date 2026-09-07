@@ -439,6 +439,26 @@
     animation: fade-in 0.8s ease-out both;
   }
 
+  /* ═══ Entrada corta — filas de lista y tarjetas que aparecen mientras el
+     usuario sigue operando (archivo agregado, resultado recién procesado,
+     aviso nuevo). Más breve que .animate-rise porque acá se repite muchas
+     veces en un lote, no es el momento de autor de una vista nueva. ═══ */
+  @keyframes rise-in-sm {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate-rise-sm {
+    animation: rise-in-sm 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-rise,
+    .animate-fade,
+    .animate-rise-sm {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
+  }
+
   /* ═══ Reveal en cascada — activado por IntersectionObserver (ver
      useReveal en LandingPage.jsx). El delay escalonado se fija inline
      por elemento (transitionDelay), no acá. ═══ */

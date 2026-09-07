@@ -197,7 +197,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
 
       {/* Barra de progreso */}
       {progress && (
-        <div className="card space-y-2">
+        <div className="card space-y-2 animate-rise-sm">
           <div className="flex justify-between text-sm">
             <span className="text-slate-300">
               Procesando {progress.procesados} de {progress.total} documento{progress.total !== 1 ? 's' : ''}
@@ -229,7 +229,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
 
       {/* Resumen del lote */}
       {exitosos > 0 && totales && (
-        <div className="card space-y-4">
+        <div className="card space-y-4 animate-rise">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-slate-200">
               Resumen del lote
@@ -277,23 +277,23 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
 
           {/* Cards de totales */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="bg-surface-700 rounded-xl p-3 text-center">
-              <p className="text-2xl font-bold text-blue-400">{exitosos}</p>
+            <div className="bg-surface-700 rounded-xl p-3 text-center animate-rise-sm" style={{ animationDelay: '0ms' }}>
+              <p className="text-2xl font-bold text-blue-400 tabular-nums">{exitosos}</p>
               <p className="text-xs text-slate-500 mt-0.5">Documentos</p>
             </div>
-            <div className="bg-surface-700 rounded-xl p-3 text-center">
+            <div className="bg-surface-700 rounded-xl p-3 text-center animate-rise-sm" style={{ animationDelay: '40ms' }}>
               <p className="text-lg font-bold text-emerald-400 tabular-nums">
                 ${fmt(totales.gravadas)}
               </p>
               <p className="text-xs text-slate-500 mt-0.5">{labelGrav}</p>
             </div>
-            <div className="bg-surface-700 rounded-xl p-3 text-center">
+            <div className="bg-surface-700 rounded-xl p-3 text-center animate-rise-sm" style={{ animationDelay: '80ms' }}>
               <p className="text-lg font-bold text-amber-400 tabular-nums">
                 ${fmt(totales.iva)}
               </p>
               <p className="text-xs text-slate-500 mt-0.5">{labelIva}</p>
             </div>
-            <div className="bg-surface-700 rounded-xl p-3 text-center">
+            <div className="bg-surface-700 rounded-xl p-3 text-center animate-rise-sm" style={{ animationDelay: '120ms' }}>
               <p className="text-lg font-bold text-white tabular-nums">
                 ${fmt(totales.total)}
               </p>
@@ -329,12 +329,14 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
 
       {/* Resultados individuales */}
       {resultadosFiltrados.length === 0 && filtro !== 'todos' ? (
-        <p className="text-center text-slate-500 py-8 text-sm">
+        <p className="text-center text-slate-500 py-8 text-sm animate-rise-sm">
           Ningún documento en «{FILTROS.find(([v]) => v === filtro)?.[1]}».
         </p>
       ) : (
         resultadosFiltrados.map(([r, i]) => (
-          <ResultadosTabla key={i} data={r} tipo={tipo} declaranteId={declaranteId} index={i + 1} />
+          <div key={i} className="animate-rise-sm">
+            <ResultadosTabla data={r} tipo={tipo} declaranteId={declaranteId} index={i + 1} />
+          </div>
         ))
       )}
     </div>

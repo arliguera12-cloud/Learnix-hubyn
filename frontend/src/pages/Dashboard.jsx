@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../services/auth'
@@ -72,6 +72,39 @@ function calcularObligaciones() {
     .sort((a, b) => a.fecha - b.fecha)
 }
 
+/**
+ * Cuenta desde el valor previo hasta `value` — el "libro mayor" tallándose
+ * en pantalla en vez de aparecer ya sumado. Arranca solo cuando `enabled`
+ * pasa a true (los datos reales ya llegaron), y respeta reduced-motion
+ * mostrando el número final de una vez.
+ */
+function useCountUp(value, enabled, duration = 900) {
+  const [display, setDisplay] = useState(value)
+  const anterior = useRef(value)
+
+  useEffect(() => {
+    if (!enabled) { setDisplay(value); anterior.current = value; return }
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const desde = anterior.current
+    const hasta = value
+    if (reduceMotion || desde === hasta) { setDisplay(hasta); anterior.current = hasta; return }
+
+    const inicio = performance.now()
+    let raf
+    function tick(ahora) {
+      const t = Math.min(1, (ahora - inicio) / duration)
+      const suavizado = 1 - Math.pow(1 - t, 3)
+      setDisplay(Math.round(desde + (hasta - desde) * suavizado))
+      if (t < 1) raf = requestAnimationFrame(tick)
+      else anterior.current = hasta
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value, enabled, duration])
+
+  return display
+}
+
 export default function Dashboard() {
   const { session } = useAuth()
   const [stats,    setStats]    = useState({ ventas: 0, compras: 0, retenciones: 0, sujetos: 0 })
@@ -115,6 +148,15 @@ export default function Dashboard() {
   const totalDTE = Object.values(stats).reduce((s, v) => s + v, 0)
   const obligaciones = calcularObligaciones()
 
+  const cargado = !loading
+  const totalAnimado = useCountUp(totalDTE, cargado)
+  const statsAnimados = {
+    ventas:      useCountUp(stats.ventas, cargado),
+    compras:     useCountUp(stats.compras, cargado),
+    retenciones: useCountUp(stats.retenciones, cargado),
+    sujetos:     useCountUp(stats.sujetos, cargado),
+  }
+
   return (
     <div className="max-w-[90rem] mx-auto space-y-7">
 
@@ -131,7 +173,7 @@ export default function Dashboard() {
         </div>
         <div className="text-right hidden sm:block">
           <p className="text-4xl text-fg tabular-nums font-display leading-none">
-            {loading ? '—' : totalDTE.toLocaleString('es-SV')}
+            {loading ? '—' : totalAnimado.toLocaleString('es-SV')}
           </p>
           <p className="text-[0.65rem] uppercase tracking-[0.14em] text-fg-4 mt-1.5">
             DTE procesados
@@ -141,8 +183,12 @@ export default function Dashboard() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-hairline border border-hairline rounded-xl overflow-hidden">
-        {STATS_CONFIG.map(({ key, label, Icon }) => (
-          <div key={key} className="bg-panel p-4">
+        {STATS_CONFIG.map(({ key, label, Icon }, i) => (
+          <div
+            key={key}
+            className="bg-panel p-4 animate-rise"
+            style={{ animationDelay: `${i * 60}ms` }}
+          >
             <div className="flex items-center justify-between mb-3">
               <Icon className="w-5 h-5 text-fg-4" />
               <span className="font-mono text-[0.6rem] text-fg-5 uppercase tracking-wider">
@@ -150,7 +196,7 @@ export default function Dashboard() {
               </span>
             </div>
             <p className="text-3xl tabular-nums font-display text-fg leading-none">
-              {loading ? <span className="text-fg-5">—</span> : stats[key].toLocaleString('es-SV')}
+              {loading ? <span className="text-fg-5">—</span> : statsAnimados[key].toLocaleString('es-SV')}
             </p>
             <p className="text-xs text-fg-4 mt-1.5">{label}</p>
           </div>
@@ -191,8 +237,12 @@ export default function Dashboard() {
           <span className="text-[0.6rem] text-fg-5">fechas aproximadas · verificá en mh.gob.sv</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-hairline border border-hairline rounded-xl overflow-hidden">
-          {obligaciones.map(({ formulario, nombre, fecha, diasRestantes }) => (
-            <div key={formulario} className="bg-panel p-4">
+          {obligaciones.map(({ formulario, nombre, fecha, diasRestantes }, i) => (
+            <div
+              key={formulario}
+              className="bg-panel p-4 animate-rise"
+              style={{ animationDelay: `${i * 60}ms` }}
+            >
               <div className="flex items-center justify-between mb-2">
                 <span className="font-mono text-[0.65rem] uppercase tracking-wider text-fg-4">
                   {formulario}
@@ -218,14 +268,16 @@ export default function Dashboard() {
           Módulos
         </h3>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-px bg-hairline border border-hairline rounded-xl overflow-hidden">
-          {MODULOS.map(({ to, Icon, label, desc, anexo }) => (
+          {MODULOS.map(({ to, Icon, label, desc, anexo }, i) => (
             <Link
               key={to}
               to={to}
-              className="bg-panel p-5 hover:bg-panel2 transition-colors duration-150 group
-                         border-l-2 border-transparent hover:border-accent"
+              style={{ animationDelay: `${i * 50}ms` }}
+              className="bg-panel p-5 hover:bg-panel2 transition-all duration-150 group animate-rise
+                         border-l-2 border-transparent hover:border-accent
+                         motion-safe:hover:-translate-y-0.5"
             >
-              <Icon className="w-6 h-6 text-fg-4 group-hover:text-accent transition-colors mb-3" />
+              <Icon className="w-6 h-6 text-fg-4 group-hover:text-accent group-hover:translate-x-0.5 transition-all mb-3" />
               <p className="font-medium text-fg text-sm">{label}</p>
               <p className="text-xs text-fg-4 mt-0.5">{desc}</p>
               <span className="inline-block mt-3 text-[0.65rem] font-mono uppercase tracking-wider

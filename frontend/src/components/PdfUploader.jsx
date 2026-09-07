@@ -167,11 +167,12 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
           onDragLeave={() => setDragging(false)}
           onDrop={handleDrop}
           onClick={() => inputRef.current?.click()}
-          className={`flex items-center gap-3.5 rounded-lg border border-dashed px-4 py-3.5 cursor-pointer transition-colors duration-150
-            ${dragging ? 'border-accent bg-accent/5' : 'border-hairline hover:border-fg-4 bg-panel2/40'}`}
+          className={`flex items-center gap-3.5 rounded-lg border border-dashed px-4 py-3.5 cursor-pointer transition-all duration-150 motion-reduce:transition-none
+            ${dragging ? 'border-accent bg-accent/5 scale-[1.01]' : 'border-hairline hover:border-fg-4 bg-panel2/40'}`}
         >
-          <div className="shrink-0 h-10 w-10 rounded-lg border border-hairline bg-panel flex items-center justify-center">
-            <IconSubir className="w-5 h-5 text-fg-4" />
+          <div className={`shrink-0 h-10 w-10 rounded-lg border flex items-center justify-center transition-all duration-150
+            ${dragging ? 'border-accent bg-accent/10 scale-110' : 'border-hairline bg-panel'}`}>
+            <IconSubir className={`w-5 h-5 transition-colors ${dragging ? 'text-accent' : 'text-fg-4'}`} />
           </div>
           <div className="min-w-0">
             <p className="text-sm text-fg-2 font-medium">
@@ -192,20 +193,20 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
         </div>
 
         {avisoArchivos && (
-          <p className="mt-2 text-xs text-amber-400 whitespace-pre-line" role="alert">
+          <p className="mt-2 text-xs text-amber-400 whitespace-pre-line animate-rise-sm" role="alert">
             {avisoArchivos}
           </p>
         )}
 
         {loteGrande && (
-          <p className="mt-2 text-xs text-fg-4">
+          <p className="mt-2 text-xs text-fg-4 animate-rise-sm">
             {files.length} archivos — se van a subir en tandas de {TANDA_AVISO} para no saturar
             la conexión. Puede tardar varios minutos, no cierres esta pestaña.
           </p>
         )}
 
         {files.length > 0 && (
-          <div className="mt-2 rounded-lg border border-hairline overflow-hidden">
+          <div className="mt-2 rounded-lg border border-hairline overflow-hidden animate-rise-sm">
             <div className="flex items-center justify-between px-3 py-1.5 bg-panel2/60 border-b border-hairline">
               <span className="text-xs text-fg-4">
                 {files.length} archivo{files.length > 1 ? 's' : ''} seleccionado{files.length > 1 ? 's' : ''}
@@ -220,14 +221,17 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
             </div>
             <ul className="divide-y divide-hairline max-h-64 overflow-y-auto">
               {files.map((f, i) => (
-                <li key={`${f.name}:${f.size}:${i}`} className="flex items-center gap-2.5 px-3 py-2 bg-panel/60">
+                <li
+                  key={`${f.name}:${f.size}:${i}`}
+                  className="flex items-center gap-2.5 px-3 py-2 bg-panel/60 animate-rise-sm"
+                >
                   <IconArchivo className="w-4 h-4 text-fg-4 shrink-0" />
                   <span className="text-sm text-fg-2 truncate flex-1">{f.name}</span>
                   <span className="text-xs text-fg-5 font-mono shrink-0">{tamano(f.size)}</span>
                   <button
                     type="button"
                     onClick={() => quitarArchivo(i)}
-                    className="shrink-0 text-fg-4 hover:text-red-400 transition-colors"
+                    className="shrink-0 text-fg-4 hover:text-red-400 hover:scale-110 transition-all"
                     aria-label={`Quitar ${f.name}`}
                   >
                     <IconCerrar className="w-3.5 h-3.5" />
