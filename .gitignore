@@ -28,3 +28,9 @@ node_modules/
 .vscode/
 *.swp
 *.swo
+
+# Claude Code — skills instaladas localmente (npx skills add), config personal
+# de la herramienta, no del negocio. .claude/skills/* son symlinks a .agents/.
+.claude/
+.agents/
+skills-lock.json
