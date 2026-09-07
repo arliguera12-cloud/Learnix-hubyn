@@ -175,9 +175,12 @@ export default function Dashboard() {
           <p className="text-4xl text-fg tabular-nums font-display leading-none">
             {loading ? '—' : totalAnimado.toLocaleString('es-SV')}
           </p>
-          <p className="text-[0.65rem] uppercase tracking-[0.14em] text-fg-4 mt-1.5">
-            DTE procesados
-          </p>
+          <div className="flex items-center justify-end gap-1.5 mt-1.5">
+            <span className="h-[2px] w-4 bg-accent" />
+            <p className="text-[0.65rem] uppercase tracking-[0.14em] text-fg-4">
+              DTE procesados
+            </p>
+          </div>
         </div>
       </div>
 
@@ -190,7 +193,9 @@ export default function Dashboard() {
             style={{ animationDelay: `${i * 60}ms` }}
           >
             <div className="flex items-center justify-between mb-3">
-              <Icon className="w-5 h-5 text-fg-4" />
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10">
+                <Icon className="w-4 h-4 text-accent" />
+              </span>
               <span className="font-mono text-[0.6rem] text-fg-5 uppercase tracking-wider">
                 {loading ? '' : 'registros'}
               </span>
@@ -217,12 +222,12 @@ export default function Dashboard() {
           />
           <div className="flex items-center gap-2">
             <span className="h-1.5 w-1.5 rounded-full bg-fg-5" />
-            <span className="text-xs text-fg-3">Groq llama-3.3-70b</span>
+            <span className="text-xs text-fg-3">Verificación con IA (principal)</span>
             <span className="badge-warn">configurable</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="h-1.5 w-1.5 rounded-full bg-fg-5" />
-            <span className="text-xs text-fg-3">Vertex AI Gemini</span>
+            <span className="text-xs text-fg-3">Verificación con IA (respaldo)</span>
             <span className="badge-warn">configurable</span>
           </div>
         </div>
@@ -244,7 +249,7 @@ export default function Dashboard() {
               style={{ animationDelay: `${i * 60}ms` }}
             >
               <div className="flex items-center justify-between mb-2">
-                <span className="font-mono text-[0.65rem] uppercase tracking-wider text-fg-4">
+                <span className="font-mono text-[0.65rem] uppercase tracking-wider text-accent bg-accent/10 rounded px-1.5 py-0.5">
                   {formulario}
                 </span>
                 <span className={
@@ -277,7 +282,10 @@ export default function Dashboard() {
                          border-l-2 border-transparent hover:border-accent
                          motion-safe:hover:-translate-y-0.5"
             >
-              <Icon className="w-6 h-6 text-fg-4 group-hover:text-accent group-hover:translate-x-0.5 transition-all mb-3" />
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-panel2
+                               group-hover:bg-accent/10 transition-colors mb-3">
+                <Icon className="w-5 h-5 text-fg-4 group-hover:text-accent group-hover:translate-x-0.5 transition-all" />
+              </span>
               <p className="font-medium text-fg text-sm">{label}</p>
               <p className="text-xs text-fg-4 mt-0.5">{desc}</p>
               <span className="inline-block mt-3 text-[0.65rem] font-mono uppercase tracking-wider
