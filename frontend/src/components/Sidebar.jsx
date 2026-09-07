@@ -51,11 +51,11 @@ export default function Sidebar() {
   return (
     <aside className="fixed inset-y-0 left-0 w-64 bg-panel border-r border-hairline flex flex-col z-30">
       {/* Logo */}
-      <div className="px-6 py-6 border-b border-hairline">
-        <div className="flex items-baseline gap-2.5">
-          <IconSeccion className="text-2xl text-accent" />
+      <div className="px-5 py-5 border-b border-hairline">
+        <div className="flex items-center gap-3">
+          <IconSeccion className="w-9 h-9 text-lg" />
           <div>
-            <p className="text-base font-display text-fg leading-none">Learnix</p>
+            <p className="text-[15px] font-semibold text-fg leading-none">Learnix</p>
             <p className="text-[10px] text-fg-4 uppercase tracking-[0.2em] leading-none mt-1.5">
               DTE Hub
             </p>
@@ -68,7 +68,7 @@ export default function Sidebar() {
         {indicador && (
           <div
             aria-hidden="true"
-            className="absolute inset-x-3 rounded-lg bg-accent/10 border-l-2 border-accent
+            className="absolute inset-x-3 rounded-lg bg-accent/10
                        transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]
                        motion-reduce:transition-none pointer-events-none"
             style={{ transform: `translateY(${indicador.top}px)`, height: indicador.height }}
@@ -89,7 +89,7 @@ export default function Sidebar() {
                   className={({ isActive }) =>
                     `relative z-10 flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] transition-colors duration-100 ` +
                     (isActive
-                      ? 'text-fg font-medium'
+                      ? 'text-accent font-medium'
                       : 'text-fg-3 hover:text-fg hover:bg-panel2')
                   }
                 >

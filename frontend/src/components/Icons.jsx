@@ -254,48 +254,12 @@ export function IconAlerta(props) {
   )
 }
 
-/**
- * Sello circular de registro — texto sobre trayectoria, gira lentamente.
- * Toma el color de `currentColor`, así que el contenedor decide el tono.
- */
-export function SelloCircular({ className = 'w-full h-full' }) {
-  return (
-    <svg viewBox="0 0 200 200" className={className} aria-hidden="true">
-      <defs>
-        <path id="circulo-sello" d="M 100,100 m -78,0 a 78,78 0 1,1 156,0 a 78,78 0 1,1 -156,0" />
-      </defs>
-      <circle cx="100" cy="100" r="94" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.55" />
-      <circle cx="100" cy="100" r="88" fill="none" stroke="currentColor" strokeWidth="0.75" opacity="0.4" />
-      <circle cx="100" cy="100" r="60" fill="none" stroke="currentColor" strokeWidth="0.75" opacity="0.4" />
-      <g className="seal-spin">
-        <text fill="currentColor" fontSize="11.5" letterSpacing="3.5" fontFamily="var(--font-ui)">
-          <textPath href="#circulo-sello" startOffset="0%">
-            · LEARNIX DTE HUB · REGISTRO DIGITAL · EL SALVADOR
-          </textPath>
-        </text>
-      </g>
-      <text
-        x="100" y="94" textAnchor="middle"
-        fontFamily="var(--font-display)" fontStyle="italic" fontWeight="500"
-        fontSize="34" fill="currentColor"
-      >
-        L
-      </text>
-      <text
-        x="100" y="118" textAnchor="middle"
-        fontFamily="var(--font-mono)" fontSize="9" letterSpacing="2" fill="currentColor" opacity="0.75"
-      >
-        № 001
-      </text>
-    </svg>
-  )
-}
-
-/** Marca de sección — el calderón editorial usado como logotipo. */
-export function IconSeccion({ className = 'w-5 h-5' }) {
+/** Marca de sección — logotipo de Learnix, como chip de color sólido. */
+export function IconSeccion({ className = 'w-8 h-8 text-base' }) {
   return (
     <span
-      className={`inline-flex items-center justify-center font-display italic leading-none ${className}`}
+      className={`inline-flex items-center justify-center shrink-0 rounded-lg bg-accent
+                  text-white font-display font-bold leading-none ${className}`}
       aria-hidden="true"
     >
       §

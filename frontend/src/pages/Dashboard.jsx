@@ -160,23 +160,23 @@ export default function Dashboard() {
   return (
     <div className="max-w-[90rem] mx-auto space-y-7">
 
-      {/* Cabecera editorial */}
-      <div className="flex items-end justify-between border-b border-hairline pb-4">
+      {/* Cabecera */}
+      <div className="flex items-end justify-between pb-1">
         <div>
           <p className="text-[0.65rem] uppercase tracking-[0.18em] text-fg-4 font-semibold mb-1">
-            Libro mayor
+            Resumen
           </p>
-          <h2 className="text-3xl text-fg leading-none">Dashboard</h2>
+          <h2 className="text-2xl text-fg leading-none">Dashboard</h2>
           <p className="text-sm text-fg-4 mt-2">
             {email} · {new Date().toLocaleDateString('es-SV', { day: '2-digit', month: 'long', year: 'numeric' })}
           </p>
         </div>
         <div className="text-right hidden sm:block">
-          <p className="text-4xl text-fg tabular-nums font-display leading-none">
+          <p className="text-4xl font-bold text-fg tabular-nums leading-none">
             {loading ? '—' : totalAnimado.toLocaleString('es-SV')}
           </p>
           <div className="flex items-center justify-end gap-1.5 mt-1.5">
-            <span className="h-[2px] w-4 bg-accent" />
+            <span className="h-[2px] w-4 bg-accent rounded-full" />
             <p className="text-[0.65rem] uppercase tracking-[0.14em] text-fg-4">
               DTE procesados
             </p>
@@ -185,11 +185,11 @@ export default function Dashboard() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-hairline border border-hairline rounded-xl overflow-hidden">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {STATS_CONFIG.map(({ key, label, Icon }, i) => (
           <div
             key={key}
-            className="bg-panel p-4 animate-rise"
+            className="tile p-4 animate-rise"
             style={{ animationDelay: `${i * 60}ms` }}
           >
             <div className="flex items-center justify-between mb-3">
@@ -200,7 +200,7 @@ export default function Dashboard() {
                 {loading ? '' : 'registros'}
               </span>
             </div>
-            <p className="text-3xl tabular-nums font-display text-fg leading-none">
+            <p className="text-3xl font-bold tabular-nums text-fg leading-none">
               {loading ? <span className="text-fg-5">—</span> : statsAnimados[key].toLocaleString('es-SV')}
             </p>
             <p className="text-xs text-fg-4 mt-1.5">{label}</p>
@@ -241,11 +241,11 @@ export default function Dashboard() {
           </h3>
           <span className="text-[0.6rem] text-fg-5">fechas aproximadas · verificá en mh.gob.sv</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-hairline border border-hairline rounded-xl overflow-hidden">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {obligaciones.map(({ formulario, nombre, fecha, diasRestantes }, i) => (
             <div
               key={formulario}
-              className="bg-panel p-4 animate-rise"
+              className="tile p-4 animate-rise"
               style={{ animationDelay: `${i * 60}ms` }}
             >
               <div className="flex items-center justify-between mb-2">
@@ -272,14 +272,13 @@ export default function Dashboard() {
         <h3 className="text-[0.65rem] font-semibold text-fg-4 uppercase tracking-[0.16em] mb-3">
           Módulos
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-px bg-hairline border border-hairline rounded-xl overflow-hidden">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {MODULOS.map(({ to, Icon, label, desc, anexo }, i) => (
             <Link
               key={to}
               to={to}
               style={{ animationDelay: `${i * 50}ms` }}
-              className="bg-panel p-5 hover:bg-panel2 transition-all duration-150 group animate-rise
-                         border-l-2 border-transparent hover:border-accent
+              className="tile p-5 hover:shadow-card-lg transition-all duration-200 group animate-rise
                          motion-safe:hover:-translate-y-0.5"
             >
               <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-panel2
@@ -307,7 +306,7 @@ function StatusRow({ label, status, textOn, textOff }) {
       <span
         className={`h-1.5 w-1.5 rounded-full ${
           status === null ? 'bg-fg-5' :
-          status ? 'bg-accent2 animate-pulse' : 'bg-accent'
+          status ? 'bg-accent2 animate-pulse' : 'bg-danger'
         }`}
       />
       <span className="text-xs text-fg-3">{label}</span>

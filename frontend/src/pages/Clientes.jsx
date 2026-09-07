@@ -217,7 +217,7 @@ export default function Clientes() {
       </div>
 
       {seleccion.size > 0 && (
-        <div className="card border-l-2 border-l-accent border-y-0 border-r-0 bg-panel flex items-center justify-between gap-3 py-3">
+        <div className="card bg-accent/5 flex items-center justify-between gap-3 py-3">
           <p className="text-sm text-fg-2">
             {seleccion.size} cliente{seleccion.size > 1 ? 's' : ''} seleccionado{seleccion.size > 1 ? 's' : ''}
           </p>

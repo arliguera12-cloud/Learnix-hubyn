@@ -4,69 +4,76 @@
 
 /*
  * Sistema de tema — claro (por defecto) y oscuro (clase .dark en <html>).
- * La paleta clara es la principal; el modo oscuro es la variante alterna,
- * activable con el ThemeToggle. Estas variables alimentan tanto los
- * componentes editoriales de abajo como las clases compartidas (.card,
- * .btn-primary, .input, etc.) usadas en toda la app.
+ * Paleta neutra fría + un solo acento (índigo) para interacción/marca,
+ * más verde/ámbar/rojo estándar para éxito/aviso/error. Reemplaza la
+ * paleta editorial (papel, tinta, bermellón) por superficies planas con
+ * sombra suave — un solo lenguaje de elevación en vez de reglas/hairlines.
  */
 :root {
-  --bg: #ebe6d9;
-  --panel: #f5f2ea;
-  --panel-2: #ded8c7;
-  --border: #c4bca6;
-  --ink: #1a1815;
-  --ink-3: #4a4437;
-  --ink-4: #6f6857;
-  --ink-5: #9a927e;
-  --rule: #c4bca6;
-  --rule-strong: #1a1815;
-  /* Acento primario — bermellón de imprenta (marca, sellos, subrayados) */
-  --gold: #b84a24;
-  /* Acento secundario — verde de tinta contable (cifras conformes) */
-  --cinnabar: #1f4c3f;
-  --font-display: 'Fraunces', 'Times New Roman', Georgia, serif;
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --panel-2: #f1f2f5;
+  --border: #e3e5ea;
+  --ink: #12141a;
+  --ink-3: #495166;
+  --ink-4: #6b7280;
+  --ink-5: #9aa1b0;
+  /* Acento primario — interacción, marca, foco */
+  --gold: #4f46e5;
+  /* Éxito — cifras conformes, estados OK */
+  --cinnabar: #17974a;
+  /* Error/negativo — separado del acento primario */
+  --danger: #dc2626;
+  --font-display: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-ui: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
 
   /* Mismos valores, como tríos RGB — para los tokens Tailwind con opacidad (bg-paper/80…) */
-  --bg-rgb: 235 230 217;
-  --panel-rgb: 245 242 234;
-  --panel2-rgb: 222 216 199;
-  --border-rgb: 196 188 166;
-  --ink-rgb: 26 24 21;
-  --ink3-rgb: 74 68 55;
-  --ink4-rgb: 111 104 87;
-  --ink5-rgb: 154 146 126;
-  --gold-rgb: 184 74 36;
-  --cinnabar-rgb: 31 76 63;
-  --warn-rgb: 138 101 16;
+  --bg-rgb: 247 248 250;
+  --panel-rgb: 255 255 255;
+  --panel2-rgb: 241 242 245;
+  --border-rgb: 227 229 234;
+  --ink-rgb: 18 20 26;
+  --ink3-rgb: 73 81 102;
+  --ink4-rgb: 107 114 128;
+  --ink5-rgb: 154 161 176;
+  --gold-rgb: 79 70 229;
+  --cinnabar-rgb: 23 151 74;
+  --danger-rgb: 220 38 38;
+  --warn-rgb: 180 83 9;
+
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04), 0 2px 8px -2px rgb(16 24 40 / 0.06);
+  --shadow-card-lg: 0 2px 4px rgb(16 24 40 / 0.04), 0 12px 24px -8px rgb(16 24 40 / 0.10);
 }
 
 .dark {
-  --bg: #12110d;
-  --panel: #1a1814;
-  --panel-2: #24211a;
-  --border: #35312a;
-  --ink: #f0ebdd;
-  --ink-3: #b5ad98;
-  --ink-4: #8a8271;
-  --ink-5: #5f594b;
-  --rule: #35312a;
-  --rule-strong: #d8d2c3;
-  --gold: #e0763f;
-  --cinnabar: #6bbd9d;
+  --bg: #0b0c10;
+  --panel: #15171d;
+  --panel-2: #1c1f27;
+  --border: #282c36;
+  --ink: #eef0f4;
+  --ink-3: #a7adbc;
+  --ink-4: #868d9e;
+  --ink-5: #565d6d;
+  --gold: #818cf8;
+  --cinnabar: #34d073;
+  --danger: #f87171;
 
-  --bg-rgb: 18 17 13;
-  --panel-rgb: 26 24 20;
-  --panel2-rgb: 36 33 26;
-  --border-rgb: 53 49 42;
-  --ink-rgb: 240 235 221;
-  --ink3-rgb: 181 173 152;
-  --ink4-rgb: 138 130 113;
-  --ink5-rgb: 95 89 75;
-  --gold-rgb: 224 118 63;
-  --cinnabar-rgb: 107 189 157;
-  --warn-rgb: 217 164 65;
+  --bg-rgb: 11 12 16;
+  --panel-rgb: 21 23 29;
+  --panel2-rgb: 28 31 39;
+  --border-rgb: 40 44 54;
+  --ink-rgb: 238 240 244;
+  --ink3-rgb: 167 173 188;
+  --ink4-rgb: 134 141 158;
+  --ink5-rgb: 86 93 109;
+  --gold-rgb: 129 140 248;
+  --cinnabar-rgb: 52 208 115;
+  --danger-rgb: 248 113 113;
+  --warn-rgb: 251 191 36;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 10px -2px rgb(0 0 0 / 0.35);
+  --shadow-card-lg: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 32px -10px rgb(0 0 0 / 0.5);
 }
 
 @layer base {
@@ -81,8 +88,12 @@
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: theme('fontFamily.display');
-    font-weight: 500;
-    letter-spacing: -0.015em;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  ::selection {
+    background: rgb(var(--gold-rgb) / 0.22);
+    color: var(--ink);
   }
   ::-webkit-scrollbar {
     @apply w-1.5 h-1.5;
@@ -98,38 +109,35 @@
 
 @layer components {
   .card {
-    @apply rounded-xl p-5;
+    @apply rounded-2xl p-5 border;
     background: var(--panel);
-    border: 1px solid var(--border);
+    border-color: var(--border);
+    box-shadow: var(--shadow-card);
   }
   .btn-primary {
-    @apply hover:bg-brand-500 hover:border-brand-500
+    @apply font-medium px-4 py-2.5 rounded-xl transition-all duration-150
            disabled:opacity-40 disabled:cursor-not-allowed
-           font-medium px-4 py-2 rounded-lg transition-all duration-150
-           hover:-translate-y-px hover:text-white;
-    background: var(--ink);
-    border: 1px solid var(--ink);
-    color: var(--bg);
+           hover:-translate-y-px active:translate-y-0;
+    background: rgb(var(--gold-rgb));
+    border: 1px solid rgb(var(--gold-rgb));
+    color: #fff;
+    box-shadow: 0 1px 2px rgb(var(--gold-rgb) / 0.2);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: rgb(var(--gold-rgb) / 0.9);
+    box-shadow: 0 6px 16px -4px rgb(var(--gold-rgb) / 0.4);
   }
   .btn-ghost {
-    @apply bg-transparent px-4 py-2 rounded-lg transition-colors duration-150;
+    @apply bg-transparent px-4 py-2 rounded-xl transition-colors duration-150;
     color: var(--ink-3);
   }
   .btn-ghost:hover {
     background: var(--panel-2);
     color: var(--ink);
   }
-  /* Landing editorial: esquinas casi rectas en vez del rounded-lg del resto
-     de la app (dashboard/módulos) — coincide con la ficha de diseño de
-     referencia (radio 2px en CTA). Solo la landing, no se toca el global. */
-  .landing-page .btn-primary,
-  .landing-page .btn-ghost,
-  .landing-page a.rounded-lg {
-    border-radius: 2px;
-  }
   .input {
-    @apply focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:italic
-           rounded-lg px-3 py-2 w-full outline-none transition-colors duration-150;
+    @apply focus:border-brand-500 focus:ring-1 focus:ring-brand-500
+           rounded-xl px-3 py-2 w-full outline-none transition-colors duration-150;
     background: var(--panel);
     border: 1px solid var(--border);
     color: var(--ink);
@@ -146,22 +154,22 @@
   .badge-ok,
   .badge-warn,
   .badge-err {
-    @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border;
+    @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium;
   }
   .badge-ok {
     color: rgb(var(--cinnabar-rgb));
     background: rgb(var(--cinnabar-rgb) / 0.1);
-    border-color: rgb(var(--cinnabar-rgb) / 0.35);
+    border-color: rgb(var(--cinnabar-rgb) / 0.28);
   }
   .badge-warn {
     color: rgb(var(--warn-rgb));
     background: rgb(var(--warn-rgb) / 0.1);
-    border-color: rgb(var(--warn-rgb) / 0.35);
+    border-color: rgb(var(--warn-rgb) / 0.28);
   }
   .badge-err {
-    color: rgb(var(--gold-rgb));
-    background: rgb(var(--gold-rgb) / 0.1);
-    border-color: rgb(var(--gold-rgb) / 0.35);
+    color: rgb(var(--danger-rgb));
+    background: rgb(var(--danger-rgb) / 0.1);
+    border-color: rgb(var(--danger-rgb) / 0.28);
   }
   .table-cell {
     @apply px-3 py-2 text-sm whitespace-nowrap;
@@ -175,250 +183,25 @@
     border-bottom: 1px solid var(--border);
   }
 
-  /* ═══ Reglas editoriales ═══ */
-  .editorial-header {
-    border-top: 3px solid var(--rule-strong);
-    border-bottom: 1px solid var(--rule-strong);
-    padding: 1.5rem 0 1.15rem;
-    margin-bottom: 1.75rem;
-    position: relative;
-  }
-  .editorial-header::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: -4px;
-    height: 1px;
-    background: var(--rule-strong);
-  }
-
-  .rule-double {
-    border-top: 2px solid var(--rule-strong);
-    border-bottom: 1px solid var(--rule-strong);
-    height: 4px;
-    margin: 0.75rem 0 1rem;
-  }
-  .rule-hair {
-    height: 1px;
-    background: var(--rule);
-    margin: 1rem 0;
-    border: 0;
-  }
-  .rule-thick {
-    height: 2px;
-    background: var(--rule-strong);
-    margin: 1rem 0;
-    border: 0;
-  }
-  .rule-divider {
-    height: 6px;
-    border-top: 1px solid var(--rule-strong);
-    border-bottom: 3px double var(--rule-strong);
-    margin: 1.5rem 0;
-  }
-
-  /* ═══ Sello registral ═══ */
-  .registro-seal {
-    width: 72px;
-    height: 72px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 1.5px solid var(--ink);
-    border-radius: 2px;
-    font-family: var(--font-display);
-    font-weight: 500;
-    font-size: 2rem;
-    letter-spacing: -0.03em;
-    color: var(--ink);
-    position: relative;
-  }
-  .registro-seal::before {
-    content: 'LEARNIX';
-    position: absolute;
-    top: 3px;
-    left: 0;
-    right: 0;
-    font-family: var(--font-ui);
-    font-size: 0.38rem;
-    letter-spacing: 0.22em;
-    color: var(--gold);
-    font-weight: 600;
-    text-align: center;
-    text-transform: uppercase;
-  }
-  .registro-seal::after {
-    content: '№ ' attr(data-num);
-    position: absolute;
-    bottom: 3px;
-    left: 0;
-    right: 0;
-    font-family: var(--font-mono);
-    font-size: 0.5rem;
-    color: var(--ink-4);
-    text-align: center;
-  }
-
-  .registro-seal-sm {
-    width: 48px;
-    height: 48px;
-    font-size: 1.3rem;
-  }
-  .registro-seal-sm::before {
-    font-size: 0.3rem;
-    top: 2px;
-  }
-  .registro-seal-sm::after {
-    font-size: 0.4rem;
-    bottom: 2px;
-  }
-
-  /* ═══ Papel ledger — textura de fondo sutil para pantallas de acceso ═══ */
-  .ledger-paper {
-    background-image:
-      repeating-linear-gradient(
-        to bottom,
-        transparent,
-        transparent 27px,
-        color-mix(in srgb, var(--ink) 6%, transparent) 28px
-      ),
-      radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--gold) 12%, transparent), transparent 55%);
-  }
-
-  /* ═══ Stamp rotado (estado borrador / no oficial) ═══ */
-  .stamp {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.35rem 0.75rem;
-    border: 2px solid currentColor;
-    border-radius: 2px;
-    transform: rotate(-4deg);
-    font-family: var(--font-display);
-    font-weight: 500;
-    font-style: italic;
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    color: var(--gold);
-    opacity: 0.9;
-  }
-
-  /* ═══ Subrayado de imprenta — bloque de tinta detrás de una palabra ═══ */
-  .marker {
-    position: relative;
-    display: inline-block;
-    white-space: nowrap;
-    /* Crea contexto de apilamiento propio para que el bloque de tinta quede
-       detrás del texto pero no detrás del fondo de la sección. */
-    isolation: isolate;
-  }
-  .marker::before {
-    content: '';
-    position: absolute;
-    left: -0.06em;
-    right: -0.06em;
-    bottom: 0.06em;
-    height: 0.3em;
-    background: var(--gold);
-    opacity: 0.9;
-    z-index: -1;
-  }
-
-  /* ═══ Cinta de cotizaciones — siempre oscura, como el pie de un diario ═══ */
-  .ticker-bar {
-    background: #12110d;
-    border-top: 3px double #35312a;
-    border-bottom: 3px double #35312a;
-  }
-  .ticker-label {
-    color: #e0763f;
-  }
-  .ticker-value {
-    color: #ded8c7;
-  }
-
-  /* ═══ Bloques siempre-oscuros — franja de cifras y pie de página, como el
-     verde de tinta contable de un libro mayor. Fijos (no theme-dependent),
-     mismo criterio que .ticker-bar: leen igual en claro y oscuro. ═══ */
-  .forest-block {
-    background: #16332b;
-    color: #e8e4d6;
-  }
-  .forest-block-deep {
-    background: #0f2620;
-    color: #cddad2;
-    border-top: 3px double #d8d2c3;
-  }
-
-  /* ═══ Ficha de precio — badge flotante sobre el borde ═══ */
-  .price-badge {
-    position: absolute;
-    top: -0.8rem;
-    left: 1.75rem;
-    background: var(--bg);
-    padding: 0.15rem 0.75rem;
-  }
-}
-
-@layer components {
-  /* ═══ Ticker editorial — cinta de códigos DTE en movimiento ═══ */
-  .ticker-track {
-    display: flex;
-    width: max-content;
-    animation: ticker-scroll 32s linear infinite;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .ticker-track {
-      animation: none;
-    }
-  }
-  @keyframes ticker-scroll {
-    from { transform: translateX(0); }
-    to   { transform: translateX(-50%); }
-  }
-
-  /* ═══ Sello circular — texto rotado sobre trayectoria ═══ */
-  .seal-spin {
-    animation: seal-spin 40s linear infinite;
-    transform-origin: 50% 50%;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .seal-spin {
-      animation: none;
-    }
-  }
-  @keyframes seal-spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-  }
-
-  /* ═══ Grano de papel — textura sutil sobre superficies oscuras ═══ */
-  .paper-grain {
-    position: relative;
-    isolation: isolate;
-  }
-  .paper-grain::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    opacity: 0.5;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
-  }
-  .dark .paper-grain::before {
-    opacity: 0.28;
+  /* Tarjeta de una celda dentro de una grilla — mismo lenguaje que .card
+     (borde + sombra suave) pero sin padding propio, para grillas de
+     estadísticas/módulos con separación real entre celdas (gap-4), no
+     costuras a un píxel. */
+  .tile {
+    @apply rounded-2xl border;
+    background: var(--panel);
+    border-color: var(--border);
+    box-shadow: var(--shadow-card);
   }
 }
 
 @layer utilities {
   /*
    * `text-white` aparece en las páginas de extractores para el texto de
-   * máximo contraste (totales, encabezados de tabla). Con la paleta clara
-   * como principal, blanco sobre papel es ilegible; se reapunta al color de
-   * tinta del tema. No queda blanco literal en la app: los botones oscuros
-   * definen su propio color vía `btn-primary`.
+   * máximo contraste (totales, encabezados de tabla) sobre superficies
+   * claras del tema. Se reapunta al color de tinta del tema para que siga
+   * siendo legible en modo claro; los botones definen su propio blanco
+   * literal en la regla de `.btn-primary`, no vía esta clase.
    */
   .text-white {
     color: rgb(var(--ink-rgb));
