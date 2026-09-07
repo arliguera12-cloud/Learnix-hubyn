@@ -93,8 +93,25 @@ REVOKE ALL ON FUNCTION set_updated_at() FROM PUBLIC, anon, authenticated;
 -- Security Advisor las marca por ser SECURITY DEFINER ejecutables, no porque
 -- filtren datos.
 --
--- PENDIENTE DE REVISAR A MANO: `rls_auto_enable()` aparece en el Security
--- Advisor pero no la crea ningún script de db/ — existe en la base y no en el
--- control de versiones, así que nadie puede revisar qué hace. Averigua su
--- origen (Supabase → Database → Functions) y, o bien súmala a este directorio,
--- o bien elimínala si fue una prueba suelta.
+-- rls_auto_enable() — NO SE TOCA, a pesar de que el Advisor la marca.
+--
+-- No la crea ningún script de db/ (vive solo en la base), así que se revisó a
+-- mano. Es la función de un EVENT TRIGGER: cada CREATE TABLE en el esquema
+-- public la dispara y le aplica ENABLE ROW LEVEL SECURITY a la tabla recién
+-- creada. Es decir, es un guardarraíl contra el error más caro de Supabase —
+-- publicar una tabla sin RLS, legible por cualquiera con la clave anon.
+--
+-- Su cuerpo llama a pg_event_trigger_ddl_commands(), que Postgres solo admite
+-- dentro de un event trigger: invocarla por RPC falla de inmediato con "can
+-- only be called from an event trigger function". El permiso de ejecución que
+-- señala el Advisor es, por tanto, inofensivo.
+--
+-- Y no se revoca a propósito. La ganancia sería puramente cosmética (silenciar
+-- un aviso sobre una función que ya es inerte si la llamas), mientras que el
+-- riesgo es real: si revocar llegara a impedir que el event trigger se dispare,
+-- las tablas nuevas nacerían sin RLS. Peor aún, la propia función se traga los
+-- errores con un EXCEPTION WHEN OTHERS que solo escribe en el log de Postgres,
+-- así que ese fallo sería silencioso. No compensa.
+--
+-- Sí conviene tenerla presente al leer db/06 y db/08: las tablas que crean ya
+-- salen con RLS activo por este trigger, además del ALTER TABLE explícito.
