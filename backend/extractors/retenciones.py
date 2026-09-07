@@ -283,9 +283,15 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
         except Exception as err:
             return {"error": str(err)}
 
-        # A este punto el parseo de texto+regex ya terminó.
-        if len(texto_completo.strip()) < 50 and not m_ctrl:
-            return {"error": "PDF de imagen — sin texto extraíble."}
+        # A este punto el parseo de texto+regex ya terminó. Antes esto cortaba
+        # de una vez ante cualquier PDF/imagen sin capa de texto (foto del
+        # DTE, escaneo) — pero tipo/gen/sello/fecha ya tienen defaults seguros
+        # y el gate de confianza de más abajo SÍ intenta Visión cuando el
+        # texto no alcanza; solo hacía falta no morir antes de llegar ahí.
+        # El corte real solo aplica cuando ni siquiera hay motor de Visión
+        # disponible para intentarlo.
+        if len(texto_completo.strip()) < 50 and not m_ctrl and not vision_disponible():
+            return {"error": "PDF de imagen — sin texto extraíble y sin motor de Visión disponible para leerlo."}
 
         # El Anexo 7 admite Comprobante de Retención (07) y también Notas de
         # Crédito/Débito (05/06) que corrigen una retención ya declarada —

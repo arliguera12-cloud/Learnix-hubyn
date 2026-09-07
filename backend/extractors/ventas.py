@@ -276,22 +276,36 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
     # baja (ver "Visión solo si Hacienda + regex no alcanzan").
     with ThreadPoolExecutor(max_workers=1) as _pool:
         _qr_future = _pool.submit(_leer_qr_y_consultar_mh, file_bytes)
+        _vision_ejecutada = False
+
+        def _llamar_vision():
+            # Único punto que invoca Visión — idempotente (si ya se llamó,
+            # p. ej. en el fallback de número de control, no la repite).
+            # Mismo patrón que compras.py.
+            nonlocal _vision_campos, _vision_alertas, _vision_audit
+            nonlocal gemini_correcciones, _vision_ejecutada
+            if _vision_ejecutada or not vision_disponible():
+                return
+            _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
+                file_bytes, "ventas",
+                {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
+            )
+            # += y no =: si Visión se dispara acá por primera vez tras el
+            # aviso de Hacienda (líneas de arriba), una reasignación directa
+            # lo borraba del audit trail en vez de sumarse a él.
+            gemini_correcciones += [
+                f"Visión: {a}" for a in _vision_alertas
+            ] if _vision_alertas else (
+                [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
+                if _vision_campos else []
+            )
+            _vision_ejecutada = True
 
         try:
             try:
                 texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
             except pdfplumber.pdfminer.pdfparser.PDFSyntaxError:
-                if vision_disponible():
-                    _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
-                        file_bytes, "ventas",
-                        {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
-                    )
-                    gemini_correcciones = [
-                        f"Visión: {a}" for a in _vision_alertas
-                    ] if _vision_alertas else (
-                        [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
-                        if _vision_campos else []
-                    )
+                _llamar_vision()
                 if not _vision_campos.get("num_control"):
                     return {"error_fatal": "PDF invalido o con sintaxis corrupta."}
                 texto_lineal = texto_visual = ""
@@ -321,7 +335,32 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 num_control = ctrl.replace("-", "")
 
             if not ctrl:
-                return {"error_tipo": "No se detecto un Numero de Control DTE valido."}
+                # Fallback: antes de gastar una llamada a Visión, el QR y la
+                # consulta a Hacienda (ya corriendo en paralelo) también traen
+                # el número de control — más barato y tan confiable como
+                # Visión. Sin este fallback, un PDF/imagen sin capa de texto
+                # (foto del DTE, escaneo) moría acá aunque Visión sí pudiera
+                # leerlo — mismo patrón ya usado en compras.py.
+                _qr_ctrl, _consulta_mh_ctrl = _qr_future.result()
+                _ctrl_candidato = ""
+                if _consulta_mh_ctrl:
+                    _ctrl_candidato = safe_str(
+                        ((_consulta_mh_ctrl.get("documento") or {}).get("identificacion") or {})
+                        .get("numeroControl")
+                    )
+                if not _ctrl_candidato and _qr_ctrl.get("num_control"):
+                    _ctrl_candidato = safe_str(_qr_ctrl["num_control"])
+                _m_vc = re.search(r'(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})', _ctrl_candidato, re.I)
+                if not _m_vc:
+                    _llamar_vision()
+                    _vc_ctrl = safe_str(_vision_campos.get("num_control", ""))
+                    _m_vc = re.search(r'(DTE-(\d{2})-[A-Z0-9]{1,20}-\d{12,18})', _vc_ctrl, re.I)
+                if _m_vc:
+                    ctrl        = _m_vc.group(1).upper()
+                    tipo        = _m_vc.group(2)
+                    num_control = ctrl.replace("-", "")
+                else:
+                    return {"error_tipo": "No se detecto un Numero de Control DTE valido."}
 
             # ── Validar tipo de documento ──────────────────────────────────────────
             if tipo not in TODOS_TIPOS_VALIDOS:
@@ -861,17 +900,8 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "perc": perc,  # ret NO se pasa: total ya es bruto (ver arriba), restarlo de nuevo duplicaría el ajuste
             }
             _confianza_pre_vision = calcular_confianza(_campos_pre_vision, "ventas")
-            if _confianza_pre_vision["score"] < 85 and vision_disponible():
-                _vision_campos, _vision_alertas, _vision_audit = extraer_dte_con_vision(
-                    file_bytes, "ventas",
-                    {"nit": _nit_emisor_ctx, "nombre": _nom_emisor_ctx},
-                )
-                gemini_correcciones += [
-                    f"Visión: {a}" for a in _vision_alertas
-                ] if _vision_alertas else (
-                    [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
-                    if _vision_campos else []
-                )
+            if _confianza_pre_vision["score"] < 85:
+                _llamar_vision()
                 if _vision_campos:
                     if _vision_campos.get("fecha") and not fecha:
                         fecha = _vision_campos["fecha"]
