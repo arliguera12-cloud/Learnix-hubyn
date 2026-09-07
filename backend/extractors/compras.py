@@ -605,7 +605,10 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 file_bytes, "compras",
                 {"nit": _nit_rec_ctx, "nombre": _nom_rec_ctx},
             )
-            gemini_correcciones = [
+            # += y no =: si Visión se dispara acá por primera vez tras el
+            # aviso de Hacienda (líneas de arriba), una reasignación directa
+            # lo borraba del audit trail en vez de sumarse a él.
+            gemini_correcciones += [
                 f"Visión: {a}" for a in _vision_alertas
             ] if _vision_alertas else (
                 [f"Visión: extrajo {len(_vision_campos)} campo(s)"]

@@ -263,9 +263,15 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
         except Exception as err:
             return {"error": str(err)}
 
-        # A este punto el parseo de texto+regex ya terminó.
-        if len(texto_completo.strip()) < 50 and not m_ctrl:
-            return {"error": "PDF de imagen — sin texto extraíble."}
+        # A este punto el parseo de texto+regex ya terminó. Antes esto cortaba
+        # de una vez ante cualquier PDF/imagen sin capa de texto (foto del
+        # DTE, escaneo) — pero tipo/gen/sello/fecha ya tienen defaults seguros
+        # y el gate de confianza de más abajo SÍ intenta Visión cuando el
+        # texto no alcanza; solo hacía falta no morir antes de llegar ahí.
+        # El corte real solo aplica cuando ni siquiera hay motor de Visión
+        # disponible para intentarlo.
+        if len(texto_completo.strip()) < 50 and not m_ctrl and not vision_disponible():
+            return {"error": "PDF de imagen — sin texto extraíble y sin motor de Visión disponible para leerlo."}
 
         if tipo != "14":
             return {"error_tipo": f"Documento DTE-{tipo}. Solo se admiten DTE-14 (Sujetos Excluidos)."}
@@ -364,6 +370,12 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
                 if _vision_campos.get("id_sujeto") and not id_sujeto:
                     id_sujeto = _vision_campos["id_sujeto"]
                     fuentes["id_sujeto"] = "vision"
+                # num_control no cuenta para calcular_confianza (no es de los
+                # campos que mira "sujetos_excluidos"), pero Visión ya lo
+                # devuelve — se aprovecha en vez de descartarlo cuando el
+                # regex sobre texto (m_nc, más arriba) no encontró nada.
+                if _vision_campos.get("num_control") and not num_control:
+                    num_control = _vision_campos["num_control"].upper()
                 if _vision_campos.get("base") and base == 0.0:
                     base = float(_vision_campos["base"])
                     fuentes["base"] = "vision"
