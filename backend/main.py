@@ -73,6 +73,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
+    # Sin esto el navegador oculta Content-Disposition a JS entre orígenes
+    # distintos (frontend en Vercel, backend en Railway) — el frontend no
+    # podía leer el nombre real del archivo que arma /exportar/excel (que
+    # ahora varía: .xlsx, .csv o .zip según el formato pedido).
+    expose_headers=["Content-Disposition"],
     max_age=600,
 )
 

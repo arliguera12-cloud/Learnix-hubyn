@@ -38,16 +38,20 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
   // Acá solo se filtra para dar aviso inmediato en vez de esperar el error del
   // servidor: la validación que cuenta es la del backend, que además comprueba
   // que el contenido sea realmente un PDF y no solo que el nombre lo diga.
-  const LIMITES_MB = { pdf: 10, json: 2 }
+  const LIMITES_MB = { pdf: 10, json: 2, jpg: 10, jpeg: 10, png: 10 }
 
   function handleFiles(selected) {
     const rechazados = []
     const validos = Array.from(selected).filter(f => {
-      const ext = f.name.toLowerCase().endsWith('.pdf') ? 'pdf'
-        : f.name.toLowerCase().endsWith('.json') ? 'json'
+      const nombre = f.name.toLowerCase()
+      const ext = nombre.endsWith('.pdf')  ? 'pdf'
+        : nombre.endsWith('.json') ? 'json'
+        : nombre.endsWith('.jpeg') ? 'jpeg'
+        : nombre.endsWith('.jpg')  ? 'jpg'
+        : nombre.endsWith('.png')  ? 'png'
         : null
       if (!ext) {
-        rechazados.push(`«${f.name}»: solo se aceptan archivos PDF o JSON.`)
+        rechazados.push(`«${f.name}»: solo se aceptan archivos PDF, imagen (JPG/PNG) o JSON.`)
         return false
       }
       if (f.size > LIMITES_MB[ext] * 1024 * 1024) {
@@ -174,13 +178,13 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
               Arrastrá el archivo aquí o hacé clic para elegirlo
             </p>
             <p className="text-xs text-fg-4 mt-0.5">
-              PDF o JSON firmado por Hacienda{multiple ? ' — se pueden elegir varios' : ''}
+              PDF, imagen (JPG/PNG) o JSON firmado por Hacienda{multiple ? ' — se pueden elegir varios' : ''}
             </p>
           </div>
           <input
             ref={inputRef}
             type="file"
-            accept=".pdf,.json"
+            accept=".pdf,.json,.jpg,.jpeg,.png"
             multiple={multiple}
             className="hidden"
             onChange={e => handleFiles(e.target.files)}

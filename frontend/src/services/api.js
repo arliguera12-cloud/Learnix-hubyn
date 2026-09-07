@@ -130,13 +130,27 @@ export async function guardarResultados(tipo, declaranteId, resultados) {
   }
 }
 
-// ─── Exportar Excel (formato F-07 Hacienda) ────────────────────────────────
+// ─── Exportar Excel / CSV oficial (formato F-07 Hacienda) ──────────────────
+//
+// formato: 'xlsx' (default, para revisión) o 'csv' — el archivo exacto que
+// exige el portal de Hacienda para subir el anexo (';', sin encabezado; ver
+// backend/routers/exportar.py::_build_csv_export). El backend responde con
+// el nombre de archivo real (.csv o .zip si hay más de un anexo, como en
+// Ventas) en el header Content-Disposition — usar nombreDesdeRespuesta() en
+// vez de asumir la extensión en el cliente.
 
-export function exportarExcel(tipo, declaranteId, registros, periodo) {
+export function nombreDesdeRespuesta(res, fallback) {
+  const cd = res.headers?.['content-disposition'] || ''
+  const m = cd.match(/filename="?([^";]+)"?/)
+  return m ? m[1] : fallback
+}
+
+export function exportarExcel(tipo, declaranteId, registros, periodo, formato = 'xlsx') {
   return api.post('/exportar/excel', {
     tipo,
     declarante_id: declaranteId,
     registros,
+    formato,
     ...(periodo && { periodo }),
   }, { responseType: 'blob' })
 }
@@ -146,6 +160,7 @@ export function exportarExcelCompras(declaranteId, registros, opts = {}) {
     tipo: 'compras',
     declarante_id: declaranteId,
     registros,
+    formato:  opts.formato  ?? 'xlsx',
     tipo_op:  opts.tipo_op  ?? '1',
     clasif:   opts.clasif   ?? '2',
     sector:   opts.sector   ?? '4',
@@ -160,6 +175,7 @@ export function exportarExcelVentas(declaranteId, registros, opts = {}) {
     tipo: 'ventas',
     declarante_id: declaranteId,
     registros,
+    formato:            opts.formato            ?? 'xlsx',
     tipo_op_renta:      opts.tipo_op_renta      ?? '1',
     tipo_ingreso_renta: opts.tipo_ingreso_renta ?? '3',
     periodo_ene2025:    opts.periodo_ene2025    ?? true,

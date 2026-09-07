@@ -25,7 +25,10 @@ import requests
 
 API_BASE = "https://www.googleapis.com/drive/v3"
 FOLDER_MIME = "application/vnd.google-apps.folder"
-TIPOS_DEFECTO = ("pdf", "json")
+# jpg/png agregados junto con la imagen como formato de entrada en
+# routers/procesamiento.py — el Centro de importación traía el mismo filtro
+# de extensiones y se hubiera quedado sin ver las fotos del DTE en Drive.
+TIPOS_DEFECTO = ("pdf", "json", "jpg", "jpeg", "png")
 
 # Límite de seguridad para no recorrer un árbol enorme por accidente.
 MAX_ARCHIVOS_HARD = 500

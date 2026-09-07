@@ -1,6 +1,7 @@
 /**
- * Centro de importación — trae PDF/JSON desde una carpeta de Google Drive o
- * desde adjuntos de Gmail, sin pasar primero por el explorador de archivos.
+ * Centro de importación — trae PDF, imagen o JSON desde una carpeta de
+ * Google Drive o desde adjuntos de Gmail, sin pasar primero por el
+ * explorador de archivos.
  *
  * Existía en la versión Streamlit (components/drive_import.py,
  * components/gmail_import.py) pero se perdió al reescribir a FastAPI/React —
@@ -14,12 +15,20 @@ import JSZip from 'jszip'
 import { IconNube, IconCorreo, IconExportar } from './Icons'
 import { importarDriveListar, importarDriveDescargar, importarGmailBuscar } from '../services/api'
 
+const _MIME_POR_EXT = {
+  '.json': 'application/json',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png':  'image/png',
+}
+
 function base64AFile(base64, nombre) {
   const binario = atob(base64)
   const bytes = new Uint8Array(binario.length)
   for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i)
-  const tipo = nombre.toLowerCase().endsWith('.json') ? 'application/json' : 'application/pdf'
-  return new File([bytes], nombre, { type: tipo })
+  const bajo = nombre.toLowerCase()
+  const ext = Object.keys(_MIME_POR_EXT).find(e => bajo.endsWith(e))
+  return new File([bytes], nombre, { type: ext ? _MIME_POR_EXT[ext] : 'application/pdf' })
 }
 
 /** Guarda un File ya en memoria como descarga del navegador — sin ida y vuelta al backend. */
@@ -125,7 +134,7 @@ function PanelDrive({ onImportar }) {
       const { data } = await importarDriveListar(apiKey.trim(), url.trim())
       setArchivos(data.archivos)
       setSeleccion(new Set(data.archivos.map((_, i) => i)))
-      if (!data.archivos.length) setError('No se encontraron PDF/JSON en esa carpeta.')
+      if (!data.archivos.length) setError('No se encontraron PDF, imagen o JSON en esa carpeta.')
     } catch (e) {
       setArchivos([])
       setError(e.response?.data?.detail || 'No se pudo leer la carpeta de Drive.')
