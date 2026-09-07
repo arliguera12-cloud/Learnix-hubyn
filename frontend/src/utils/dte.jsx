@@ -400,6 +400,25 @@ export function descargarBlob(blobData, nombre) {
 }
 
 /**
+ * Extrae el `detail` de un error de /exportar/excel. Como esas llamadas usan
+ * responseType: 'blob', axios no parsea el cuerpo del error (ej. el 400 de
+ * "no hay registros para exportar en CSV") como JSON — llega como Blob y hay
+ * que leerlo a mano. Si no es JSON o falla la lectura, cae al mensaje genérico.
+ */
+export async function detalleErrorExport(err, generico = 'Error al exportar. Intenta de nuevo.') {
+  const data = err?.response?.data
+  if (data instanceof Blob && data.type?.includes('json')) {
+    try {
+      const detail = JSON.parse(await data.text())?.detail
+      if (typeof detail === 'string') return detail
+    } catch {
+      // cuerpo no era JSON válido — usar el genérico
+    }
+  }
+  return generico
+}
+
+/**
  * Clave que identifica un DTE de forma única.
  *
  * El código de generación (UUID que asigna Hacienda) es único por documento:
@@ -476,6 +495,35 @@ export function avisoDuplicados(duplicados) {
   // volcar todos los nombres en un solo párrafo (que es lo que hacía ruido
   // en lotes de 20+ duplicados).
   return [`${n} documentos ya estaban en la lista y no se agregaron:`, ...duplicados].join('\n')
+}
+
+/**
+ * Redacta el aviso agregado de confianza baja, o null si el lote quedó limpio.
+ *
+ * El motivo por fila (`detalle_confianza`) ya lo calcula qa_utils y ya se
+ * muestra en ResultadosTabla — pero solo ahí, fila por fila: en un lote de
+ * 20+ documentos, dos o tres con alerta se pierden entre el resto hasta que
+ * el usuario los encuentra scrolleando. Este resumen aparece apenas termina
+ * de procesar, arriba de la tabla, igual que "revisa antes de exportar" en
+ * cualquier libro real.
+ */
+export function avisoConfianza(resultados) {
+  const conAlerta = resultados.filter(r => esAlerta(r.registro?.estado))
+  if (!conAlerta.length) return null
+
+  const resumen = conAlerta.length === 1
+    ? '1 documento necesita revisión antes de exportar:'
+    : conAlerta.length === resultados.length
+    ? `Los ${conAlerta.length} documentos necesitan revisión antes de exportar:`
+    : `${conAlerta.length} de ${resultados.length} documentos necesitan revisión antes de exportar:`
+
+  const detalle = conAlerta.map(r => {
+    const campos = r.registro?.campos_faltantes
+    const razon = r.registro?.detalle_confianza
+      || (campos?.length ? `Campos faltantes: ${campos.join(', ')}` : 'Confianza baja')
+    return `${r.filename || 'documento'}: ${razon}`
+  })
+  return [resumen, ...detalle].join('\n')
 }
 
 /**

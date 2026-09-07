@@ -81,7 +81,7 @@ def _construir_query(
     remitente: str = "",
     texto: str = "",
     dias: int | None = 30,
-    tipos: tuple[str, ...] = ("pdf", "json"),
+    tipos: tuple[str, ...] = ("pdf", "json", "jpg", "jpeg", "png"),
     solo_adjuntos: bool = True,
 ) -> str:
     """Arma una consulta estilo Gmail (X-GM-RAW)."""
@@ -146,7 +146,7 @@ def buscar_adjuntos(
     remitente: str = "",
     texto: str = "",
     dias: int = 30,
-    tipos: tuple[str, ...] = ("pdf", "json"),
+    tipos: tuple[str, ...] = ("pdf", "json", "jpg", "jpeg", "png"),
     max_correos: int = 50,
     mailbox: str = '"[Gmail]/All Mail"',
 ) -> list[dict]:

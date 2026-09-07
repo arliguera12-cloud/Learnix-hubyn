@@ -3,8 +3,10 @@ Exportación al formato exacto F-07 — Ministerio de Hacienda El Salvador.
 Columnas y nombres copiados exactamente del MVP Streamlit (pages/1_ y 2_).
 POST /exportar/excel → .xlsx
 """
+import csv
 import io
 import re
+import zipfile
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -288,12 +290,75 @@ def _build_xlsx(sheets: dict) -> bytes:
     return buf.getvalue()
 
 
+# ─── CSV builder (formato exacto de subida al portal de Hacienda) ──────────
+#
+# Los seis anexos definidos en utils/anexos_schema/*.json declaran el mismo
+# configuracion_archivo: CSV, separador ';', sin fila de encabezado, UTF-8,
+# celdas como texto. El xlsx de arriba es para que el contador revise antes
+# de declarar; este es el archivo que se sube al portal tal cual — un CSV
+# por anexo, porque cada anexo se declara por separado en Hacienda.
+
+_ANEXO_NUM = {
+    "Ventas_Contribuyentes":   1,
+    "Ventas_Consumidor":       2,
+    "Compras_F07":             3,
+    "SujetosExcluidos_Anexo5": 5,
+    "Retenciones_Anexo7":      7,
+}
+
+def _fila_a_texto(fila: dict) -> list[str]:
+    """Valores de una fila en el formato de texto exacto del anexo: montos
+    con 2 decimales fijos ("Colocar 0.00" en instrucciones_llenado), el
+    resto tal cual — igual que el valor que ya se ve en la hoja del xlsx."""
+    out = []
+    for v in fila.values():
+        out.append(f"{v:.2f}" if isinstance(v, float) else _s(v))
+    return out
+
+def _build_csv(filas: list[dict]) -> bytes:
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL, lineterminator="\r\n")
+    for fila in filas:
+        writer.writerow(_fila_a_texto(fila))
+    # UTF-8 sin BOM: es lo que declara configuracion_archivo en los anexos_schema.
+    return buf.getvalue().encode("utf-8")
+
+def _build_csv_export(sheets: dict, nombre_tipo: str, declarante_id: str, periodo_str: str):
+    """
+    Arma el/los CSV oficiales a partir de las mismas filas que arma el xlsx.
+    Sheets sin filas se omiten (un anexo con cero registros no se sube).
+    Devuelve (bytes, filename, mime): un .csv suelto si hay un solo anexo con
+    datos, o un .zip con un .csv por anexo si hay más de uno (caso Ventas,
+    que reparte contribuyentes/consumidor en Anexo 1 y Anexo 2).
+    """
+    con_datos = {nombre: filas for nombre, (_cols, filas, *_resto) in sheets.items() if filas}
+    if not con_datos:
+        raise HTTPException(status_code=400, detail="No hay registros para exportar en formato CSV.")
+
+    if len(con_datos) == 1:
+        (nombre, filas), = con_datos.items()
+        anexo = _ANEXO_NUM.get(nombre, "")
+        filename = f"F07_Anexo{anexo}_{nombre_tipo}_{declarante_id}_{periodo_str}.csv"
+        return _build_csv(filas), filename, "text/csv; charset=utf-8"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for nombre, filas in con_datos.items():
+            anexo = _ANEXO_NUM.get(nombre, "")
+            zf.writestr(f"Anexo{anexo}_{nombre}.csv", _build_csv(filas))
+    filename = f"F07_Anexos_{nombre_tipo}_{declarante_id}_{periodo_str}.zip"
+    return buf.getvalue(), filename, "application/zip"
+
+
 # ─── Request model ──────────────────────────────────────────────────────────
 
 class ExportarRequest(BaseModel):
     tipo: str
     declarante_id: str
     periodo: Optional[str] = None
+    # "xlsx" (default, para revisión) o "csv" (formato exacto de subida al
+    # portal de Hacienda: ';', sin encabezado — ver _build_csv_export).
+    formato: str = "xlsx"
     # El anexo se arma entero en memoria antes de responder, así que el tamaño
     # del lote tiene que estar acotado: sin tope, una sola petición podía
     # reservar toda la memoria del contenedor. 20.000 filas cubren de sobra un
@@ -324,6 +389,8 @@ async def exportar_excel(body: ExportarRequest):
             status_code=400,
             detail=f"Tipo inválido. Debe ser uno de: {', '.join(_TIPOS_VALIDOS)}",
         )
+    if body.formato not in ("xlsx", "csv"):
+        raise HTTPException(status_code=400, detail="Formato inválido. Debe ser 'xlsx' o 'csv'.")
 
     periodo_str = body.periodo or "sin_periodo"
     sheets: dict = {}
@@ -356,12 +423,16 @@ async def exportar_excel(body: ExportarRequest):
         "ventas": "Ventas", "compras": "Compras",
         "retenciones": "Retenciones", "sujetos_excluidos": "SujetosExcluidos",
     }[body.tipo]
-    filename = f"F07_{nombre_tipo}_{body.declarante_id}_{periodo_str}.xlsx"
-    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-    xlsx_bytes = _build_xlsx(sheets)
+    if body.formato == "csv":
+        contenido, filename, mime = _build_csv_export(sheets, nombre_tipo, body.declarante_id, periodo_str)
+    else:
+        filename = f"F07_{nombre_tipo}_{body.declarante_id}_{periodo_str}.xlsx"
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        contenido = _build_xlsx(sheets)
+
     return StreamingResponse(
-        io.BytesIO(xlsx_bytes),
+        io.BytesIO(contenido),
         media_type=mime,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
