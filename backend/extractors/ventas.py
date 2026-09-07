@@ -19,7 +19,7 @@ from utils.ai_utils import (
     procesar_dte_con_gemini,
     es_nombre_sospechoso,
 )
-from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
+from utils.gemini_vision import extraer_dte_con_vision, vision_disponible, vision_ultimo_error
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
 from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta
 from utils.qa_utils import calcular_confianza
@@ -293,12 +293,16 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
             # += y no =: si Visión se dispara acá por primera vez tras el
             # aviso de Hacienda (líneas de arriba), una reasignación directa
             # lo borraba del audit trail en vez de sumarse a él.
-            gemini_correcciones += [
-                f"Visión: {a}" for a in _vision_alertas
-            ] if _vision_alertas else (
-                [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
-                if _vision_campos else []
-            )
+            if _vision_alertas:
+                gemini_correcciones += [f"Visión: {a}" for a in _vision_alertas]
+            elif _vision_campos:
+                gemini_correcciones += [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
+            elif vision_ultimo_error():
+                # Visión se intentó y falló del todo (rate limit, modelo caído,
+                # etc.) — sin esto, el fallo quedaba mudo: el documento
+                # terminaba con el mismo error genérico de siempre y ningún
+                # rastro de qué pasó realmente con la llamada a Groq/Vertex.
+                gemini_correcciones += [f"Visión: {vision_ultimo_error()}"]
             _vision_ejecutada = True
 
         try:
@@ -360,7 +364,8 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     tipo        = _m_vc.group(2)
                     num_control = ctrl.replace("-", "")
                 else:
-                    return {"error_tipo": "No se detecto un Numero de Control DTE valido."}
+                    _detalle_vision = f" Visión: {vision_ultimo_error()}" if _vision_ejecutada and vision_ultimo_error() else ""
+                    return {"error_tipo": f"No se detecto un Numero de Control DTE valido.{_detalle_vision}"}
 
             # ── Validar tipo de documento ──────────────────────────────────────────
             if tipo not in TODOS_TIPOS_VALIDOS:

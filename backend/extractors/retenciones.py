@@ -17,7 +17,7 @@ from utils.pdf_utils import (
     extraer_texto_pdf,
 )
 from utils.ai_utils import gemini_disponible, procesar_dte_con_gemini
-from utils.gemini_vision import extraer_dte_con_vision, vision_disponible
+from utils.gemini_vision import extraer_dte_con_vision, vision_disponible, vision_ultimo_error
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
 from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta
 from utils.qa_utils import calcular_confianza
@@ -382,12 +382,15 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
                 file_bytes, "retenciones",
                 {"nit": _nit_cliente_ctx, "nombre": _nom_cliente_ctx},
             )
-            gemini_correcciones += [
-                f"Visión: {a}" for a in _vision_alertas
-            ] if _vision_alertas else (
-                [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
-                if _vision_campos else []
-            )
+            if _vision_alertas:
+                gemini_correcciones += [f"Visión: {a}" for a in _vision_alertas]
+            elif _vision_campos:
+                gemini_correcciones += [f"Visión: extrajo {len(_vision_campos)} campo(s)"]
+            elif vision_ultimo_error():
+                # Visión se intentó y falló del todo (rate limit, modelo
+                # caído, etc.) — sin esto, el documento quedaba con
+                # confianza baja sin ninguna pista de qué pasó.
+                gemini_correcciones += [f"Visión: {vision_ultimo_error()}"]
             if _vision_campos:
                 if _vision_campos.get("fecha") and not fecha:
                     fecha    = _vision_campos["fecha"]
