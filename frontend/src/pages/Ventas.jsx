@@ -1,12 +1,12 @@
 import { useState, useMemo } from 'react'
 import PdfUploader from '../components/PdfUploader'
-import { procesarVentas, procesarVentasLote, exportarExcelVentas, guardarResultados } from '../services/api'
+import { procesarVentas, procesarVentasLote, exportarExcelVentas, guardarResultados, nombreDesdeRespuesta } from '../services/api'
 import {
-  fmt, descargarBlob, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados,
+  fmt, descargarBlob, detalleErrorExport, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados, avisoConfianza,
   usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen,
   SearchBar, filtrarPorTexto, ErrorBox, AvisoBox,
 } from '../utils/dte'
-import { IconVentas, IconExportar, IconCheck, IconAlerta } from '../components/Icons'
+import { IconVentas, IconExportar, IconArchivo, IconCheck, IconAlerta } from '../components/Icons'
 
 // Tipos que van al Anexo 1 (Contribuyentes): CCF, NC, ND
 const TIPOS_CONTRIB = new Set(['03', '05', '06'])
@@ -27,7 +27,7 @@ export default function Ventas() {
   const { resultados, setResultados, declaranteId, setDeclaranteId } = usePersistenciaExtractor('ventas')
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState(null)
-  const [exportando,   setExportando]   = useState(false)
+  const [exportando,   setExportando]   = useState(null) // null | 'xlsx' | 'csv'
   const [tab,          setTab]          = useState(0)
   const [aviso,        setAviso]        = useState(null)
   const [busqueda,     setBusqueda]     = useState('')
@@ -100,6 +100,7 @@ export default function Ventas() {
   )
 
   const registros = useMemo(() => resultadosFiltrados.map(r => r.registro || {}), [resultadosFiltrados])
+  const avisoConf = useMemo(() => avisoConfianza(resultados), [resultados])
 
   const contrib = useMemo(() => registros.filter(r => TIPOS_CONTRIB.has(String(r.tipo))), [registros])
   const consumidor = useMemo(() => registros.filter(r => !TIPOS_CONTRIB.has(String(r.tipo))), [registros])
@@ -160,16 +161,16 @@ export default function Ventas() {
 
   // ── exportar ─────────────────────────────────────────────────────────────
 
-  async function handleExportar() {
+  async function handleExportar(formato = 'xlsx') {
     if (!registros.length) return
-    setExportando(true)
+    setExportando(formato)
     try {
-      const res = await exportarExcelVentas(declaranteId, registros)
-      descargarBlob(res.data, `F07_Ventas_${declaranteId}.xlsx`)
-    } catch {
-      setError('Error al exportar. Intenta de nuevo.')
+      const res = await exportarExcelVentas(declaranteId, registros, { formato })
+      descargarBlob(res.data, nombreDesdeRespuesta(res, `F07_Ventas_${declaranteId}.${formato}`))
+    } catch (err) {
+      setError(await detalleErrorExport(err))
     } finally {
-      setExportando(false)
+      setExportando(null)
     }
   }
 
@@ -230,6 +231,9 @@ export default function Ventas() {
 
       {/* Documentos repetidos omitidos */}
       <AvisoBox mensaje={aviso} />
+
+      {/* Confianza baja — resumen agregado, antes solo se veía fila por fila */}
+      <AvisoBox mensaje={avisoConf} />
 
       {/* Tabs */}
       {resultados.length > 0 && (
@@ -329,15 +333,29 @@ export default function Ventas() {
                   )}
                 </div>
 
-                <div className="flex justify-end">
-                  <button onClick={handleExportar} disabled={exportando} className="btn-primary flex items-center gap-2 px-5 py-2">
-                    {exportando ? (
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => handleExportar('xlsx')} disabled={!!exportando} className="btn-primary flex items-center gap-2 px-5 py-2">
+                    {exportando === 'xlsx' ? (
                       <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                       </svg>
                     ) : <IconExportar className="w-4 h-4" />}
                     Generar / Descargar Ventas
+                  </button>
+                  <button
+                    onClick={() => handleExportar('csv')}
+                    disabled={!!exportando}
+                    title="Formato exacto para subir el anexo al portal de Hacienda"
+                    className="btn-ghost flex items-center gap-2 px-4 py-2 border border-slate-700"
+                  >
+                    {exportando === 'csv' ? (
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                      </svg>
+                    ) : <IconArchivo className="w-4 h-4" />}
+                    CSV Anexo (MH)
                   </button>
                 </div>
               </div>
@@ -425,15 +443,29 @@ export default function Ventas() {
                   </div>
                 </div>
 
-                <div className="flex justify-end">
-                  <button onClick={handleExportar} disabled={exportando} className="btn-primary flex items-center gap-2 px-5 py-2">
-                    {exportando ? (
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => handleExportar('xlsx')} disabled={!!exportando} className="btn-primary flex items-center gap-2 px-5 py-2">
+                    {exportando === 'xlsx' ? (
                       <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                       </svg>
                     ) : <IconExportar className="w-4 h-4" />}
                     Generar / Descargar Ventas
+                  </button>
+                  <button
+                    onClick={() => handleExportar('csv')}
+                    disabled={!!exportando}
+                    title="Formato exacto para subir el anexo al portal de Hacienda"
+                    className="btn-ghost flex items-center gap-2 px-4 py-2 border border-slate-700"
+                  >
+                    {exportando === 'csv' ? (
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                      </svg>
+                    ) : <IconArchivo className="w-4 h-4" />}
+                    CSV Anexo (MH)
                   </button>
                 </div>
               </div>

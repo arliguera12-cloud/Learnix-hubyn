@@ -5,6 +5,7 @@ Cada endpoint recibe un PDF o (ventas/compras) un JSON firmado por Hacienda
 listos para guardarse en Supabase.
 """
 import asyncio
+import io
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
@@ -25,6 +26,8 @@ router = APIRouter(dependencies=[Depends(get_current_org)])
 
 _MAX_PDF_SIZE = 10 * 1024 * 1024   # 10MB
 _MAX_JSON_SIZE = 2 * 1024 * 1024   # 2MB
+_MAX_IMG_SIZE = 10 * 1024 * 1024   # 10MB — igual que el PDF; una foto de celular ronda esto
+_EXT_IMAGEN = (".jpg", ".jpeg", ".png")
 _MAX_LOTE_ARCHIVOS = 15             # ver TAMANO_TANDA en frontend/src/utils/dte.jsx — con más,
                                      # el pico de memoria de Visión en paralelo tumbaba el contenedor
 
@@ -33,14 +36,42 @@ _MAX_LOTE_ARCHIVOS = 15             # ver TAMANO_TANDA en frontend/src/utils/dte
 # Helper compartido
 # ---------------------------------------------------------------------------
 
+def _imagen_a_pdf(content: bytes) -> bytes:
+    """
+    Envuelve una foto/imagen del DTE en un PDF de una sola página.
+
+    El resto del pipeline (extraer_texto_pdf → confianza → visión, ver
+    extractors/*.py) solo sabe leer PDF. En vez de abrir un tercer camino de
+    datos para la imagen, se normaliza acá al mismo formato que ya procesa un
+    PDF escaneado: la extracción de texto no encuentra nada, la confianza cae,
+    y el motor de visión —que ya lee PDFs sin capa de texto, ver
+    utils/ai_utils.py _pdf_a_imagen_b64— toma el documento sin ningún cambio
+    más downstream.
+    """
+    from PIL import Image, UnidentifiedImageError
+    try:
+        img = Image.open(io.BytesIO(content))
+        img.load()  # Image.open es perezoso — sin esto un archivo truncado pasa sin error
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="PDF")
+        return buf.getvalue()
+    except UnidentifiedImageError:
+        raise HTTPException(status_code=400, detail="El archivo no es una imagen válida")
+    except Exception:
+        raise HTTPException(status_code=400, detail="No se pudo procesar la imagen")
+
+
 def _read_upload_bytes(file: UploadFile, permitir_json: bool = False) -> tuple[bytes, str]:
     """
-    Lee y valida el archivo subido. Acepta .pdf siempre; .json solo cuando
-    permitir_json=True (hoy: ventas y compras, que tienen parser JSON nativo
-    contra el schema oficial de Hacienda — ver utils/concurrent_processor.py).
+    Lee y valida el archivo subido. Acepta .pdf e imagen (.jpg/.jpeg/.png)
+    siempre; .json solo cuando permitir_json=True (hoy: ventas y compras, que
+    tienen parser JSON nativo contra el schema oficial de Hacienda — ver
+    utils/concurrent_processor.py).
 
     Returns:
-        (bytes, "pdf"|"json")
+        (bytes, "pdf"|"json") — una imagen vuelve como "pdf": ver _imagen_a_pdf.
     """
     filename = (file.filename or "").lower()
 
@@ -51,6 +82,12 @@ def _read_upload_bytes(file: UploadFile, permitir_json: bool = False) -> tuple[b
         if not content.startswith(b"%PDF-"):
             raise HTTPException(status_code=400, detail="El archivo no es un PDF válido")
         return content, "pdf"
+
+    if filename.endswith(_EXT_IMAGEN):
+        content = file.file.read()
+        if len(content) > _MAX_IMG_SIZE:
+            raise HTTPException(status_code=400, detail="La imagen excede 10MB")
+        return _imagen_a_pdf(content), "pdf"
 
     if filename.endswith(".json"):
         if not permitir_json:
@@ -69,7 +106,7 @@ def _read_upload_bytes(file: UploadFile, permitir_json: bool = False) -> tuple[b
             raise HTTPException(status_code=400, detail="El archivo no es un JSON válido")
         return content, "json"
 
-    tipos_aceptados = "PDF o JSON" if permitir_json else "PDF"
+    tipos_aceptados = "PDF, imagen (JPG/PNG) o JSON" if permitir_json else "PDF o imagen (JPG/PNG)"
     raise HTTPException(status_code=400, detail=f"Solo se aceptan archivos {tipos_aceptados}")
 
 

@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
 import PdfUploader from './PdfUploader'
 import ResultadosTabla from './ResultadosTabla'
-import { exportarExcel, guardarResultados } from '../services/api'
+import { exportarExcel, guardarResultados, nombreDesdeRespuesta } from '../services/api'
 import {
-  fmt, descargarBlob, fusionarSinDuplicados, avisoDuplicados, nivelEstado,
+  fmt, descargarBlob, detalleErrorExport, fusionarSinDuplicados, avisoDuplicados, avisoConfianza, nivelEstado,
   usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA,
   SearchBar, filtrarPorTexto, ErrorBox, AvisoBox,
 } from '../utils/dte'
-import { IconExportar } from './Icons'
+import { IconExportar, IconArchivo } from './Icons'
 
 const FILTROS = [
   ['todos',   'Todos'],
@@ -48,7 +48,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
   const { resultados, setResultados, declaranteId, setDeclaranteId } = usePersistenciaExtractor(tipo)
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState(null)
-  const [exportando,   setExportando]   = useState(false)
+  const [exportando,   setExportando]   = useState(null) // null | 'xlsx' | 'csv'
   const [aviso,        setAviso]        = useState(null)
   const [filtro,       setFiltro]       = useState('todos')
   const [busqueda,     setBusqueda]     = useState('')
@@ -123,17 +123,17 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
     }
   }
 
-  async function handleExportarTodo() {
+  async function handleExportarTodo(formato = 'xlsx') {
     if (!resultados.length) return
-    setExportando(true)
+    setExportando(formato)
     try {
       const registros = resultados.map(r => r.registro || {})
-      const res = await exportarExcel(tipo, declaranteId, registros)
-      descargarBlob(res.data, `F07_${tipo}_${declaranteId}.xlsx`)
-    } catch {
-      setError('Error al exportar. Intenta de nuevo.')
+      const res = await exportarExcel(tipo, declaranteId, registros, null, formato)
+      descargarBlob(res.data, nombreDesdeRespuesta(res, `F07_${tipo}_${declaranteId}.${formato}`))
+    } catch (err) {
+      setError(await detalleErrorExport(err))
     } finally {
-      setExportando(false)
+      setExportando(null)
     }
   }
 
@@ -146,6 +146,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
 
   const exitosos   = resultados.length
   const totales    = exitosos > 0 ? calcularTotales(tipo, resultados) : null
+  const avisoConf  = useMemo(() => avisoConfianza(resultados), [resultados])
   const labelIva   = tipo === 'ventas' ? 'Débito Fiscal' : 'IVA / Retención'
   const labelGrav  = tipo === 'ventas' ? 'Ventas Gravadas' : 'Monto Gravado'
   const labelTotal = 'Total'
@@ -221,6 +222,11 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
       {/* Documentos repetidos omitidos */}
       <AvisoBox mensaje={aviso} />
 
+      {/* Confianza baja — antes solo se veía fila por fila; en un lote
+          grande, dos o tres documentos con alerta se perdían hasta que el
+          usuario scrolleaba toda la tabla. */}
+      <AvisoBox mensaje={avisoConf} />
+
       {/* Resumen del lote */}
       {exitosos > 0 && totales && (
         <div className="card space-y-4">
@@ -230,11 +236,11 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
             </h3>
             <div className="flex items-center gap-2">
               <button
-                onClick={handleExportarTodo}
-                disabled={exportando}
+                onClick={() => handleExportarTodo('xlsx')}
+                disabled={!!exportando}
                 className="btn-primary text-sm px-4 py-1.5 flex items-center gap-2"
               >
-                {exportando ? (
+                {exportando === 'xlsx' ? (
                   <>
                     <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
@@ -245,6 +251,20 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
                 ) : (
                   <><IconExportar className="w-4 h-4" /> Exportar todo ({exitosos})</>
                 )}
+              </button>
+              <button
+                onClick={() => handleExportarTodo('csv')}
+                disabled={!!exportando}
+                title="Formato exacto para subir el anexo al portal de Hacienda"
+                className="btn-ghost text-sm px-3 py-1.5 flex items-center gap-2 border border-slate-700"
+              >
+                {exportando === 'csv' ? (
+                  <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                  </svg>
+                ) : <IconArchivo className="w-3.5 h-3.5" />}
+                CSV Anexo (MH)
               </button>
               <button
                 onClick={handleLimpiar}

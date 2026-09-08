@@ -29,8 +29,8 @@ node_modules/
 *.swp
 *.swo
 
-# Claude Code — skills instalados localmente (solo para este entorno,
-# no son parte del proyecto)
-.agents/
+# Claude Code — skills instaladas localmente (npx skills add), config personal
+# de la herramienta, no del negocio. .claude/skills/* son symlinks a .agents/.
 .claude/
+.agents/
 skills-lock.json
