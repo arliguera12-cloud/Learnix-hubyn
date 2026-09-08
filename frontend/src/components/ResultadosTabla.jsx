@@ -122,6 +122,14 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index, onCor
   const tieneError  = registro.error || registro.error_fatal || registro.error_tipo
   const errorMsg    = registro.error_fatal || registro.error_tipo || registro.error
 
+  // Solo existe durante la sesión en la que se subió (ver adjuntarArchivosLocales
+  // en utils/dte.jsx) — un documento traído de Revisión Manual, de una subida
+  // anterior, no lo tiene: no hay dónde conseguir el PDF original ya perdido.
+  function verPdf() {
+    const url = URL.createObjectURL(data.archivoLocal)
+    window.open(url, '_blank', 'noopener')
+  }
+
   async function handleExportar() {
     setExportando(true)
     try {
@@ -186,6 +194,16 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index, onCor
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {data.archivoLocal && (
+            <button
+              type="button"
+              onClick={verPdf}
+              className="btn-ghost text-xs px-2 py-1 text-sky-400"
+              title="Abre el archivo tal como se subió, en otra pestaña"
+            >
+              Ver PDF
+            </button>
+          )}
           {onCorregir && esAlerta(registro.estado) && (
             <button
               onClick={() => { setForm({ ...registro }); setCorrigiendo(v => !v) }}
@@ -232,6 +250,20 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index, onCor
       {/* Corrección en línea — mismos campos y mismo criterio que Revisión Manual */}
       {corrigiendo && form && (
         <div className="px-4 py-3 border-b border-surface-600/50 bg-surface-700/30 space-y-3">
+          {data.archivoLocal ? (
+            <button
+              type="button"
+              onClick={verPdf}
+              className="text-xs text-sky-400 hover:text-sky-300 underline underline-offset-2"
+            >
+              Abrir el PDF original en otra pestaña, para comparar antes de corregir
+            </button>
+          ) : (
+            <p className="text-xs text-slate-500 italic">
+              El PDF original no está disponible (documento de una sesión anterior) —
+              revisá los valores contra tu propia copia del archivo antes de guardar.
+            </p>
+          )}
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {(CAMPOS_EDITABLES[tipo] || []).map(([campo, label]) => (
               <div key={campo}>

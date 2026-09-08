@@ -23,7 +23,7 @@ from utils.gemini_vision import extraer_dte_con_vision, vision_disponible, visio
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
 from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta
 from utils.qa_utils import calcular_confianza
-from utils.dte_layout import ids_pareados, identificadores_emisor, buscar_numero_control, cliente_aparece_en_documento
+from utils.dte_layout import ids_pareados, identificadores_emisor, buscar_numero_control, verificar_cliente_en_documento
 from utils.constants import (
     TIPOS_CONTRIBUYENTES,
     TIPOS_CONSUMIDOR,
@@ -320,12 +320,18 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
 
             texto_completo = texto_lineal + "\n" + texto_visual
 
-            if not cliente_aparece_en_documento(texto_completo, cliente_activo):
+            _aparece, _motivo = verificar_cliente_en_documento(texto_completo, cliente_activo, "emisor")
+            if not _aparece:
                 nombre_cli = safe_str(cliente_activo.get('nombre', '')).strip() or "el cliente seleccionado"
+                if _motivo.startswith("aparece como"):
+                    return {"error_fatal": (
+                        f"Este documento parece una compra, no una venta: {nombre_cli} {_motivo} "
+                        "del documento. Subilo desde el extractor de Compras."
+                    )}
                 return {"error_fatal": (
-                    f"Este documento no parece corresponder a {nombre_cli}: no aparece como "
-                    "emisor ni receptor (se buscó por NRC, NIT, DUI y nombre). Revisá que "
-                    "subiste el archivo del cliente correcto."
+                    f"Este documento no parece corresponder a {nombre_cli} como emisor "
+                    "(se buscó por NRC, NIT, DUI y nombre). Revisá que subiste el archivo "
+                    "del cliente correcto."
                 )}
 
             t_clean = re.sub(r'[ \t]+', ' ', texto_completo)
