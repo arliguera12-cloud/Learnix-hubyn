@@ -4,10 +4,11 @@
 
 /*
  * Sistema de tema — claro (por defecto) y oscuro (clase .dark en <html>).
- * Paleta neutra fría + un solo acento (índigo) para interacción/marca,
- * más verde/ámbar/rojo estándar para éxito/aviso/error. Reemplaza la
- * paleta editorial (papel, tinta, bermellón) por superficies planas con
- * sombra suave — un solo lenguaje de elevación en vez de reglas/hairlines.
+ * Paleta neutra fría + un solo acento de marca (bermellón, el mismo tono
+ * distintivo del sistema editorial anterior, no el índigo genérico de SaaS
+ * con el que se probó primero), más verde/ámbar/rojo estándar para
+ * éxito/aviso/error. Superficies planas con sombra suave en vez de
+ * reglas/hairlines, pero el color de marca es intencional, no de plantilla.
  */
 :root {
   --bg: #f7f8fa;
@@ -18,8 +19,8 @@
   --ink-3: #495166;
   --ink-4: #6b7280;
   --ink-5: #9aa1b0;
-  /* Acento primario — interacción, marca, foco */
-  --gold: #4f46e5;
+  /* Acento primario — interacción, marca, foco. Bermellón, no índigo. */
+  --gold: #b8451f;
   /* Éxito — cifras conformes, estados OK */
   --cinnabar: #17974a;
   /* Error/negativo — separado del acento primario */
@@ -37,7 +38,7 @@
   --ink3-rgb: 73 81 102;
   --ink4-rgb: 107 114 128;
   --ink5-rgb: 154 161 176;
-  --gold-rgb: 79 70 229;
+  --gold-rgb: 184 69 31;
   --cinnabar-rgb: 23 151 74;
   --danger-rgb: 220 38 38;
   --warn-rgb: 180 83 9;
@@ -55,7 +56,7 @@
   --ink-3: #a7adbc;
   --ink-4: #868d9e;
   --ink-5: #565d6d;
-  --gold: #818cf8;
+  --gold: #e0763f;
   --cinnabar: #34d073;
   --danger: #f87171;
 
@@ -67,7 +68,7 @@
   --ink3-rgb: 167 173 188;
   --ink4-rgb: 134 141 158;
   --ink5-rgb: 86 93 109;
-  --gold-rgb: 129 140 248;
+  --gold-rgb: 224 118 63;
   --cinnabar-rgb: 52 208 115;
   --danger-rgb: 248 113 113;
   --warn-rgb: 251 191 36;

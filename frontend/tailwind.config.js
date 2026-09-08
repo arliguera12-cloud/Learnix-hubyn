@@ -18,7 +18,7 @@ export default {
           800: 'rgb(var(--panel-rgb) / <alpha-value>)',
           900: 'rgb(var(--bg-rgb) / <alpha-value>)',
         },
-        // Primario — acento índigo único de marca/interacción. Pestañas
+        // Primario — acento bermellón único de marca/interacción. Pestañas
         // activas, barras de progreso, foco de inputs, CTA.
         brand: {
           50:  'rgb(var(--gold-rgb) / <alpha-value>)',
@@ -84,8 +84,7 @@ export default {
           900: 'rgb(var(--warn-rgb) / <alpha-value>)',
         },
         // Azules/rosas sueltos que quedaron de la plantilla original: se
-        // reconducen al acento único de marca (ahora índigo, así que ya
-        // no hace falta "disfrazarlos" — son, literalmente, el acento).
+        // reconducen al único acento de marca en vez de dejarlos sueltos.
         blue:   { 400: 'rgb(var(--gold-rgb) / <alpha-value>)', 500: 'rgb(var(--gold-rgb) / <alpha-value>)' },
         sky:    { 400: 'rgb(var(--gold-rgb) / <alpha-value>)', 500: 'rgb(var(--gold-rgb) / <alpha-value>)' },
         green:  { 400: 'rgb(var(--cinnabar-rgb) / <alpha-value>)' },
