@@ -5,11 +5,67 @@ import {
   IconVentas, IconCompras, IconRetenciones, IconSujetos, IconSeccion, IconCheck,
 } from '../components/Icons'
 
-/** Índice de características — el "por qué Learnix" frente a hacerlo a mano. */
+/**
+ * Documentos de ejemplo para la ilustración del hero: cada uno arranca
+ * desordenado (rotado y desplazado vía --doc-start) y se asienta en su
+ * lugar en la grilla — la promesa del producto hecha imagen, no un
+ * screenshot falso de la interfaz.
+ */
+const DOCUMENTOS_HERO = [
+  { start: 'translate(-24px, 20px) rotate(-10deg)', delay: '0ms',   qr: true  },
+  { start: 'translate(22px, -16px) rotate(8deg)',   delay: '90ms',  qr: false },
+  { start: 'translate(-18px, -22px) rotate(6deg)',  delay: '180ms', qr: false },
+  { start: 'translate(20px, 18px) rotate(-7deg)',   delay: '270ms', qr: true  },
+]
+
+/** Ilustración del hero — documentos DTE (con su QR) ordenándose en la grilla. */
+function IlustracionHero() {
+  return (
+    <div className="relative aspect-[4/5] max-w-xs md:max-w-sm mx-auto" aria-hidden="true">
+      <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-accent/10 blur-2xl" />
+      <div className="absolute inset-0 rounded-2xl bg-panel border border-hairline shadow-card-lg" />
+      <div className="relative h-full grid grid-cols-2 gap-3.5 p-6">
+        {DOCUMENTOS_HERO.map((d, i) => (
+          <div
+            key={i}
+            className="doc-card rounded-lg border border-hairline bg-paper p-2.5 shadow-card"
+            style={{ '--doc-start': d.start, animationDelay: d.delay }}
+          >
+            <div className="h-1.5 w-7 rounded-full bg-accent/70 mb-2" />
+            <div className="space-y-1.5">
+              <div className="h-1 rounded-full bg-fg-4/30 w-full" />
+              <div className="h-1 rounded-full bg-fg-4/30 w-4/5" />
+              <div className="h-1 rounded-full bg-fg-4/30 w-3/5" />
+            </div>
+            {d.qr && (
+              <div className="mt-2 grid grid-cols-3 grid-rows-3 gap-[1.5px] w-5 h-5">
+                {Array.from({ length: 9 }).map((_, qi) => (
+                  <span
+                    key={qi}
+                    className={`rounded-[1px] ${[0, 1, 3, 4, 8].includes(qi) ? 'bg-fg/70' : ''}`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div
+        className="animate-rise absolute -bottom-3 -right-3 h-11 w-11 rounded-full bg-accent2
+                   text-[#fff] flex items-center justify-center shadow-card"
+        style={{ animationDelay: '520ms' }}
+      >
+        <IconCheck className="w-5 h-5" />
+      </div>
+    </div>
+  )
+}
+
+/** Índice de características, el "por qué Learnix" frente a hacerlo a mano. */
 const CARACTERISTICAS = [
   {
     titulo: 'Lectura nativa del DTE',
-    detalle: <>Lee el <b>JSON firmado</b> por Hacienda campo por campo — o el PDF si no lo tenés — sin regex frágil ni plantillas que se rompen con el próximo formato.</>,
+    detalle: <>Lee el <b>JSON firmado</b> por Hacienda campo por campo (o el PDF si no lo tenés), sin regex frágil ni plantillas que se rompen con el próximo formato.</>,
   },
   {
     titulo: 'Verificación con IA',
@@ -17,11 +73,11 @@ const CARACTERISTICAS = [
   },
   {
     titulo: 'Multi-cliente real',
-    detalle: <>Directorio de clientes con cambio instantáneo — cada extracción queda <b>separada</b>, sin mezclar el trabajo de dos empresas en la misma tabla.</>,
+    detalle: <>Directorio de clientes con cambio instantáneo: cada extracción queda <b>separada</b>, sin mezclar el trabajo de dos empresas en la misma tabla.</>,
   },
   {
     titulo: 'Anexos listos para declarar',
-    detalle: <>Exportá a Excel con los campos exactos del anexo — 1, 2 o 3 — en un clic, <b>sin reordenar columnas</b> a mano.</>,
+    detalle: <>Exportá a Excel con los campos exactos del anexo (1, 2 o 3) en un clic, <b>sin reordenar columnas</b> a mano.</>,
   },
   {
     titulo: 'Importación desde Drive y Gmail',
@@ -35,7 +91,7 @@ const CARACTERISTICAS = [
 
 const STATS = [
   ['4', 'Anexos de Hacienda cubiertos: Ventas, Compras, Retenciones y Sujetos Excluidos.'],
-  ['2', 'Motores de IA verificando cada documento — lectura Vision y verificación textual.'],
+  ['2', 'Motores de IA verificando cada documento: lectura Vision y verificación textual.'],
   ['100%', 'Campos leídos del documento firmado por Hacienda, no de una plantilla genérica.'],
   ['0', 'Captura manual. Todo desde el navegador, sin instalar nada.'],
 ]
@@ -45,7 +101,7 @@ const MODULOS = [
     Icon: IconVentas,
     titulo: 'Ventas',
     detalle: 'CCF, notas de crédito/débito y facturas de consumidor final, leídas directo del DTE firmado.',
-    ref: 'DTE-01 · 03 · 05 · 06 — Anexos 1 y 2',
+    ref: 'DTE-01 · 03 · 05 · 06 · Anexos 1 y 2',
   },
   {
     Icon: IconCompras,
@@ -57,13 +113,13 @@ const MODULOS = [
     Icon: IconRetenciones,
     titulo: 'Retenciones',
     detalle: 'Comprobantes de retención listos para la casilla exacta del formulario.',
-    ref: 'DTE-07 — Casilla 162',
+    ref: 'DTE-07 · Casilla 162',
   },
   {
     Icon: IconSujetos,
     titulo: 'Sujetos Excluidos',
     detalle: 'Compras a sujetos excluidos de IVA, clasificadas sin revisión manual.',
-    ref: 'DTE-14 — Casilla 66',
+    ref: 'DTE-14 · Casilla 66',
   },
 ]
 
@@ -88,7 +144,7 @@ const WHATSAPP_SOLICITAR_ACCESO =
   '&type=phone_number&app_absent=0'
 
 const PRECIO_ITEMS = [
-  'Extracción ilimitada de DTE — PDF y JSON firmado',
+  'Extracción ilimitada de DTE: PDF y JSON firmado',
   'Los 4 anexos: Ventas, Compras, Retenciones, Sujetos Excluidos',
   'Verificación con IA y puntaje de confianza por documento',
   'Directorio de clientes ilimitado, con historial separado',
@@ -157,51 +213,52 @@ export default function LandingPage() {
 
       {/* ═══ Hero ═══ */}
       <section className="max-w-[75rem] mx-auto px-6 pt-16 pb-16 md:pt-24 md:pb-24">
-        <div className="max-w-3xl">
-          <p className="reveal text-[13px] uppercase tracking-[0.18em] text-accent font-semibold mb-4">
-            Extracción automática de DTE · El Salvador
-          </p>
-          <h1
-            className="reveal text-fg font-bold tracking-tight leading-[1.05]"
-            style={{ fontSize: 'clamp(40px, 6vw, 72px)' }}
-          >
-            Tus DTE, por fin, en orden.
-          </h1>
-          <p className="reveal text-lg text-fg-3 leading-relaxed mt-6 max-w-2xl">
-            Learnix lee el documento firmado por Hacienda campo por campo — PDF o JSON — y en
-            segundos tenés tus anexos de IVA listos para declarar: ventas, compras, retenciones y
-            sujetos excluidos, sin tipear un solo número.
-          </p>
-          <div className="reveal mt-8 flex flex-wrap items-center gap-3">
-            <Link to="/login" className="btn-primary py-3 px-6 text-[15px]">
-              Ingresar al sistema
-            </Link>
-            <a href="#producto" className="btn-ghost py-3 px-6 border border-hairline text-[15px]">
-              Ver características
-            </a>
+        <div className="grid md:grid-cols-[1.2fr_1fr] gap-12 md:gap-10 items-center">
+          <div>
+            <p className="reveal text-[13px] uppercase tracking-[0.18em] text-accent font-semibold mb-4">
+              Extracción automática de DTE · El Salvador
+            </p>
+            <h1
+              className="reveal text-fg font-bold tracking-tight leading-[1.05]"
+              style={{ fontSize: 'clamp(40px, 5.5vw, 68px)' }}
+            >
+              Tus DTE, por fin, en orden.
+            </h1>
+            <p className="reveal text-lg text-fg-3 leading-relaxed mt-6 max-w-lg">
+              Learnix lee el documento firmado por Hacienda campo por campo, en PDF o JSON, y en
+              segundos tenés tus anexos de IVA listos para declarar: ventas, compras, retenciones y
+              sujetos excluidos, sin tipear un solo número.
+            </p>
+            <div className="reveal mt-8 flex flex-wrap items-center gap-3">
+              <Link to="/login" className="btn-primary py-3 px-6 text-[15px]">
+                Ingresar al sistema
+              </Link>
+              <a href="#producto" className="btn-ghost py-3 px-6 border border-hairline text-[15px]">
+                Ver características
+              </a>
+            </div>
+
+            <div className="reveal mt-12 grid grid-cols-3 gap-6 max-w-md">
+              {[
+                ['4', 'Anexos cubiertos'],
+                ['0', 'Captura manual'],
+                ['seg.', 'Por documento'],
+              ].map(([valor, label]) => (
+                <div key={label}>
+                  <p className="text-3xl font-bold text-fg leading-none">{valor}</p>
+                  <p className="text-xs text-fg-4 mt-1.5">{label}</p>
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className="reveal mt-12 grid grid-cols-3 gap-6 max-w-md">
-            {[
-              ['4', 'Anexos cubiertos'],
-              ['0', 'Captura manual'],
-              ['seg.', 'Por documento'],
-            ].map(([valor, label]) => (
-              <div key={label}>
-                <p className="text-3xl font-bold text-fg leading-none">{valor}</p>
-                <p className="text-xs text-fg-4 mt-1.5">{label}</p>
-              </div>
-            ))}
-          </div>
+          <IlustracionHero />
         </div>
       </section>
 
       {/* ═══ Producto — índice de características ═══ */}
       <section id="producto" className="max-w-[75rem] mx-auto px-6 py-20 md:py-24 scroll-mt-16 border-t border-hairline">
         <div className="reveal max-w-2xl mb-12">
-          <p className="text-[13px] uppercase tracking-[0.18em] text-accent font-semibold mb-2">
-            Producto
-          </p>
           <h2 className="text-3xl md:text-4xl text-fg">Lo que le falta a la hoja de cálculo</h2>
           <p className="text-fg-4 mt-3">
             No es una plantilla con fórmulas. Es un sistema que lee el documento oficial y hace
@@ -210,10 +267,13 @@ export default function LandingPage() {
         </div>
 
         <div className="grid md:grid-cols-3 gap-4">
-          {CARACTERISTICAS.map(({ titulo, detalle }) => (
-            <div key={titulo} className="reveal tile p-6">
+          {CARACTERISTICAS.map(({ titulo, detalle }, i) => (
+            <div
+              key={titulo}
+              className={`reveal tile p-6 ${i === 0 ? 'md:col-span-2 bg-accent/5' : ''}`}
+            >
               <h3 className="text-lg font-semibold text-fg mb-2">{titulo}</h3>
-              <p className="text-sm text-fg-3 leading-relaxed">{detalle}</p>
+              <p className={`text-sm text-fg-3 leading-relaxed ${i === 0 ? 'max-w-md' : ''}`}>{detalle}</p>
             </div>
           ))}
         </div>
@@ -235,9 +295,6 @@ export default function LandingPage() {
       <section id="modulos" className="max-w-[75rem] mx-auto px-6 py-20 md:py-24 scroll-mt-16">
         <div className="mb-12 reveal grid md:grid-cols-[auto_1fr] md:items-end gap-4">
           <div>
-            <p className="text-[13px] uppercase tracking-[0.18em] text-accent font-semibold mb-2">
-              Extractores
-            </p>
             <h2 className="text-3xl md:text-4xl text-fg">Cuatro registros, un mismo libro</h2>
           </div>
           <p className="text-sm text-fg-4 max-w-xs md:justify-self-end md:text-right">
@@ -276,16 +333,13 @@ export default function LandingPage() {
       <section id="procedimiento" className="border-t border-hairline scroll-mt-16">
         <div className="max-w-[75rem] mx-auto px-6 py-20 md:py-24">
           <div className="reveal max-w-2xl mb-12">
-            <p className="text-[13px] uppercase tracking-[0.18em] text-accent font-semibold mb-2">
-              Procedimiento
-            </p>
             <h2 className="text-3xl md:text-4xl text-fg">Tres pasos, sin captura manual</h2>
           </div>
 
           <div className="grid md:grid-cols-3 gap-8">
             {PASOS.map((p, i) => (
               <div key={p.titulo} className="reveal">
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-accent text-white text-sm font-semibold mb-4">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-accent text-[#fff] text-sm font-semibold mb-4">
                   {i + 1}
                 </span>
                 <h3 className="text-lg font-semibold text-fg mb-2">{p.titulo}</h3>
@@ -311,7 +365,7 @@ export default function LandingPage() {
               <span className="text-5xl md:text-6xl font-bold text-fg">$15</span>
               <span className="text-fg-4 ml-1">/ mes · USD</span>
             </div>
-            <p className="text-center text-sm text-fg-4 mb-8">Suscripción Learnix — todo incluido</p>
+            <p className="text-center text-sm text-fg-4 mb-8">Suscripción Learnix, todo incluido</p>
             <ul className="space-y-3 mb-8">
               {PRECIO_ITEMS.map(item => (
                 <li key={item} className="flex items-start gap-2.5 text-sm text-fg-3">
@@ -329,7 +383,7 @@ export default function LandingPage() {
               Solicitar acceso
             </a>
             <Link to="/login" className="block mt-3 text-center text-sm text-fg-4 hover:text-accent transition-colors">
-              Ya tenés cuenta — iniciar sesión
+              Ya tenés cuenta, iniciar sesión
             </Link>
           </div>
         </div>
@@ -338,10 +392,10 @@ export default function LandingPage() {
       {/* ═══ CTA final ═══ */}
       <section className="bg-accent">
         <div className="max-w-[75rem] mx-auto px-6 py-20 md:py-28 text-center reveal">
-          <h2 className="text-3xl md:text-5xl text-white font-bold mb-4 leading-tight max-w-2xl mx-auto">
+          <h2 className="text-3xl md:text-5xl text-[#fff] font-bold mb-4 leading-tight max-w-2xl mx-auto">
             Dejá de tipear DTE a mano.
           </h2>
-          <p className="text-white/80 mb-9 max-w-md mx-auto">
+          <p className="text-[#fff]/80 mb-9 max-w-md mx-auto">
             Subí tus documentos, dejá que la IA los lea y exportá los anexos de Hacienda con
             tranquilidad.
           </p>

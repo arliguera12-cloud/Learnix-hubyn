@@ -242,6 +242,23 @@
     }
   }
 
+  /* ═══ Asentado de documentos — ilustración del hero: cada tarjeta parte
+     de su propio desorden (--doc-start, distinto por elemento) y llega a su
+     lugar en la grilla. Es literal al valor del producto ("tus DTE, por fin,
+     en orden"), no decoración genérica. ═══ */
+  @keyframes doc-settle {
+    from { opacity: 0; transform: var(--doc-start, translate(0, 0) rotate(0deg)); }
+    to   { opacity: 1; transform: translate(0, 0) rotate(0deg); }
+  }
+  .doc-card {
+    animation: doc-settle 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .doc-card {
+      animation-duration: 0.01ms !important;
+    }
+  }
+
   /* ═══ Reveal en cascada — activado por IntersectionObserver (ver
      useReveal en LandingPage.jsx). El delay escalonado se fija inline
      por elemento (transitionDelay), no acá. ═══ */
