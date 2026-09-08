@@ -28,3 +28,9 @@ node_modules/
 .vscode/
 *.swp
 *.swo
+
+# Claude Code — skills instalados localmente (solo para este entorno,
+# no son parte del proyecto)
+.agents/
+.claude/
+skills-lock.json
