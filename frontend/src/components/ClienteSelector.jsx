@@ -31,7 +31,12 @@ export default function ClienteSelector({ onSeleccionar, autoFocus = false }) {
   }, [clientes, busqueda])
 
   function elegir(cliente) {
-    onSeleccionar({ nit: cliente.nit, nombre_comercial: cliente.nombre_comercial })
+    onSeleccionar({
+      nit: cliente.nit,
+      nombre_comercial: cliente.nombre_comercial,
+      nrc: cliente.nrc,
+      dui: cliente.dui,
+    })
     setBusqueda('')
     setAbierto(false)
   }

@@ -79,6 +79,18 @@ export function IconSujetos(props) {
   )
 }
 
+/** Revisión manual — documento con lupa (inspección). */
+export function IconRevision(props) {
+  return (
+    <Svg {...props}>
+      <Hoja />
+      <path d="M13.5 2.75v4.5H18" />
+      <circle cx="10.75" cy="14.25" r="2.75" />
+      <path d="M12.75 16.25l2.25 2.25" />
+    </Svg>
+  )
+}
+
 /** Clientes — dos figuras (receptores). */
 export function IconClientes(props) {
   return (

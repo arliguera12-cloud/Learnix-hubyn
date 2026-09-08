@@ -92,11 +92,13 @@ export default function PdfUploader({ onUpload, loading, multiple = false, onCli
 
   const declaranteId = modoManual ? manualNit.trim() : (clienteActivo?.nit ?? '')
   const nombreDeclarante = modoManual ? manualNombre.trim() : (clienteActivo?.nombre_comercial ?? '')
+  const nrcDeclarante = modoManual ? '' : (clienteActivo?.nrc ?? '')
+  const duiDeclarante = modoManual ? '' : (clienteActivo?.dui ?? '')
 
   function handleSubmit(e) {
     e.preventDefault()
     if (!files.length || !declaranteId) return
-    onUpload(multiple ? files : files[0], declaranteId, nombreDeclarante)
+    onUpload(multiple ? files : files[0], declaranteId, nombreDeclarante, nrcDeclarante, duiDeclarante)
   }
 
   const loteGrande = multiple && files.length > TANDA_AVISO

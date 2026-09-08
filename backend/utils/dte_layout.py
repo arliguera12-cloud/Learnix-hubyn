@@ -105,6 +105,60 @@ def buscar_numero_control(texto: str) -> tuple[str, str]:
     return "", ""
 
 
+def _patron_valor(valor_limpio: str) -> re.Pattern:
+    """
+    Regex que encuentra `valor_limpio` (solo dígitos) dentro de un texto,
+    tolerando guiones o espacios entre dígitos — así lo imprime Hacienda
+    (ej. NIT "0614-150307-102-3", NRC "228200-7") — y sin matchear como
+    substring de un número más largo (límite de dígito a cada lado).
+    """
+    cuerpo = r"[\s\-]*".join(re.escape(d) for d in valor_limpio)
+    return re.compile(rf"(?<!\d){cuerpo}(?!\d)")
+
+
+_CONECTORES_NOMBRE = {"DE", "DEL", "LA", "LAS", "LOS", "Y"}
+
+
+def _tokens_nombre(nombre: str) -> set[str]:
+    palabras = re.findall(r"[A-ZÁÉÍÓÚÑÜ]+", (nombre or "").upper())
+    return {p for p in palabras if p not in _CONECTORES_NOMBRE and len(p) > 1}
+
+
+def cliente_aparece_en_documento(texto: str, cliente_activo: dict) -> bool:
+    """
+    ¿El cliente activo (declarante) aparece en este documento, como emisor o
+    receptor? Detecta el caso de subir el PDF de un tercero sin relación con
+    el cliente seleccionado — antes se procesaba igual.
+
+    Prioridad: NRC primero, después NIT, después DUI. El NRC es el
+    identificador más confiable para personas naturales: a diferencia del
+    NIT/DUI (que a veces aparecen intercambiados) y del nombre (que unos
+    documentos anotan "Apellido Nombre" y otros "Nombre Apellido"), el NRC no
+    se presta a esa ambigüedad. El nombre solo se usa como último recurso —
+    coincidencia de todas sus palabras en el documento, en cualquier orden —
+    para no fallar con clientes que aún no tienen NIT/NRC/DUI cargado en el
+    directorio.
+    """
+    texto = texto or ""
+    if len(texto.strip()) < 20:
+        # Sin capa de texto extraíble (PDF de imagen que depende de Visión):
+        # no hay sobre qué validar. Mejor no bloquear que dar un falso rechazo.
+        return True
+
+    for campo in ("nrc", "nit", "dui"):
+        valor = re.sub(r"[^0-9]", "", str(cliente_activo.get(campo, "") or ""))
+        if valor and _patron_valor(valor).search(texto):
+            return True
+
+    tokens = _tokens_nombre(str(cliente_activo.get("nombre", "") or ""))
+    if len(tokens) >= 2:
+        texto_up = texto.upper()
+        if all(re.search(rf"\b{re.escape(t)}\b", texto_up) for t in tokens):
+            return True
+
+    return False
+
+
 def identificadores_emisor(texto: str) -> set[str]:
     """
     Identificadores del emisor tal como aparecen en el documento.

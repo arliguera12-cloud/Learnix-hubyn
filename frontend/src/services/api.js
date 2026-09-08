@@ -27,19 +27,23 @@ api.interceptors.request.use(async (config) => {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-function buildForm(file, declaranteId, nombre = '') {
+function buildForm(file, declaranteId, nombre = '', nrc = '', dui = '') {
   const form = new FormData()
   form.append('file', file)
   form.append('declarante_id', declaranteId)
   if (nombre) form.append('nombre_declarante', nombre)
+  if (nrc) form.append('nrc_declarante', nrc)
+  if (dui) form.append('dui_declarante', dui)
   return form
 }
 
-function buildLoteForm(files, declaranteId, nombre = '') {
+function buildLoteForm(files, declaranteId, nombre = '', nrc = '', dui = '') {
   const form = new FormData()
   for (const f of files) form.append('files', f)
   form.append('declarante_id', declaranteId)
   if (nombre) form.append('nombre_declarante', nombre)
+  if (nrc) form.append('nrc_declarante', nrc)
+  if (dui) form.append('dui_declarante', dui)
   return form
 }
 
@@ -55,32 +59,32 @@ function _periodoDesde(fecha) {
 
 // ─── DTEs (single) ─────────────────────────────────────────────────────────
 
-export function procesarVentas(file, declaranteId, nombre) {
-  return api.post('/procesar/ventas', buildForm(file, declaranteId, nombre))
+export function procesarVentas(file, declaranteId, nombre, nrc, dui) {
+  return api.post('/procesar/ventas', buildForm(file, declaranteId, nombre, nrc, dui))
 }
-export function procesarCompras(file, declaranteId, nombre) {
-  return api.post('/procesar/compras', buildForm(file, declaranteId, nombre))
+export function procesarCompras(file, declaranteId, nombre, nrc, dui) {
+  return api.post('/procesar/compras', buildForm(file, declaranteId, nombre, nrc, dui))
 }
-export function procesarRetenciones(file, declaranteId, nombre) {
-  return api.post('/procesar/retenciones', buildForm(file, declaranteId, nombre))
+export function procesarRetenciones(file, declaranteId, nombre, nrc, dui) {
+  return api.post('/procesar/retenciones', buildForm(file, declaranteId, nombre, nrc, dui))
 }
-export function procesarSujetosExcluidos(file, declaranteId, nombre) {
-  return api.post('/procesar/sujetos-excluidos', buildForm(file, declaranteId, nombre))
+export function procesarSujetosExcluidos(file, declaranteId, nombre, nrc, dui) {
+  return api.post('/procesar/sujetos-excluidos', buildForm(file, declaranteId, nombre, nrc, dui))
 }
 
 // ─── DTEs (lote / multi-PDF) ───────────────────────────────────────────────
 
-export function procesarVentasLote(files, declaranteId, nombre) {
-  return api.post('/procesar/ventas/lote', buildLoteForm(files, declaranteId, nombre))
+export function procesarVentasLote(files, declaranteId, nombre, nrc, dui) {
+  return api.post('/procesar/ventas/lote', buildLoteForm(files, declaranteId, nombre, nrc, dui))
 }
-export function procesarComprasLote(files, declaranteId, nombre) {
-  return api.post('/procesar/compras/lote', buildLoteForm(files, declaranteId, nombre))
+export function procesarComprasLote(files, declaranteId, nombre, nrc, dui) {
+  return api.post('/procesar/compras/lote', buildLoteForm(files, declaranteId, nombre, nrc, dui))
 }
-export function procesarRetencionesLote(files, declaranteId, nombre) {
-  return api.post('/procesar/retenciones/lote', buildLoteForm(files, declaranteId, nombre))
+export function procesarRetencionesLote(files, declaranteId, nombre, nrc, dui) {
+  return api.post('/procesar/retenciones/lote', buildLoteForm(files, declaranteId, nombre, nrc, dui))
 }
-export function procesarSujetosExcluidosLote(files, declaranteId, nombre) {
-  return api.post('/procesar/sujetos-excluidos/lote', buildLoteForm(files, declaranteId, nombre))
+export function procesarSujetosExcluidosLote(files, declaranteId, nombre, nrc, dui) {
+  return api.post('/procesar/sujetos-excluidos/lote', buildLoteForm(files, declaranteId, nombre, nrc, dui))
 }
 
 /**

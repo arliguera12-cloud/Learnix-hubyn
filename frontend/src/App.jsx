@@ -9,6 +9,7 @@ import Ventas           from './pages/Ventas'
 import Compras          from './pages/Compras'
 import Retenciones      from './pages/Retenciones'
 import SujetosExcluidos from './pages/SujetosExcluidos'
+import RevisionManual   from './pages/RevisionManual'
 import Clientes         from './pages/Clientes'
 import Proveedores      from './pages/Proveedores'
 
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/compras" element={<ProtectedRoute><Compras /></ProtectedRoute>} />
         <Route path="/retenciones" element={<ProtectedRoute><Retenciones /></ProtectedRoute>} />
         <Route path="/sujetos-excluidos" element={<ProtectedRoute><SujetosExcluidos /></ProtectedRoute>} />
+        <Route path="/revision-manual" element={<ProtectedRoute><RevisionManual /></ProtectedRoute>} />
         <Route path="/clientes" element={<ProtectedRoute><Clientes /></ProtectedRoute>} />
         <Route path="/proveedores" element={<ProtectedRoute><Proveedores /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />

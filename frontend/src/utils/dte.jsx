@@ -280,7 +280,7 @@ async function _esperarJob(jobId, onProgresoTanda) {
   }
 }
 
-export async function subirLoteEnTandas(files, loteApiFn, declaranteId, nombre, onProgreso) {
+export async function subirLoteEnTandas(files, loteApiFn, declaranteId, nombre, onProgreso, nrc = '', dui = '') {
   const resultados = []
   const errores = []
   let procesados = 0
@@ -289,7 +289,7 @@ export async function subirLoteEnTandas(files, loteApiFn, declaranteId, nombre, 
 
   for (let i = 0; i < files.length; i += TAMANO_TANDA) {
     const tanda = files.slice(i, i + TAMANO_TANDA)
-    const { data: inicio } = await loteApiFn(tanda, declaranteId, nombre)
+    const { data: inicio } = await loteApiFn(tanda, declaranteId, nombre, nrc, dui)
     const job = await _esperarJob(inicio.job_id, (procesadosTanda) => {
       onProgreso?.(procesados + procesadosTanda, files.length, tandaActual + 1, totalTandas)
     })

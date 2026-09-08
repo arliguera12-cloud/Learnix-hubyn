@@ -30,42 +30,66 @@ const STATS_CONFIG = [
   { key: 'sujetos',     tabla: 'db_sujetos',     label: 'Sujetos Excluidos', Icon: IconSujetos },
 ]
 
-// Calendario tributario (aproximado): reglas generales de vencimiento de
-// El Salvador (Ministerio de Hacienda) — declaraciones mensuales el día 10
-// (IVA F-07, Pago a Cuenta/Retención Renta F-14) o 15 (Informe mensual de
-// retenciones/percepciones/anticipos IVA, F-930) del mes siguiente al
-// período que declaran, y Declaración de Renta anual el 30 de abril. Cuando
-// esa fecha cae en fin de semana o feriado, Hacienda la corre al siguiente
-// día hábil — ese ajuste exacto no se calcula acá (requeriría el calendario
-// oficial de feriados), así que la fecha mostrada es una aproximación:
-// siempre hay que confirmar la fecha límite real en mh.gob.sv antes de
-// declarar.
-const OBLIGACIONES_BASE = [
-  { formulario: 'F-07',  nombre: 'Declaración de IVA',                                   dia: 10 },
-  { formulario: 'F-14',  nombre: 'Pago a Cuenta / Retención Renta',                       dia: 10 },
-  { formulario: 'F-930', nombre: 'Informe mensual de retenciones/percepciones IVA',       dia: 15 },
-]
+// Calendario tributario oficial de Hacienda (mh.gob.sv), "Calendario
+// Tributario 2026". Los vencimientos mensuales de El Salvador son "los
+// primeros diez/quince días hábiles siguientes" al período que se declara,
+// así que la fecha exacta se recorre cada mes según fines de semana y
+// asuetos — no es un día fijo del calendario. Estos son los días de cada
+// mes de 2026 ya ajustados por Hacienda; cuando Hacienda publique el
+// calendario del año siguiente, hay que reemplazar esta tabla.
+const CALENDARIO_2026 = {
+  0:  { f07f14: 16, f930: 23 }, // enero
+  1:  { f07f14: 13, f930: 20 }, // febrero
+  2:  { f07f14: 13, f930: 20 }, // marzo
+  3:  { f07f14: 20, f930: 27 }, // abril
+  4:  { f07f14: 15, f930: 22 }, // mayo
+  5:  { f07f14: 12, f930: 22 }, // junio
+  6:  { f07f14: 14, f930: 21 }, // julio
+  7:  { f07f14: 20, f930: 27 }, // agosto
+  8:  { f07f14: 14, f930: 22 }, // septiembre
+  9:  { f07f14: 14, f930: 21 }, // octubre
+  10: { f07f14: 16, f930: 23 }, // noviembre
+  11: { f07f14: 14, f930: 21 }, // diciembre
+}
 
-function proximaFecha(dia, mesOffset = 0) {
+// Respaldo para meses fuera de la tabla oficial (p. ej. cuando aún no se
+// carga el calendario del año siguiente): aproximación por día fijo, igual
+// que antes — siempre hay que confirmar la fecha real en mh.gob.sv.
+const DIA_APROXIMADO = { f07f14: 10, f930: 15 }
+
+function obtenerDia(anio, mesIndex, campo) {
+  const mesCalendario = anio === 2026 ? CALENDARIO_2026[mesIndex] : null
+  return mesCalendario ? mesCalendario[campo] : DIA_APROXIMADO[campo]
+}
+
+function proximaFecha(campo, nombre, formulario) {
   const hoy = new Date()
-  const fecha = new Date(hoy.getFullYear(), hoy.getMonth() + mesOffset, dia)
-  fecha.setHours(23, 59, 59, 999)
-  return fecha
+  let anio = hoy.getFullYear()
+  let mes  = hoy.getMonth()
+  let fecha = new Date(anio, mes, obtenerDia(anio, mes, campo), 23, 59, 59, 999)
+
+  if (fecha < hoy) {
+    mes += 1
+    if (mes > 11) { mes = 0; anio += 1 }
+    fecha = new Date(anio, mes, obtenerDia(anio, mes, campo), 23, 59, 59, 999)
+  }
+
+  return { formulario, nombre, fecha, aproximada: anio !== 2026 }
 }
 
 function calcularObligaciones() {
   const hoy = new Date()
-  const obligaciones = OBLIGACIONES_BASE.map(({ formulario, nombre, dia }) => {
-    let fecha = proximaFecha(dia, 0)
-    if (fecha < hoy) fecha = proximaFecha(dia, 1)
-    return { formulario, nombre, fecha }
-  })
+  const obligaciones = [
+    proximaFecha('f07f14', 'Declaración de IVA', 'F-07'),
+    proximaFecha('f07f14', 'Pago a Cuenta / Retención Renta', 'F-14'),
+    proximaFecha('f930',   'Informe mensual de retenciones/percepciones IVA', 'F-930'),
+  ]
 
-  // Declaración de Renta anual — 30 de abril
+  // Declaración de Renta anual — 30 de abril (fecha fija, sin ajuste por Hacienda)
   const anioActual = hoy.getFullYear()
   let fechaRenta = new Date(anioActual, 3, 30, 23, 59, 59, 999)
   if (fechaRenta < hoy) fechaRenta = new Date(anioActual + 1, 3, 30, 23, 59, 59, 999)
-  obligaciones.push({ formulario: 'Renta', nombre: 'Declaración de Renta anual', fecha: fechaRenta })
+  obligaciones.push({ formulario: 'Renta', nombre: 'Declaración de Renta anual', fecha: fechaRenta, aproximada: false })
 
   return obligaciones
     .map((o) => ({ ...o, diasRestantes: Math.ceil((o.fecha - hoy) / 86400000) }))
@@ -188,10 +212,14 @@ export default function Dashboard() {
           <h3 className="text-[0.65rem] font-semibold text-fg-4 uppercase tracking-[0.16em]">
             Próximas obligaciones fiscales
           </h3>
-          <span className="text-[0.6rem] text-fg-5">fechas aproximadas · verificá en mh.gob.sv</span>
+          <span className="text-[0.6rem] text-fg-5">
+            {obligaciones.some(o => o.aproximada)
+              ? 'algunas fechas son aproximadas · verificá en mh.gob.sv'
+              : 'calendario oficial Hacienda 2026'}
+          </span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-hairline border border-hairline rounded-xl overflow-hidden">
-          {obligaciones.map(({ formulario, nombre, fecha, diasRestantes }) => (
+          {obligaciones.map(({ formulario, nombre, fecha, diasRestantes, aproximada }) => (
             <div key={formulario} className="bg-panel p-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="font-mono text-[0.65rem] uppercase tracking-wider text-fg-4">
@@ -206,6 +234,7 @@ export default function Dashboard() {
               <p className="text-sm text-fg leading-snug">{nombre}</p>
               <p className="text-xs text-fg-4 mt-1.5">
                 {fecha.toLocaleDateString('es-SV', { day: '2-digit', month: 'long', year: 'numeric' })}
+                {aproximada && ' (aprox.)'}
               </p>
             </div>
           ))}

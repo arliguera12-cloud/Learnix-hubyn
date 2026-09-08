@@ -141,6 +141,7 @@ async def procesar_ventas(
     declarante_id: str = Form(..., description="ID del declarante (NIT sin guiones)"),
     nombre_declarante: str = Form("", description="Nombre/razón social del declarante"),
     nrc_declarante: str = Form("", description="NRC del declarante"),
+    dui_declarante: str = Form("", description="DUI del declarante"),
     org: dict = Depends(get_current_org),
 ):
     """
@@ -154,7 +155,7 @@ async def procesar_ventas(
         result = procesar_json_nativo_ventas(content)
     else:
         cliente = _build_cliente_activo(declarante_id, org["organizacion_id"],
-                                        nombre=nombre_declarante, nrc=nrc_declarante)
+                                        nombre=nombre_declarante, nrc=nrc_declarante, dui=dui_declarante)
         result = extraer_venta_nativo_pro(content, cliente)
     return _handle_extractor_result(result, "ventas", file.filename, declarante_id)
 
@@ -169,6 +170,7 @@ async def procesar_compras(
     declarante_id: str = Form(..., description="ID del declarante (NIT sin guiones)"),
     nombre_declarante: str = Form("", description="Nombre/razón social del declarante"),
     nrc_declarante: str = Form("", description="NRC del declarante"),
+    dui_declarante: str = Form("", description="DUI del declarante"),
     org: dict = Depends(get_current_org),
 ):
     """
@@ -182,7 +184,7 @@ async def procesar_compras(
         result = procesar_json_nativo_compras(content)
     else:
         cliente = _build_cliente_activo(declarante_id, org["organizacion_id"],
-                                        nombre=nombre_declarante, nrc=nrc_declarante)
+                                        nombre=nombre_declarante, nrc=nrc_declarante, dui=dui_declarante)
         result = extraer_compra_nativo_pro(content, cliente)
     return _handle_extractor_result(result, "compras", file.filename, declarante_id)
 
@@ -196,6 +198,8 @@ async def procesar_retenciones(
     file: UploadFile = File(..., description="PDF del DTE de retenciones"),
     declarante_id: str = Form(..., description="ID del declarante (NIT sin guiones)"),
     nombre_declarante: str = Form("", description="Nombre/razón social del declarante"),
+    nrc_declarante: str = Form("", description="NRC del declarante"),
+    dui_declarante: str = Form("", description="DUI del declarante"),
     org: dict = Depends(get_current_org),
 ):
     """
@@ -204,7 +208,8 @@ async def procesar_retenciones(
     casilla 162 / IVA 1%). Devuelve un registro con estructura del Anexo 7 DGII.
     """
     content, _ext = _read_upload_bytes(file, permitir_json=False)
-    cliente = _build_cliente_activo(declarante_id, org["organizacion_id"], nombre=nombre_declarante)
+    cliente = _build_cliente_activo(declarante_id, org["organizacion_id"],
+                                    nombre=nombre_declarante, nrc=nrc_declarante, dui=dui_declarante)
     result = extraer_retencion_nativa(content, cliente)
     return _handle_extractor_result(result, "retenciones", file.filename, declarante_id)
 
@@ -218,6 +223,8 @@ async def procesar_sujetos_excluidos(
     file: UploadFile = File(..., description="PDF del DTE de sujetos excluidos"),
     declarante_id: str = Form(..., description="ID del declarante (NIT sin guiones)"),
     nombre_declarante: str = Form("", description="Nombre/razón social del declarante"),
+    nrc_declarante: str = Form("", description="NRC del declarante"),
+    dui_declarante: str = Form("", description="DUI del declarante"),
     org: dict = Depends(get_current_org),
 ):
     """
@@ -225,7 +232,8 @@ async def procesar_sujetos_excluidos(
     Devuelve un registro con estructura del Anexo 5 DGII.
     """
     content, _ext = _read_upload_bytes(file, permitir_json=False)
-    cliente = _build_cliente_activo(declarante_id, org["organizacion_id"], nombre=nombre_declarante)
+    cliente = _build_cliente_activo(declarante_id, org["organizacion_id"],
+                                    nombre=nombre_declarante, nrc=nrc_declarante, dui=dui_declarante)
     result = extraer_sujetos_nativo(content, cliente)
     return _handle_extractor_result(result, "sujetos_excluidos", file.filename, declarante_id)
 
@@ -285,7 +293,7 @@ async def _ejecutar_lote_job(
 async def _iniciar_lote_job(
     background_tasks: BackgroundTasks, files: List[UploadFile], extractor_fn, tipo: str,
     declarante_id: str, organizacion_id: str, nombre_declarante: str = "",
-    nrc_declarante: str = "", permitir_json: bool = False, json_fn=None,
+    nrc_declarante: str = "", dui_declarante: str = "", permitir_json: bool = False, json_fn=None,
 ) -> dict:
     if len(files) > _MAX_LOTE_ARCHIVOS:
         raise HTTPException(
@@ -294,7 +302,7 @@ async def _iniciar_lote_job(
         )
 
     cliente = _build_cliente_activo(declarante_id, organizacion_id,
-                                    nombre=nombre_declarante, nrc=nrc_declarante)
+                                    nombre=nombre_declarante, nrc=nrc_declarante, dui=dui_declarante)
 
     # Los archivos se leen ACÁ, todavía con la conexión abierta — un UploadFile
     # deja de ser válido apenas la request termina, así que hay que sacarle
@@ -324,11 +332,12 @@ async def procesar_ventas_lote(
     declarante_id: str = Form(...),
     nombre_declarante: str = Form(""),
     nrc_declarante: str = Form(""),
+    dui_declarante: str = Form(""),
     org: dict = Depends(get_current_org),
 ):
     return await _iniciar_lote_job(background_tasks, files, extraer_venta_nativo_pro, "ventas",
                          declarante_id, org["organizacion_id"], nombre_declarante, nrc_declarante,
-                         permitir_json=True, json_fn=procesar_json_nativo_ventas)
+                         dui_declarante, permitir_json=True, json_fn=procesar_json_nativo_ventas)
 
 
 @router.post("/compras/lote")
@@ -338,11 +347,12 @@ async def procesar_compras_lote(
     declarante_id: str = Form(...),
     nombre_declarante: str = Form(""),
     nrc_declarante: str = Form(""),
+    dui_declarante: str = Form(""),
     org: dict = Depends(get_current_org),
 ):
     return await _iniciar_lote_job(background_tasks, files, extraer_compra_nativo_pro, "compras",
                          declarante_id, org["organizacion_id"], nombre_declarante, nrc_declarante,
-                         permitir_json=True, json_fn=procesar_json_nativo_compras)
+                         dui_declarante, permitir_json=True, json_fn=procesar_json_nativo_compras)
 
 
 @router.post("/retenciones/lote")
@@ -351,10 +361,13 @@ async def procesar_retenciones_lote(
     files: List[UploadFile] = File(...),
     declarante_id: str = Form(...),
     nombre_declarante: str = Form(""),
+    nrc_declarante: str = Form(""),
+    dui_declarante: str = Form(""),
     org: dict = Depends(get_current_org),
 ):
     return await _iniciar_lote_job(background_tasks, files, extraer_retencion_nativa, "retenciones",
-                         declarante_id, org["organizacion_id"], nombre_declarante)
+                         declarante_id, org["organizacion_id"], nombre_declarante, nrc_declarante,
+                         dui_declarante)
 
 
 @router.post("/sujetos-excluidos/lote")
@@ -363,10 +376,13 @@ async def procesar_sujetos_excluidos_lote(
     files: List[UploadFile] = File(...),
     declarante_id: str = Form(...),
     nombre_declarante: str = Form(""),
+    nrc_declarante: str = Form(""),
+    dui_declarante: str = Form(""),
     org: dict = Depends(get_current_org),
 ):
     return await _iniciar_lote_job(background_tasks, files, extraer_sujetos_nativo, "sujetos_excluidos",
-                         declarante_id, org["organizacion_id"], nombre_declarante)
+                         declarante_id, org["organizacion_id"], nombre_declarante, nrc_declarante,
+                         dui_declarante)
 
 
 @router.get("/lote/jobs/{job_id}")
