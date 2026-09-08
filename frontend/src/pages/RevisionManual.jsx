@@ -55,6 +55,7 @@ export default function RevisionManual() {
   const [loading,     setLoading]   = useState(true)
   const [error,       setError]     = useState(null)
   const [filtro,      setFiltro]    = useState('todos')
+  const [clienteFiltro, setClienteFiltro] = useState('todos') // declarante_id, o 'todos'
   const [seleccion,   setSeleccion] = useState(null) // fila elegida para corregir
   const [form,        setForm]      = useState({})
   const [guardando,   setGuardando] = useState(false)
@@ -93,10 +94,24 @@ export default function RevisionManual() {
 
   useEffect(() => { cargar() }, [])
 
-  const filtrados = useMemo(
-    () => filtro === 'todos' ? pendientes : pendientes.filter(p => p.tipo === filtro),
-    [pendientes, filtro]
-  )
+  // Clientes presentes en la lista actual, con un nombre representativo —
+  // para no mostrar "de todos" mezclado cuando alguien solo quiere ver los
+  // de un cliente puntual.
+  const clientesEnLista = useMemo(() => {
+    const mapa = new Map()
+    for (const p of pendientes) {
+      if (!mapa.has(p.declarante_id)) {
+        mapa.set(p.declarante_id, p.registro?.[NOMBRE_CAMPO[p.tipo]] || p.declarante_id)
+      }
+    }
+    return [...mapa.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+  }, [pendientes])
+
+  const filtrados = useMemo(() => {
+    let lista = filtro === 'todos' ? pendientes : pendientes.filter(p => p.tipo === filtro)
+    if (clienteFiltro !== 'todos') lista = lista.filter(p => p.declarante_id === clienteFiltro)
+    return lista
+  }, [pendientes, filtro, clienteFiltro])
 
   function elegir(fila) {
     setSeleccion(fila)
@@ -165,24 +180,39 @@ export default function RevisionManual() {
 
       {error && <p className="text-red-400 text-sm">{error}</p>}
 
-      <div className="flex items-center gap-2 flex-wrap">
-        {FILTROS.map(([key, label]) => {
-          const count = key === 'todos' ? pendientes.length : pendientes.filter(p => p.tipo === key).length
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setFiltro(key)}
-              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                filtro === key
-                  ? 'bg-accent/15 border-accent text-accent'
-                  : 'border-hairline text-fg-4 hover:text-fg-2'
-              }`}
-            >
-              {label} ({count})
-            </button>
-          )
-        })}
+      <div className="flex items-center gap-3 flex-wrap justify-between">
+        <div className="flex items-center gap-2 flex-wrap">
+          {FILTROS.map(([key, label]) => {
+            const count = key === 'todos' ? pendientes.length : pendientes.filter(p => p.tipo === key).length
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFiltro(key)}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                  filtro === key
+                    ? 'bg-accent/15 border-accent text-accent'
+                    : 'border-hairline text-fg-4 hover:text-fg-2'
+                }`}
+              >
+                {label} ({count})
+              </button>
+            )
+          })}
+        </div>
+
+        {clientesEnLista.length > 1 && (
+          <select
+            className="input w-auto max-w-[16rem] text-xs py-1.5"
+            value={clienteFiltro}
+            onChange={e => setClienteFiltro(e.target.value)}
+          >
+            <option value="todos">Todos los clientes ({pendientes.length})</option>
+            {clientesEnLista.map(([nit, nombre]) => (
+              <option key={nit} value={nit}>{nombre}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="card p-0 overflow-hidden">

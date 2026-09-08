@@ -109,14 +109,20 @@ const _TABLA = {
 /**
  * Guarda un array de resultados en la tabla Supabase correspondiente.
  * Silencia errores (tablas pueden no existir aún en entornos de desarrollo).
+ *
+ * Devuelve los ids que Supabase asignó a cada fila insertada, en el mismo
+ * orden que `resultados` — quien llama los guarda junto al resultado en
+ * memoria (`r.dbId`) para poder corregirlo después (Revisión manual, o la
+ * corrección en línea del propio extractor) sin tener que volver a buscarlo
+ * por nombre de archivo. `null` si no se pudo guardar nada.
  */
 export async function guardarResultados(tipo, declaranteId, resultados) {
   const tabla = _TABLA[tipo]
-  if (!tabla || !resultados?.length) return
+  if (!tabla || !resultados?.length) return null
 
   try {
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!user) return null
 
     const rows = resultados.map(({ registro = {}, filename }) => ({
       user_id:       user.id,
@@ -128,10 +134,20 @@ export async function guardarResultados(tipo, declaranteId, resultados) {
       registro,
     }))
 
-    await supabase.from(tabla).insert(rows)
+    const { data, error } = await supabase.from(tabla).insert(rows).select('id')
+    if (error || !data) return null
+    return data.map(row => row.id)
   } catch {
     // Ignorar — tablas pueden no existir aún
+    return null
   }
+}
+
+/** Actualiza el `registro` de un documento ya guardado (corrección manual). */
+export async function actualizarResultado(tipo, dbId, registro) {
+  const tabla = _TABLA[tipo]
+  if (!tabla || !dbId) return { error: new Error('Falta el id del documento guardado.') }
+  return supabase.from(tabla).update({ registro }).eq('id', dbId)
 }
 
 // ─── Exportar Excel / CSV oficial (formato F-07 Hacienda) ──────────────────
