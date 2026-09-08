@@ -3,18 +3,19 @@ import { signOut } from '../services/auth'
 import ThemeToggle from './ThemeToggle'
 import {
   IconLibro, IconVentas, IconCompras, IconRetenciones,
-  IconSujetos, IconRevision, IconClientes, IconProveedores, IconSalir, IconSeccion,
+  IconSujetos, IconRevision, IconLibrosLegales, IconClientes, IconProveedores, IconSalir, IconSeccion,
 } from './Icons'
 
 const NAV = [
-  { to: '/dashboard',         Icon: IconLibro,       label: 'Dashboard',         group: null },
-  { to: '/ventas',            Icon: IconVentas,      label: 'Ventas',            group: 'Extractores' },
-  { to: '/compras',           Icon: IconCompras,     label: 'Compras',           group: 'Extractores' },
-  { to: '/retenciones',       Icon: IconRetenciones, label: 'Retenciones',       group: 'Extractores' },
-  { to: '/sujetos-excluidos', Icon: IconSujetos,     label: 'Sujetos Excluidos', group: 'Extractores' },
-  { to: '/revision-manual',   Icon: IconRevision,    label: 'Revisión manual',   group: 'Extractores' },
-  { to: '/clientes',          Icon: IconClientes,    label: 'Clientes',          group: 'Directorios' },
-  { to: '/proveedores',       Icon: IconProveedores, label: 'Proveedores',       group: 'Directorios' },
+  { to: '/dashboard',         Icon: IconLibro,        label: 'Dashboard',         group: null },
+  { to: '/ventas',            Icon: IconVentas,       label: 'Ventas',            group: 'Extractores' },
+  { to: '/compras',           Icon: IconCompras,      label: 'Compras',           group: 'Extractores' },
+  { to: '/retenciones',       Icon: IconRetenciones,  label: 'Retenciones',       group: 'Extractores' },
+  { to: '/sujetos-excluidos', Icon: IconSujetos,      label: 'Sujetos Excluidos', group: 'Extractores' },
+  { to: '/revision-manual',   Icon: IconRevision,     label: 'Revisión manual',   group: 'Extractores' },
+  { to: '/libros-legales',    Icon: IconLibrosLegales,label: 'Libros legales',    group: 'Registros' },
+  { to: '/clientes',          Icon: IconClientes,     label: 'Clientes',          group: 'Directorios' },
+  { to: '/proveedores',       Icon: IconProveedores,  label: 'Proveedores',       group: 'Directorios' },
 ]
 
 export default function Sidebar() {

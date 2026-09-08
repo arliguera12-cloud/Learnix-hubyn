@@ -13,6 +13,7 @@ Scripts SQL para provisionar el esquema en **Supabase → SQL Editor**.
 7. `08_org_scope_directorio.sql` — mueve el directorio de clientes/proveedores a alcance por organización
 8. `09_permisos_funciones.sql` — cierra permisos de ejecución de funciones SECURITY DEFINER que no hacían falta
 9. `10_revision_manual_update.sql` — política UPDATE sobre `db_ventas`/`db_compras`/`db_retenciones`/`db_sujetos`, para la pantalla de Revisión Manual
+10. `11_libros_legales.sql` — correlativo persistente por cliente/año sobre `db_compras`/`db_ventas`, para el Libro de Compras y los libros de Ventas (Contribuyentes / Consumidor Final)
 
 `legacy/schema_v1_superseded.sql` es el schema v1.0 (single-tenant), superado por `01_schema_saas.sql`. **No ejecutar en instalaciones nuevas** — se conserva solo como referencia histórica.
 
