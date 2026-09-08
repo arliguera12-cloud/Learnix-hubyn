@@ -158,7 +158,10 @@ export function usePersistenciaExtractor(tipo) {
   // pantalla). Sacar este campo antes de serializar entra en la cuota en
   // los casos reales que se vieron en pruebas.
   function _liviano(resultados) {
-    return resultados.map(({ vision_campos, ...resto }) => resto)
+    // archivoLocal (el File original, para "Ver PDF" al corregir) tampoco
+    // sirve serializado: un File no sobrevive un JSON.stringify, y de
+    // todos modos solo tiene sentido durante la sesión en la que se subió.
+    return resultados.map(({ vision_campos, archivoLocal, ...resto }) => resto)
   }
 
   function guardar(nuevosResultados, nuevoDeclaranteId) {
@@ -477,6 +480,30 @@ function claveDocumento(registro) {
     return `op:${fecha}|${contraparte}|${limpio(r.tipo)}|${importe}`
   }
   return '' // Sin ningún dato identificador no se puede afirmar que sea repetido.
+}
+
+/**
+ * Pega el `File` original de cada resultado recién extraído, para poder
+ * mostrarlo al corregir ("no puedo ver el documento para saber qué está
+ * mal" — sin esto, corregir era escribir un número a ciegas). Solo sirve
+ * durante la sesión actual: un `File` no sobrevive a un remount ni a
+ * sessionStorage (ver `_liviano` en usePersistenciaExtractor, que lo saca
+ * antes de serializar), así que un documento de una sesión anterior
+ * (Revisión Manual) no tiene esta opción — ahí no queda otra que confiar
+ * en los campos.
+ *
+ * Empareja por nombre de archivo, no por posición: un lote grande se sube
+ * en tandas que el backend procesa en paralelo, así que el orden de las
+ * respuestas no tiene por qué coincidir con el de `archivos`.
+ */
+export function adjuntarArchivosLocales(nuevos, archivos) {
+  const lista = Array.isArray(archivos) ? archivos : [archivos]
+  const porNombre = new Map(lista.map(f => [f.name, f]))
+  for (const r of nuevos) {
+    const archivo = porNombre.get(r.filename)
+    if (archivo) r.archivoLocal = archivo
+  }
+  return nuevos
 }
 
 /**

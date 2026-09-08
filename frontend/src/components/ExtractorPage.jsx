@@ -4,7 +4,7 @@ import ResultadosTabla from './ResultadosTabla'
 import { exportarExcel, guardarResultados, actualizarResultado, nombreDesdeRespuesta } from '../services/api'
 import {
   fmt, descargarBlob, detalleErrorExport, fusionarSinDuplicados, avisoDuplicados, avisoConfianza, nivelEstado,
-  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, registroCorregido,
+  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, registroCorregido, adjuntarArchivosLocales,
   SearchBar, filtrarPorTexto, ErrorBox, AvisoBox,
 } from '../utils/dte'
 import { IconExportar, IconArchivo } from './Icons'
@@ -100,6 +100,8 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
         const { data } = await apiFn(filesOrFile, dId, nombre, nrc, dui)
         nuevos = [data]
       }
+
+      adjuntarArchivosLocales(nuevos, filesOrFile)
 
       // Descarta lo que ya estaba: subir el mismo DTE dos veces (su PDF y su
       // JSON, o lotes que se solapan) duplicaba la fila y el crédito fiscal.

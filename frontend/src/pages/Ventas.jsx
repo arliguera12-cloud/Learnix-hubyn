@@ -4,7 +4,7 @@ import ResultadosTabla from '../components/ResultadosTabla'
 import { procesarVentas, procesarVentasLote, exportarExcelVentas, guardarResultados, actualizarResultado, nombreDesdeRespuesta } from '../services/api'
 import {
   fmt, descargarBlob, detalleErrorExport, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados, avisoConfianza,
-  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen, registroCorregido,
+  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen, registroCorregido, adjuntarArchivosLocales,
   SearchBar, filtrarPorTexto, ErrorBox, AvisoBox,
 } from '../utils/dte'
 import { IconVentas, IconExportar, IconArchivo, IconCheck } from '../components/Icons'
@@ -72,6 +72,7 @@ export default function Ventas() {
         const { data } = await procesarVentas(filesOrFile, dId, nombre, nrc, dui)
         nuevos = [data]
       }
+      adjuntarArchivosLocales(nuevos, filesOrFile)
       // Descarta lo que ya estaba: subir el mismo DTE dos veces (su PDF y su
       // JSON, o lotes que se solapan) duplicaba la fila y el crédito fiscal.
       // Si el declarante cambió desde la última subida, arranca de cero en

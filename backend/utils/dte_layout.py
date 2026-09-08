@@ -124,39 +124,64 @@ def _tokens_nombre(nombre: str) -> set[str]:
     return {p for p in palabras if p not in _CONECTORES_NOMBRE and len(p) > 1}
 
 
-def cliente_aparece_en_documento(texto: str, cliente_activo: dict) -> bool:
+def verificar_cliente_en_documento(texto: str, cliente_activo: dict, rol_esperado: str) -> tuple[bool, str]:
     """
-    ¿El cliente activo (declarante) aparece en este documento, como emisor o
-    receptor? Detecta el caso de subir el PDF de un tercero sin relación con
-    el cliente seleccionado — antes se procesaba igual.
+    ¿El cliente activo (declarante) aparece en este documento EN EL ROL que
+    le corresponde? `rol_esperado` es "emisor" (ventas, retenciones, sujetos
+    excluidos: el declarante emite el DTE) o "receptor" (compras: el
+    declarante recibe el CCF que emitió su proveedor).
 
-    Prioridad: NRC primero, después NIT, después DUI. El NRC es el
-    identificador más confiable para personas naturales: a diferencia del
-    NIT/DUI (que a veces aparecen intercambiados) y del nombre (que unos
-    documentos anotan "Apellido Nombre" y otros "Nombre Apellido"), el NRC no
-    se presta a esa ambigüedad. El nombre solo se usa como último recurso —
-    coincidencia de todas sus palabras en el documento, en cualquier orden —
-    para no fallar con clientes que aún no tienen NIT/NRC/DUI cargado en el
-    directorio.
+    No alcanza con comprobar que el cliente esté en algún lado del
+    documento: una compra de Juan Pérez (Juan como receptor) subida al
+    extractor de Ventas antes pasaba igual, porque Juan sí aparece en el
+    documento — nomás que del lado equivocado, y el extractor terminaba
+    armando una "venta" de Juan que en realidad es una compra suya.
+
+    Devuelve (aparece, motivo). `motivo` empieza con "aparece como" cuando
+    el cliente sí está, pero del otro lado — quien llama arma con eso un
+    aviso específico ("esto es una compra, no una venta") en vez del
+    genérico de "no encontrado". Prioridad de identificador: NRC primero
+    (el más confiable para personas naturales, ya que NIT/DUI a veces
+    aparecen intercambiados), después NIT, después DUI; el nombre solo
+    como último recurso.
     """
     texto = texto or ""
     if len(texto.strip()) < 20:
         # Sin capa de texto extraíble (PDF de imagen que depende de Visión):
         # no hay sobre qué validar. Mejor no bloquear que dar un falso rechazo.
-        return True
+        return True, ""
 
-    for campo in ("nrc", "nit", "dui"):
-        valor = re.sub(r"[^0-9]", "", str(cliente_activo.get(campo, "") or ""))
-        if valor and _patron_valor(valor).search(texto):
-            return True
+    identificadores = {
+        campo: re.sub(r"[^0-9]", "", str(cliente_activo.get(campo, "") or ""))
+        for campo in ("nrc", "nit", "dui")
+    }
+    identificadores = {k: v for k, v in identificadores.items() if v}
+
+    def _coincide(columna: dict) -> bool:
+        return any(columna.get(campo) == valor for campo, valor in identificadores.items())
+
+    pares = ids_pareados(texto)
+    if pares:
+        rol_contrario = "receptor" if rol_esperado == "emisor" else "emisor"
+        if _coincide(pares.get(rol_esperado, {})):
+            return True, ""
+        if _coincide(pares.get(rol_contrario, {})):
+            return False, f"aparece como {rol_contrario}, no como {rol_esperado}"
+        # Ninguna columna calza por número — no se descarta todavía: el
+        # directorio puede tener el identificador en otro formato que el
+        # documento. Sigue con la búsqueda permisiva de abajo.
+
+    for valor in identificadores.values():
+        if _patron_valor(valor).search(texto):
+            return True, ""
 
     tokens = _tokens_nombre(str(cliente_activo.get("nombre", "") or ""))
     if len(tokens) >= 2:
         texto_up = texto.upper()
         if all(re.search(rf"\b{re.escape(t)}\b", texto_up) for t in tokens):
-            return True
+            return True, ""
 
-    return False
+    return False, "ausente"
 
 
 def identificadores_emisor(texto: str) -> set[str]:
