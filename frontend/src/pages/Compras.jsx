@@ -1,12 +1,13 @@
 import { useState, useMemo } from 'react'
 import PdfUploader from '../components/PdfUploader'
-import { procesarCompras, procesarComprasLote, exportarExcelCompras, guardarResultados, nombreDesdeRespuesta } from '../services/api'
+import ResultadosTabla from '../components/ResultadosTabla'
+import { procesarCompras, procesarComprasLote, exportarExcelCompras, guardarResultados, actualizarResultado, nombreDesdeRespuesta } from '../services/api'
 import {
   fmt, descargarBlob, detalleErrorExport, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados, avisoConfianza,
-  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen,
+  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen, registroCorregido,
   SearchBar, filtrarPorTexto, ErrorBox, AvisoBox,
 } from '../utils/dte'
-import { IconCompras, IconExportar, IconArchivo, IconCheck, IconAlerta } from '../components/Icons'
+import { IconCompras, IconExportar, IconArchivo, IconCheck } from '../components/Icons'
 
 const TIPOS_PERCEPCION = new Set(['03', '05', '06', '12'])
 
@@ -68,7 +69,11 @@ export default function Compras() {
       const { lista, agregados, duplicados } = fusionarSinDuplicados(base, nuevos)
       setResultados(lista)
       setAviso(avisoDuplicados(duplicados))
-      guardarResultados('compras', dId, agregados)
+      guardarResultados('compras', dId, agregados).then(ids => {
+        if (!ids) return
+        agregados.forEach((r, i) => { if (ids[i]) r.dbId = ids[i] })
+        setResultados(prev => [...prev])
+      })
     } catch (err) {
       const detail = err.response?.data?.detail
       setError(typeof detail === 'string' ? detail : JSON.stringify(detail ?? err.message))
@@ -77,6 +82,15 @@ export default function Compras() {
       setLoading(false)
       setTimeout(limpiarProgreso, 500)
     }
+  }
+
+  // Corrige un documento ahí mismo, sin ir a la pantalla de Revisión
+  // Manual: actualiza la fila en memoria y, si ya se guardó en Supabase
+  // (r.dbId), sincroniza también el registro persistido.
+  async function handleCorregir(row, cambios, soloConforme) {
+    const registroNuevo = registroCorregido(row.registro, soloConforme ? {} : cambios)
+    setResultados(prev => prev.map(r => (r === row ? { ...r, registro: registroNuevo } : r)))
+    if (row.dbId) await actualizarResultado('compras', row.dbId, registroNuevo)
   }
 
   // ── datos derivados ───────────────────────────────────────────────────────
@@ -456,7 +470,9 @@ export default function Compras() {
               </div>
             )}
 
-            {/* Tab 4 — Alertas */}
+            {/* Tab 4 — Alertas: mismo componente que la tabla de auditoría,
+                así "corregir" queda en el mismo lugar donde se ve el
+                resultado — no hace falta ir a otra pantalla. */}
             {tab === 4 && (
               <div className="space-y-2">
                 {alertas.length === 0 ? (
@@ -464,38 +480,12 @@ export default function Compras() {
                     <IconCheck className="w-4 h-4" /> Sin alertas — todos los documentos están conformes.
                   </p>
                 ) : (
-                  alertas.map((r, i) => {
-                    const d = r.registro || {}
-                    return (
-                      <div key={i} className="bg-surface-700 rounded-lg px-4 py-3 flex items-start gap-3">
-                        <IconAlerta
-                          className={`w-4 h-4 mt-0.5 shrink-0 ${
-                            nivelEstado(d.estado) === 'manual' ? 'text-red-400' : 'text-amber-400'
-                          }`}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-white truncate">
-                            {d.nom_prov || d.nit_prov || `Doc #${i + 1}`}
-                          </p>
-                          {r.filename && (
-                            <p className="font-mono text-[0.65rem] text-slate-400 bg-surface-800 inline-block px-1.5 py-0.5 rounded mt-1 truncate max-w-full">
-                              {r.filename}
-                            </p>
-                          )}
-                          <p className="text-xs text-slate-400 mt-1">
-                            {d.estado}{d.confianza != null && ` · confianza ${d.confianza}%`}
-                          </p>
-                          {d.detalle_confianza && (
-                            <p className="text-xs text-slate-500 mt-1">{d.detalle_confianza}</p>
-                          )}
-                        </div>
-                        <div className="text-right shrink-0">
-                          <p className="text-xs text-slate-400">{d.fecha}</p>
-                          <p className="text-xs font-mono text-amber-400">${fmt(d.tot)}</p>
-                        </div>
-                      </div>
-                    )
-                  })
+                  alertas.map((r, i) => (
+                    <ResultadosTabla
+                      key={i} data={r} tipo="compras" declaranteId={declaranteId}
+                      index={i + 1} onCorregir={handleCorregir}
+                    />
+                  ))
                 )}
               </div>
             )}

@@ -146,12 +146,38 @@ export function usePersistenciaExtractor(tipo) {
     }
   })
 
+  // `vision_campos` es una copia interna de auditoría (de dónde salió cada
+  // campo) que ninguna pantalla llega a leer — ver ResultadosTabla.jsx, que
+  // usa `registro.fuentes`, no esto. En lotes grandes duplicaba varios KB
+  // por documento sin necesidad, y eso fue lo que hacía fallar el
+  // `setItem` por cuota excedida en sessionStorage — en silencio, porque el
+  // catch de abajo no distinguía "no cabe" de cualquier otro error, así que
+  // ni declaranteId quedaba guardado y la próxima carga de la página volvía
+  // a foja cero (peor aún: el próximo upload veía un declaranteId vacío,
+  // asumía que había cambiado de cliente y BORRABA los resultados en
+  // pantalla). Sacar este campo antes de serializar entra en la cuota en
+  // los casos reales que se vieron en pruebas.
+  function _liviano(resultados) {
+    return resultados.map(({ vision_campos, ...resto }) => resto)
+  }
+
   function guardar(nuevosResultados, nuevoDeclaranteId) {
+    const payload = { resultados: _liviano(nuevosResultados), declaranteId: nuevoDeclaranteId }
     try {
-      sessionStorage.setItem(key, JSON.stringify({ resultados: nuevosResultados, declaranteId: nuevoDeclaranteId }))
-    } catch {
-      // Lote muy grande para la cuota de sessionStorage: se sigue viendo en
-      // pantalla, solo no sobrevive a cambiar de módulo. No es crítico.
+      sessionStorage.setItem(key, JSON.stringify(payload))
+    } catch (err) {
+      console.warn(`No se pudo guardar "${key}" en sessionStorage (${err?.name || err}) — los resultados quedan en pantalla pero no sobreviven a cambiar de módulo.`)
+      // Al menos el declaranteId (unas pocas decenas de bytes, siempre entra
+      // en cuota): si esto tampoco se guarda, al volver a esta página
+      // `declaranteId` lee vacío, el próximo upload del mismo cliente lo ve
+      // como "cambió de cliente" y BORRA los resultados que sí sobrevivían
+      // en memoria — un fallo de cuota terminaba borrando más de lo que
+      // realmente no entraba.
+      try {
+        sessionStorage.setItem(key, JSON.stringify({ resultados: [], declaranteId: nuevoDeclaranteId }))
+      } catch {
+        // Ni esto entra — cuota agotada por otra razón. Nada más que hacer.
+      }
     }
   }
 
@@ -558,6 +584,51 @@ const ETIQUETA = {
 export function esAlerta(estado) {
   const nivel = nivelEstado(estado)
   return nivel === 'revisar' || nivel === 'manual'
+}
+
+// Campos que tiene sentido corregir a mano, por tipo de extractor — no
+// incluye identificadores del documento (gen/sello/num_control): editarlos
+// rompería la deduplicación (claveDocumento) y no son datos que el usuario
+// deba reescribir, a diferencia de nombres/identificaciones/montos, que sí
+// vienen mal a veces por errores de OCR/regex.
+export const CAMPOS_EDITABLES = {
+  ventas: [
+    ['nom_cli', 'Cliente', 'text'], ['nit_cli', 'NIT cliente', 'text'], ['dui_cli', 'DUI cliente', 'text'],
+    ['fecha', 'Fecha (DD/MM/AAAA)', 'text'],
+    ['exentas', 'Exentas', 'number'], ['no_sujetas', 'No sujetas', 'number'],
+    ['gravadas', 'Gravadas', 'number'], ['debito', 'Débito fiscal', 'number'], ['total', 'Total', 'number'],
+  ],
+  compras: [
+    ['nom_prov', 'Proveedor', 'text'], ['nit_prov', 'NIT proveedor', 'text'], ['dui_prov', 'DUI proveedor', 'text'],
+    ['fecha', 'Fecha (DD/MM/AAAA)', 'text'],
+    ['exe', 'Exentas', 'number'], ['gra', 'Gravadas', 'number'], ['iva', 'IVA', 'number'], ['tot', 'Total', 'number'],
+  ],
+  retenciones: [
+    ['nit_prov', 'NIT sujeto retenido', 'text'], ['dui_agente', 'DUI agente', 'text'],
+    ['fecha', 'Fecha (DD/MM/AAAA)', 'text'],
+    ['base', 'Base imponible', 'number'], ['ret', 'Retención', 'number'],
+  ],
+  sujetos_excluidos: [
+    ['nom_sujeto', 'Sujeto excluido', 'text'], ['id_sujeto', 'NIT/DUI sujeto', 'text'],
+    ['fecha', 'Fecha (DD/MM/AAAA)', 'text'],
+    ['base', 'Base imponible', 'number'], ['ret', 'Retención', 'number'],
+  ],
+}
+
+/**
+ * Registro corregido — mismo criterio que usa la pantalla de Revisión
+ * Manual (RevisionManual.jsx) para marcar un documento como conforme
+ * después de arreglarlo a mano, así el estado se ve igual sin importar
+ * desde dónde se corrigió.
+ */
+export function registroCorregido(registroBase, cambios) {
+  return {
+    ...registroBase,
+    ...cambios,
+    estado: 'OK (revisado manualmente)',
+    revisado_manualmente: true,
+    revisado_en: new Date().toISOString(),
+  }
 }
 
 /** Insignia de estado para las tablas de resultados. */

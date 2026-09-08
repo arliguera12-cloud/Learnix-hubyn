@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { IconExportar, IconAlerta } from './Icons'
 import { exportarExcel } from '../services/api'
-import { EstadoBadge, esAlerta, nivelEstado } from '../utils/dte'
+import { EstadoBadge, esAlerta, nivelEstado, CAMPOS_EDITABLES } from '../utils/dte'
 
 // Campos a mostrar por tipo, con etiquetas amigables
 const CAMPOS_DISPLAY = {
@@ -109,9 +109,12 @@ function descargarBlob(blobData, nombre) {
   URL.revokeObjectURL(url)
 }
 
-export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
+export default function ResultadosTabla({ data, tipo, declaranteId, index, onCorregir }) {
   const [exportando, setExportando] = useState(false)
   const [expandido,  setExpandido]  = useState(false)
+  const [corrigiendo, setCorrigiendo] = useState(false)
+  const [form,        setForm]        = useState(null)
+  const [guardando,   setGuardando]   = useState(false)
 
   if (!data) return null
 
@@ -183,6 +186,14 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {onCorregir && esAlerta(registro.estado) && (
+            <button
+              onClick={() => { setForm({ ...registro }); setCorrigiendo(v => !v) }}
+              className={`btn-ghost text-xs px-2 py-1 ${corrigiendo ? 'text-accent' : 'text-amber-400'}`}
+            >
+              {corrigiendo ? 'Cancelar' : 'Corregir'}
+            </button>
+          )}
           <button
             onClick={() => setExpandido(v => !v)}
             className="btn-ghost text-xs px-2 py-1 text-slate-400"
@@ -215,6 +226,54 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
             {registro.detalle_confianza || `Campos faltantes: ${registro.campos_faltantes.join(', ')}`}
             {registro.confianza != null && <span className="text-slate-500"> · confianza {registro.confianza}%</span>}
           </p>
+        </div>
+      )}
+
+      {/* Corrección en línea — mismos campos y mismo criterio que Revisión Manual */}
+      {corrigiendo && form && (
+        <div className="px-4 py-3 border-b border-surface-600/50 bg-surface-700/30 space-y-3">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {(CAMPOS_EDITABLES[tipo] || []).map(([campo, label]) => (
+              <div key={campo}>
+                <label className="form-label" htmlFor={`corr-${filename}-${campo}`}>{label}</label>
+                <input
+                  id={`corr-${filename}-${campo}`}
+                  className="input"
+                  value={form[campo] ?? ''}
+                  onChange={e => setForm(f => ({ ...f, [campo]: e.target.value }))}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              disabled={guardando}
+              onClick={async () => {
+                setGuardando(true)
+                await onCorregir(data, {}, true)
+                setGuardando(false)
+                setCorrigiendo(false)
+              }}
+              className="btn-ghost text-xs px-3 py-2 border border-hairline"
+              title="Los datos extraídos están correctos tal como están, solo confirmar"
+            >
+              Marcar conforme sin cambios
+            </button>
+            <button
+              type="button"
+              disabled={guardando}
+              onClick={async () => {
+                setGuardando(true)
+                await onCorregir(data, form, false)
+                setGuardando(false)
+                setCorrigiendo(false)
+              }}
+              className="btn-primary text-xs px-4 py-2"
+            >
+              {guardando ? 'Guardando…' : 'Guardar corrección'}
+            </button>
+          </div>
         </div>
       )}
 

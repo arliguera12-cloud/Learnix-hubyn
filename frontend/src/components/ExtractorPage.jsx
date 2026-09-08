@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import PdfUploader from './PdfUploader'
 import ResultadosTabla from './ResultadosTabla'
-import { exportarExcel, guardarResultados, nombreDesdeRespuesta } from '../services/api'
+import { exportarExcel, guardarResultados, actualizarResultado, nombreDesdeRespuesta } from '../services/api'
 import {
   fmt, descargarBlob, detalleErrorExport, fusionarSinDuplicados, avisoDuplicados, avisoConfianza, nivelEstado,
-  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA,
+  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, registroCorregido,
   SearchBar, filtrarPorTexto, ErrorBox, AvisoBox,
 } from '../utils/dte'
 import { IconExportar, IconArchivo } from './Icons'
@@ -110,8 +110,16 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
       setResultados(lista)
       setAviso(avisoDuplicados(duplicados))
 
-      // Guardar en Supabase en segundo plano (solo lo realmente agregado)
-      guardarResultados(tipo, dId, agregados)
+      // Guardar en Supabase en segundo plano (solo lo realmente agregado).
+      // Los ids que devuelve se pegan en los mismos objetos que ya viven en
+      // `resultados` (agregados es un subconjunto de lista, mismas
+      // referencias) — así "Corregir" sabe qué fila actualizar en Supabase
+      // sin tener que volver a buscarla.
+      guardarResultados(tipo, dId, agregados).then(ids => {
+        if (!ids) return
+        agregados.forEach((r, i) => { if (ids[i]) r.dbId = ids[i] })
+        setResultados(prev => [...prev])
+      })
 
     } catch (err) {
       const detail = err.response?.data?.detail
@@ -135,6 +143,16 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
     } finally {
       setExportando(null)
     }
+  }
+
+  // Corrige un documento ahí mismo, sin ir a la pantalla de Revisión
+  // Manual: actualiza la fila en memoria (para que el anexo se exporte ya
+  // corregido) y, si ya se guardó en Supabase (r.dbId), sincroniza también
+  // el registro persistido.
+  async function handleCorregir(row, cambios, soloConforme) {
+    const registroNuevo = registroCorregido(row.registro, soloConforme ? {} : cambios)
+    setResultados(prev => prev.map(r => (r === row ? { ...r, registro: registroNuevo } : r)))
+    if (row.dbId) await actualizarResultado(tipo, row.dbId, registroNuevo)
   }
 
   function handleLimpiar() {
@@ -334,7 +352,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
         </p>
       ) : (
         resultadosFiltrados.map(([r, i]) => (
-          <ResultadosTabla key={i} data={r} tipo={tipo} declaranteId={declaranteId} index={i + 1} />
+          <ResultadosTabla key={i} data={r} tipo={tipo} declaranteId={declaranteId} index={i + 1} onCorregir={handleCorregir} />
         ))
       )}
     </div>
