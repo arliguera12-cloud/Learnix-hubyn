@@ -32,7 +32,7 @@ export function ErrorBox({ mensaje }) {
   const ocultos = lineas.length - visibles.length
 
   return (
-    <div className="card border-l-2 border-l-red-500 border-y-0 border-r-0 bg-panel animate-rise-sm">
+    <div className="card border-l-2 border-l-red-500 border-y-0 border-r-0 bg-panel">
       <p className="text-red-400 font-semibold text-sm flex items-center gap-1.5 mb-2">
         <IconAlerta className="w-4 h-4 shrink-0" />
         {lineas.length > 1 ? `${lineas.length} documentos no procesados` : 'Documento no procesado'}
@@ -77,7 +77,7 @@ export function AvisoBox({ mensaje }) {
   // Sin detalle (caso de un solo duplicado): un párrafo simple alcanza.
   if (!detalle.length) {
     return (
-      <div className="card border-l-2 border-l-amber-500 border-y-0 border-r-0 bg-panel animate-rise-sm">
+      <div className="card border-l-2 border-l-amber-500 border-y-0 border-r-0 bg-panel">
         <p className="text-amber-400 text-sm flex items-start gap-2">
           <IconAlerta className="w-4 h-4 shrink-0 mt-0.5" />
           <span>{resumen}</span>

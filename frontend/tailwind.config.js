@@ -5,7 +5,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Superficies — reapuntadas a los tokens de tema.
+        // Superficies — reapuntadas a los tokens de tema (ver `slate` abajo).
         surface: {
           50:  'rgb(var(--panel-rgb) / <alpha-value>)',
           100: 'rgb(var(--panel-rgb) / <alpha-value>)',
@@ -18,8 +18,9 @@ export default {
           800: 'rgb(var(--panel-rgb) / <alpha-value>)',
           900: 'rgb(var(--bg-rgb) / <alpha-value>)',
         },
-        // Primario — acento bermellón único de marca/interacción. Pestañas
-        // activas, barras de progreso, foco de inputs, CTA.
+        // Primario — el bermellón de imprenta. Antes era un celeste que no
+        // pertenecía a la paleta editorial; se usa en pestañas activas,
+        // barras de progreso y foco de inputs.
         brand: {
           50:  'rgb(var(--gold-rgb) / <alpha-value>)',
           100: 'rgb(var(--gold-rgb) / <alpha-value>)',
@@ -27,24 +28,47 @@ export default {
           500: 'rgb(var(--gold-rgb) / <alpha-value>)',
           600: 'rgb(var(--gold-rgb) / <alpha-value>)',
         },
-        // Éxito / ganancia
+        // Acento editorial — dorado
+        gold: {
+          DEFAULT: '#d4b45c',
+          tint: '#2a2110',
+        },
+        // Tokens explícitos --ink/--cream (modo oscuro) para componentes
+        // que replican el patrón exacto de Certia (btn-primary, form-label, etc.)
+        ink: {
+          DEFAULT: '#f2ede1',
+          3: '#a89f8b',
+          5: '#4d4638',
+        },
+        cream: {
+          DEFAULT: '#0b0a08',
+          hi: '#131110',
+        },
+        // Éxito / ganancia — ledger
         ledger: {
-          DEFAULT: 'rgb(var(--cinnabar-rgb))',
-          tint: 'rgb(var(--cinnabar-rgb) / 0.1)',
+          DEFAULT: '#5fd7be',
+          tint: '#0b2620',
+        },
+        // Error / pérdida — cinnabar
+        cinnabar: {
+          DEFAULT: '#ed8b73',
+          tint: '#2b1310',
         },
         // Sidebar — siempre oscuro
         sb: {
-          bg: '#0d0e12',
-          'bg-2': '#171922',
+          bg: '#0d0c0a',
+          'bg-2': '#171512',
           hair: 'rgba(246,244,238,0.08)',
-          txt: '#c7cbd6',
-          'txt-mute': '#767c8c',
-          'txt-hi': '#f4f5f8',
+          txt: '#d3ccbc',
+          'txt-mute': '#7a7365',
+          'txt-hi': '#f6f4ee',
         },
         // Escalas nativas de Tailwind reapuntadas a los tokens de tema. Las
         // páginas de extractores (Ventas, Compras, …) ya usan `text-slate-400`,
-        // `bg-surface-700`, etc. en cientos de sitios; remapearlas aquí hace
-        // que toda esa UI siga el tema claro/oscuro sin reescribir su marcado.
+        // `bg-surface-700`, `text-emerald-400`, etc. en cientos de sitios;
+        // remapearlas aquí hace que toda esa UI siga el tema claro/oscuro sin
+        // reescribir su marcado. Los números conservan su sentido relativo
+        // (más alto = más apagado en texto, más profundo en superficie).
         slate: {
           50:  'rgb(var(--panel-rgb) / <alpha-value>)',
           100: 'rgb(var(--ink-rgb) / <alpha-value>)',
@@ -57,17 +81,17 @@ export default {
           800: 'rgb(var(--panel2-rgb) / <alpha-value>)',
           900: 'rgb(var(--panel-rgb) / <alpha-value>)',
         },
-        // Semánticos: error real → rojo (independiente del acento de marca),
-        // ganancia/conforme → verde, observación → ámbar. Los tonos 700–900
-        // se usan casi siempre con modificador de opacidad (bg-red-900/20),
-        // así que apuntan al mismo color base y el tinte lo da la opacidad.
+        // Semánticos: pérdida/error → bermellón, ganancia/conforme → verde,
+        // observación → ocre. Los tonos 700–900 se usan casi siempre con
+        // modificador de opacidad (bg-red-900/20), así que apuntan al mismo
+        // color base y el tinte lo da la opacidad.
         red: {
-          300: 'rgb(var(--danger-rgb) / <alpha-value>)',
-          400: 'rgb(var(--danger-rgb) / <alpha-value>)',
-          500: 'rgb(var(--danger-rgb) / <alpha-value>)',
-          700: 'rgb(var(--danger-rgb) / <alpha-value>)',
-          800: 'rgb(var(--danger-rgb) / <alpha-value>)',
-          900: 'rgb(var(--danger-rgb) / <alpha-value>)',
+          300: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          400: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          500: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          700: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          800: 'rgb(var(--gold-rgb) / <alpha-value>)',
+          900: 'rgb(var(--gold-rgb) / <alpha-value>)',
         },
         emerald: {
           400: 'rgb(var(--cinnabar-rgb) / <alpha-value>)',
@@ -84,13 +108,13 @@ export default {
           900: 'rgb(var(--warn-rgb) / <alpha-value>)',
         },
         // Azules/rosas sueltos que quedaron de la plantilla original: se
-        // reconducen al único acento de marca en vez de dejarlos sueltos.
+        // reconducen al acento editorial para que no reaparezca el arcoíris.
         blue:   { 400: 'rgb(var(--gold-rgb) / <alpha-value>)', 500: 'rgb(var(--gold-rgb) / <alpha-value>)' },
         sky:    { 400: 'rgb(var(--gold-rgb) / <alpha-value>)', 500: 'rgb(var(--gold-rgb) / <alpha-value>)' },
         green:  { 400: 'rgb(var(--cinnabar-rgb) / <alpha-value>)' },
         // Tokens de tema (claro por defecto / oscuro vía .dark) — con soporte
         // de modificador de opacidad (bg-paper/80, text-fg-3/60, etc.) porque
-        // apuntan a variables RGB, no hex.
+        // apuntan a variables RGB, no hex. Usados en landing, login y layout.
         paper:    'rgb(var(--bg-rgb) / <alpha-value>)',
         panel:    'rgb(var(--panel-rgb) / <alpha-value>)',
         panel2:   'rgb(var(--panel2-rgb) / <alpha-value>)',
@@ -101,28 +125,24 @@ export default {
         'fg-5':   'rgb(var(--ink5-rgb) / <alpha-value>)',
         accent:   'rgb(var(--gold-rgb) / <alpha-value>)',
         accent2:  'rgb(var(--cinnabar-rgb) / <alpha-value>)',
-        danger:   'rgb(var(--danger-rgb) / <alpha-value>)',
         warn:     'rgb(var(--warn-rgb) / <alpha-value>)',
       },
       fontFamily: {
         sans: ["'Instrument Sans'", '-apple-system', 'BlinkMacSystemFont', "'Segoe UI'", 'sans-serif'],
-        display: ["'Instrument Sans'", '-apple-system', 'BlinkMacSystemFont', "'Segoe UI'", 'sans-serif'],
+        display: ["'Fraunces'", "'Times New Roman'", 'Georgia', 'serif'],
         ui: ["'Instrument Sans'", '-apple-system', 'BlinkMacSystemFont', "'Segoe UI'", 'sans-serif'],
         mono: ["'JetBrains Mono'", "'Menlo'", "'Consolas'", 'monospace'],
       },
       borderRadius: {
-        // Escala moderna generosa — reemplaza el radio casi recto (2px,
-        // "boleto impreso") del sistema editorial anterior.
-        DEFAULT: '0.625rem',
-        sm: '0.5rem',
-        md: '0.75rem',
-        lg: '0.875rem',
-        xl: '1rem',
-        '2xl': '1.25rem',
-      },
-      boxShadow: {
-        card: 'var(--shadow-card)',
-        'card-lg': 'var(--shadow-card-lg)',
+        // Radio casi recto en toda la app — "botones que parecen boletos
+        // impresos, no burbujas de app" (motivo de marca documentado en el
+        // sistema de diseño de ContaSV). rounded-full queda intacto: el
+        // círculo se reserva para el sello y los íconos de feature.
+        DEFAULT: '2px',
+        sm: '2px',
+        md: '2px',
+        lg: '2px',
+        xl: '3px',
       },
     },
   },

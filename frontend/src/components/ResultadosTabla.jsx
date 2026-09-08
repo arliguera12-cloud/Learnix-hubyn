@@ -235,15 +235,8 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
         </div>
       )}
 
-      {/* Tabla de campos + notas por fuente (expandible) — grid-template-rows
-          de 0fr a 1fr anima hasta el alto real del contenido sin medirlo
-          a mano; el contenido queda montado siempre, solo cambia el alto
-          visible, así "Ver campos" se lee como una revelación y no un salto. */}
-      <div
-        className={`grid transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none
-          ${expandido ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
-      >
-        <div className="overflow-hidden">
+      {/* Tabla de campos (expandible) */}
+      {expandido && (
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -286,28 +279,27 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index }) {
             </tbody>
           </table>
         </div>
+      )}
 
-        {/* Notas por fuente: qué corrigió/verificó cada mecanismo (Visión, Hacienda, IA) */}
-        {tieneIa && (
-          <div className="px-4 py-3 border-t border-surface-600/50 bg-surface-700/30">
-            <p className="text-xs text-slate-400 font-semibold mb-2">
-              Origen de los datos
-            </p>
-            <ul className="space-y-1.5">
-              {correcciones_ia.map((c, i) => {
-                const { label, clase, mensaje } = parsearCorreccion(c)
-                return (
-                  <li key={i} className={`text-xs text-slate-300 pl-3 border-l-2 ${clase}`}>
-                    <span className={`font-semibold mr-1.5 ${clase.split(' ')[0]}`}>{label}:</span>
-                    {mensaje}
-                  </li>
-                )
-              })}
-            </ul>
-          </div>
-        )}
+      {/* Notas por fuente: qué corrigió/verificó cada mecanismo (Visión, Hacienda, IA) */}
+      {tieneIa && expandido && (
+        <div className="px-4 py-3 border-t border-surface-600/50 bg-surface-700/30">
+          <p className="text-xs text-slate-400 font-semibold mb-2">
+            Origen de los datos
+          </p>
+          <ul className="space-y-1.5">
+            {correcciones_ia.map((c, i) => {
+              const { label, clase, mensaje } = parsearCorreccion(c)
+              return (
+                <li key={i} className={`text-xs text-slate-300 pl-3 border-l-2 ${clase}`}>
+                  <span className={`font-semibold mr-1.5 ${clase.split(' ')[0]}`}>{label}:</span>
+                  {mensaje}
+                </li>
+              )
+            })}
+          </ul>
         </div>
-      </div>
+      )}
     </div>
   )
 }

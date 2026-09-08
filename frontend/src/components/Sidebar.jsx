@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { signOut } from '../services/auth'
 import ThemeToggle from './ThemeToggle'
 import {
@@ -19,22 +18,11 @@ const NAV = [
 
 export default function Sidebar() {
   const navigate = useNavigate()
-  const location = useLocation()
-  const navRef = useRef(null)
-  const [indicador, setIndicador] = useState(null)
 
   async function handleLogout() {
     await signOut()
     navigate('/login')
   }
-
-  // Barra que se desliza hacia el item activo en vez de aparecer/desaparecer
-  // de golpe — la navegación se lee como un mismo espacio que se mueve, no
-  // como recargas de estado independientes entre sí.
-  useEffect(() => {
-    const activo = navRef.current?.querySelector('a[aria-current="page"]')
-    setIndicador(activo ? { top: activo.offsetTop, height: activo.offsetHeight } : null)
-  }, [location.pathname])
 
   // Agrupar items de nav
   const grupos = []
@@ -51,11 +39,11 @@ export default function Sidebar() {
   return (
     <aside className="fixed inset-y-0 left-0 w-64 bg-panel border-r border-hairline flex flex-col z-30">
       {/* Logo */}
-      <div className="px-5 py-5 border-b border-hairline">
-        <div className="flex items-center gap-3">
-          <IconSeccion className="w-9 h-9 text-lg" />
+      <div className="px-6 py-6 border-b border-hairline">
+        <div className="flex items-baseline gap-2.5">
+          <IconSeccion className="text-2xl text-accent" />
           <div>
-            <p className="text-[15px] font-semibold text-fg leading-none">Learnix</p>
+            <p className="text-base font-display text-fg leading-none">Learnix</p>
             <p className="text-[10px] text-fg-4 uppercase tracking-[0.2em] leading-none mt-1.5">
               DTE Hub
             </p>
@@ -64,16 +52,7 @@ export default function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav ref={navRef} className="relative flex-1 overflow-y-auto py-4 px-3 space-y-5">
-        {indicador && (
-          <div
-            aria-hidden="true"
-            className="absolute inset-x-3 rounded-lg bg-accent/10
-                       transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]
-                       motion-reduce:transition-none pointer-events-none"
-            style={{ transform: `translateY(${indicador.top}px)`, height: indicador.height }}
-          />
-        )}
+      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-5">
         {grupos.map(({ label, items }) => (
           <div key={label || '_root'}>
             {label && (
@@ -87,9 +66,9 @@ export default function Sidebar() {
                   key={to}
                   to={to}
                   className={({ isActive }) =>
-                    `relative z-10 flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] transition-colors duration-100 ` +
+                    `flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] transition-colors duration-100 ` +
                     (isActive
-                      ? 'text-accent font-medium'
+                      ? 'bg-accent/10 text-fg font-medium border-l-2 border-accent pl-[10px]'
                       : 'text-fg-3 hover:text-fg hover:bg-panel2')
                   }
                 >
