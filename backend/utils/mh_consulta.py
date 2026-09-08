@@ -130,6 +130,63 @@ def _registrar_resultado(ok: bool) -> None:
 _ESTADO_DOC_PROBLEMA = ("RECHAZ", "INVALID", "ANULA")
 
 
+def verificar_cliente_en_consulta_mh(
+    consulta_mh: dict | None, cliente_activo: dict, rol_esperado: str,
+) -> tuple[bool, str] | None:
+    """
+    ¿El cliente activo aparece en el rol que le corresponde ("emisor" o
+    "receptor"), según el documento oficial que devuelve esta consulta?
+
+    Es la fuente más confiable posible para esto: `documento.emisor` /
+    `documento.receptor` vienen tal como Hacienda los tiene registrados
+    (mismos campos que schemas/dte_hacienda.py), no hay que adivinarlos de
+    un PDF cuyo layout varía de un emisor a otro — el regex de
+    dte_layout.verificar_cliente_en_documento ya se topó con al menos dos
+    formatos reales (columnas con NIT+NRC intercalados, y facturación por
+    cuenta de terceros vía un procesador de pagos) donde el emisor/receptor
+    no caen en una sola línea parejita y esa detección no tiene con qué
+    trabajar.
+
+    Devuelve `None` (no concluyente, que quien llama recurra al chequeo por
+    texto) cuando: no hay consulta, el documento no trae emisor/receptor,
+    el cliente activo no tiene ningún NIT/NRC/DUI cargado para comparar, o
+    ninguno de los dos lados calza — ahí no se afirma "ausente" porque el
+    directorio podría tener el identificador en otro formato que Hacienda.
+    Solo devuelve una respuesta firme cuando hay una coincidencia real,
+    en el rol esperado o en el contrario.
+    """
+    documento = (consulta_mh or {}).get("documento") or {}
+    emisor = documento.get("emisor") or {}
+    receptor = documento.get("receptor") or {}
+    if not emisor and not receptor:
+        return None
+
+    identificadores = {
+        campo: re.sub(r"[^0-9]", "", str(cliente_activo.get(campo, "") or ""))
+        for campo in ("nrc", "nit", "dui")
+    }
+    identificadores = {k: v for k, v in identificadores.items() if v}
+    if not identificadores:
+        return None
+
+    def _coincide(lado: dict) -> bool:
+        for campo, valor in identificadores.items():
+            crudo = re.sub(r"[^0-9]", "", str(lado.get(campo, "") or ""))
+            if crudo and crudo == valor:
+                return True
+        return False
+
+    rol_contrario   = "receptor" if rol_esperado == "emisor" else "emisor"
+    lado_esperado   = emisor if rol_esperado == "emisor" else receptor
+    lado_contrario  = receptor if rol_esperado == "emisor" else emisor
+
+    if _coincide(lado_esperado):
+        return True, ""
+    if _coincide(lado_contrario):
+        return False, f"aparece como {rol_contrario}, no como {rol_esperado} (confirmado por Hacienda)"
+    return None
+
+
 def estado_doc_alerta(consulta_mh: dict | None) -> str | None:
     """
     Si la consulta MH trae un estadoDoc que indica un problema real

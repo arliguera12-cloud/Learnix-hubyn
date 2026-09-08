@@ -16,7 +16,7 @@ from utils.pdf_utils import (
 from utils.ai_utils import gemini_disponible, procesar_dte_con_gemini, es_nombre_sospechoso
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible, vision_ultimo_error
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
-from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta
+from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta, verificar_cliente_en_consulta_mh
 from utils.qa_utils import calcular_confianza
 from utils.dte_layout import verificar_cliente_en_documento
 
@@ -165,7 +165,14 @@ def extraer_sujetos_nativo(file_bytes: bytes, cliente_activo: dict) -> dict:
             texto_lineal, texto_visual = extraer_texto_pdf(file_bytes)
             texto_completo = texto_lineal + "\n" + texto_visual
 
-            _aparece, _motivo = verificar_cliente_en_documento(texto_completo, cliente_activo, "emisor")
+            # Ground truth de Hacienda cuando está disponible — ver docstring
+            # de verificar_cliente_en_consulta_mh (utils/mh_consulta.py).
+            _qr_temprano, _consulta_mh_temprano = _qr_future.result()
+            _resultado_mh = verificar_cliente_en_consulta_mh(_consulta_mh_temprano, cliente_activo, "emisor")
+            _aparece, _motivo = (
+                _resultado_mh if _resultado_mh is not None
+                else verificar_cliente_en_documento(texto_completo, cliente_activo, "emisor")
+            )
             if not _aparece:
                 nombre_cli = str(cliente_activo.get('nombre', '') or '').strip() or "el cliente seleccionado"
                 if _motivo.startswith("aparece como"):
