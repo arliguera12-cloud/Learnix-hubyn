@@ -51,7 +51,7 @@ export default function Ventas() {
 
   // ── upload ───────────────────────────────────────────────────────────────
 
-  async function handleUpload(filesOrFile, dId) {
+  async function handleUpload(filesOrFile, dId, nombre, nrc = '', dui = '') {
     setLoading(true); setError(null); setAviso(null); limpiarProgreso(); setDeclaranteId(dId)
     const isMultiple = Array.isArray(filesOrFile)
     try {
@@ -62,13 +62,13 @@ export default function Ventas() {
         // con el límite por request ni con el timeout del proxy.
         iniciarProgreso(filesOrFile.length, Math.ceil(filesOrFile.length / TAMANO_TANDA))
         const { resultados: res, errores } = await subirLoteEnTandas(
-          filesOrFile, procesarVentasLote, dId, undefined, avanzarProgreso,
+          filesOrFile, procesarVentasLote, dId, nombre, avanzarProgreso, nrc, dui,
         )
         nuevos = res
         if (errores.length) setError(errores.map(e => `${e.filename}: ${e.error}`).join('\n'))
         terminarProgreso()
       } else {
-        const { data } = await procesarVentas(filesOrFile, dId)
+        const { data } = await procesarVentas(filesOrFile, dId, nombre, nrc, dui)
         nuevos = [data]
       }
       // Descarta lo que ya estaba: subir el mismo DTE dos veces (su PDF y su

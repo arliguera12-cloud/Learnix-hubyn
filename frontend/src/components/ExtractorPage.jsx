@@ -62,7 +62,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
     setResultados([]); setError(null); setAviso(null)
   }
 
-  async function handleUpload(filesOrFile, dId, nombre) {
+  async function handleUpload(filesOrFile, dId, nombre, nrc = '', dui = '') {
     setLoading(true)
     setError(null)
     setAviso(null)
@@ -80,7 +80,7 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
         // con el límite por request ni con el timeout del proxy.
         iniciarProgreso(filesOrFile.length, Math.ceil(filesOrFile.length / TAMANO_TANDA))
         const { resultados: res, errores } = await subirLoteEnTandas(
-          filesOrFile, loteApiFn, dId, nombre, avanzarProgreso,
+          filesOrFile, loteApiFn, dId, nombre, avanzarProgreso, nrc, dui,
         )
         nuevos = res
         if (errores.length) {
@@ -91,13 +91,13 @@ export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, 
         // Secuencial como fallback, si el tipo no tiene endpoint de lote
         iniciarProgreso(filesOrFile.length, filesOrFile.length)
         for (let i = 0; i < filesOrFile.length; i++) {
-          const { data } = await apiFn(filesOrFile[i], dId, nombre)
+          const { data } = await apiFn(filesOrFile[i], dId, nombre, nrc, dui)
           nuevos.push(data)
           avanzarProgreso(i + 1, filesOrFile.length, i + 1, filesOrFile.length)
         }
         terminarProgreso()
       } else {
-        const { data } = await apiFn(filesOrFile, dId, nombre)
+        const { data } = await apiFn(filesOrFile, dId, nombre, nrc, dui)
         nuevos = [data]
       }
 

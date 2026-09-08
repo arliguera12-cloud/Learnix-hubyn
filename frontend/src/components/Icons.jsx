@@ -79,6 +79,29 @@ export function IconSujetos(props) {
   )
 }
 
+/** Libros legales — libro abierto con folios foliados. */
+export function IconLibrosLegales(props) {
+  return (
+    <Svg {...props}>
+      <path d="M12 5.5c-2-1.2-4.5-1.75-7.25-1.75v14.5c2.75 0 5.25.55 7.25 1.75" />
+      <path d="M12 5.5c2-1.2 4.5-1.75 7.25-1.75v14.5c-2.75 0-5.25.55-7.25 1.75" />
+      <path d="M12 5.5v14.5" />
+    </Svg>
+  )
+}
+
+/** Revisión manual — documento con lupa (inspección). */
+export function IconRevision(props) {
+  return (
+    <Svg {...props}>
+      <Hoja />
+      <path d="M13.5 2.75v4.5H18" />
+      <circle cx="10.75" cy="14.25" r="2.75" />
+      <path d="M12.75 16.25l2.25 2.25" />
+    </Svg>
+  )
+}
+
 /** Clientes — dos figuras (receptores). */
 export function IconClientes(props) {
   return (
