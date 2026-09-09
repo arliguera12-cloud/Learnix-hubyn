@@ -441,32 +441,69 @@ export default function Compras() {
                     No hay documentos con percepciones (perc &gt; 0 y tipo 03/05/06/12).
                   </p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr>
-                          {['Fecha','Tipo','Proveedor','NIT/NRC','DUI','Exentas','Gravadas','IVA','Percepción'].map(h => (
-                            <th key={h} className="table-head text-left whitespace-nowrap">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {percepciones.map((r, i) => (
-                          <tr key={i} className="hover:bg-surface-700/40 transition-colors">
-                            <td className="table-cell">{r.fecha || '—'}</td>
-                            <td className="table-cell font-mono">{r.tipo || '—'}</td>
-                            <td className="table-cell max-w-[140px] truncate" title={r.nom_prov}>{r.nom_prov || '—'}</td>
-                            <td className="table-cell font-mono">{r.nit_prov || '—'}</td>
-                            <td className="table-cell font-mono">{r.dui_prov || '—'}</td>
-                            <td className="table-cell text-right font-mono">{`$${fmt(r.exe)}`}</td>
-                            <td className="table-cell text-right font-mono text-emerald-400">{`$${fmt(r.gra)}`}</td>
-                            <td className="table-cell text-right font-mono text-amber-400">{`$${fmt(r.iva)}`}</td>
-                            <td className="table-cell text-right font-mono text-sky-400 font-bold">{`$${fmt(r.perc)}`}</td>
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr>
+                            {['Fecha','Tipo','Proveedor','NIT/NRC','DUI','Exentas','Gravadas','IVA','Percepción'].map(h => (
+                              <th key={h} className="table-head text-left whitespace-nowrap">{h}</th>
+                            ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {percepciones.map((r, i) => (
+                            <tr key={i} className="hover:bg-surface-700/40 transition-colors">
+                              <td className="table-cell">{r.fecha || '—'}</td>
+                              <td className="table-cell font-mono">{r.tipo || '—'}</td>
+                              <td className="table-cell max-w-[140px] truncate" title={r.nom_prov}>{r.nom_prov || '—'}</td>
+                              <td className="table-cell font-mono">{r.nit_prov || '—'}</td>
+                              <td className="table-cell font-mono">{r.dui_prov || '—'}</td>
+                              <td className="table-cell text-right font-mono">{`$${fmt(r.exe)}`}</td>
+                              <td className="table-cell text-right font-mono text-emerald-400">{`$${fmt(r.gra)}`}</td>
+                              <td className="table-cell text-right font-mono text-amber-400">{`$${fmt(r.iva)}`}</td>
+                              <td className="table-cell text-right font-mono text-sky-400 font-bold">{`$${fmt(r.perc)}`}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Botones exportar — mismo endpoint que la pestaña F-07:
+                        el backend arma Anexo 3 y Anexo 8 del mismo lote de
+                        registros, así que el botón de acá genera el mismo
+                        archivo (xlsx con 2 hojas, o zip con 2 CSV) sin tener
+                        que volver a la primera pestaña. */}
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        onClick={() => handleExportar('xlsx')}
+                        disabled={!!exportando}
+                        className="btn-primary flex items-center gap-2 px-5 py-2"
+                      >
+                        {exportando === 'xlsx' ? (
+                          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                          </svg>
+                        ) : <IconExportar className="w-4 h-4" />}
+                        Generar / Descargar Percepciones
+                      </button>
+                      <button
+                        onClick={() => handleExportar('csv')}
+                        disabled={!!exportando}
+                        title="Formato exacto para subir el Anexo 8 al portal de Hacienda"
+                        className="btn-ghost flex items-center gap-2 px-4 py-2 border border-slate-700"
+                      >
+                        {exportando === 'csv' ? (
+                          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                          </svg>
+                        ) : <IconArchivo className="w-4 h-4" />}
+                        CSV Anexo (MH)
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
             )}

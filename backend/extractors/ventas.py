@@ -700,11 +700,17 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                     ret = limpiar_monto(m_ret.group(1))
                     if ret > 0:
                         break
-            m_perc = re.search(
-                r'[Ii][Vv][Aa]\s+[Pp]ercibido\s*:?\s*\$?\s*(\d[\d,.]+)', t_clean
-            )
-            if m_perc:
-                perc = limpiar_monto(m_perc.group(1))
+            for pat in [
+                r'[Ii][Vv][Aa]\s+[Pp]ercibido\s*:?\s*\$?\s*(\d[\d,.]+)',
+                r'[Ii][Vv][Aa]\s+[Pp]ercepci[oó]n\s*:?\s*\$?\s*(\d[\d,.]+)',
+                r'[Pp]ercepci[oó]n\s+[Ii][Vv][Aa]\s*:?\s*\$?\s*(\d[\d,.]+)',
+                r'[Pp]ercepci[oó]n\s*(?:1\s*%)?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            ]:
+                m_perc = re.search(pat, t_clean)
+                if m_perc:
+                    perc = limpiar_monto(m_perc.group(1))
+                    if perc > 0:
+                        break
 
             # Ventas gravadas
             _PATS_GRAVADAS = [

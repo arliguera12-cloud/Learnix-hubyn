@@ -955,12 +955,22 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                         break
 
             # ── IVA Percibido ──────────────────────────────────────────────────────
-            perc   = 0.0
-            m_perc = re.search(
-                r'[Ii][Vv][Aa]\s+[Pp]ercibido\s*:?\s*\$?\s*(\d[\d,.]+)', t_clean
-            )
-            if m_perc:
-                perc = limpiar_monto(m_perc.group(1))
+            # Mismos rótulos alternativos que IVA Retenido arriba: cuando el
+            # PDF dice "Percepción IVA" en vez de "IVA Percibido", perc se
+            # quedaba en 0 aunque el documento sí traía percepción, y
+            # validar_montos_ventas disparaba "Total no cuadra" en falso.
+            perc = 0.0
+            for pat in [
+                r'[Ii][Vv][Aa]\s+[Pp]ercibido\s*:?\s*\$?\s*(\d[\d,.]+)',
+                r'[Ii][Vv][Aa]\s+[Pp]ercepci[oó]n\s*:?\s*\$?\s*(\d[\d,.]+)',
+                r'[Pp]ercepci[oó]n\s+[Ii][Vv][Aa]\s*:?\s*\$?\s*(\d[\d,.]+)',
+                r'[Pp]ercepci[oó]n\s*(?:1\s*%)?\s*:?\s*\$?\s*(\d[\d,.]+)',
+            ]:
+                m_perc = re.search(pat, t_clean)
+                if m_perc:
+                    perc = limpiar_monto(m_perc.group(1))
+                    if perc > 0:
+                        break
 
             # ── Total a Pagar ──────────────────────────────────────────────────────
             # Facturas de servicios (energía, agua, telecom) con mora: el
