@@ -231,6 +231,46 @@ def _es_contenido_binario(resp: "requests.Response") -> bool:
     return bool(resp.content)
 
 
+# Firma binaria esperada según extensión — ver _validar_contenido.
+_FIRMAS = {
+    "pdf":  (b"%PDF-",),
+    "jpg":  (b"\xff\xd8\xff",),
+    "jpeg": (b"\xff\xd8\xff",),
+    "png":  (b"\x89PNG\r\n\x1a\n",),
+}
+
+
+def _validar_contenido(nombre: str, data: bytes) -> None:
+    """
+    Confirma que lo descargado sea de verdad el tipo de archivo que el nombre
+    promete, no solo "no es HTML" (el filtro de _es_contenido_binario/
+    _descargar_publico deja pasar cualquier respuesta no-HTML, incluida una
+    página de aviso de Drive servida con otro Content-Type, o una descarga
+    truncada por una sesión vencida) — sin esto, ese archivo entraba al lote
+    como si fuera un PDF válido y el error solo aparecía mucho después, al
+    tratar de extraerlo junto con el resto del lote ("El archivo no es un PDF
+    válido", ver routers/procesamiento.py::_read_upload_bytes).
+    """
+    ext = nombre.rsplit(".", 1)[-1].lower() if "." in nombre else ""
+    firmas = _FIRMAS.get(ext)
+    if firmas and not any(data.startswith(f) for f in firmas):
+        raise DriveError(
+            f"Drive no devolvió el archivo real (recibido no parece un .{ext} válido — "
+            "puede ser una página de aviso o permiso insuficiente). "
+            "Descárgalo manualmente desde Drive y subilo directo."
+        )
+    if ext == "json":
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                data.decode("latin-1")
+            except UnicodeDecodeError as e:
+                raise DriveError(
+                    "Drive no devolvió el archivo real (el .json recibido no es texto válido)."
+                ) from e
+
+
 def _descargar_publico(file_id: str, resource_key: str | None = None) -> bytes | None:
     """
     Descarga vía el endpoint público de Drive (el que usa el navegador para
@@ -379,9 +419,11 @@ def descargar_como_drivefiles(
         return [], []
 
     def _descargar_uno(it: dict) -> DriveFile:
+        nombre = it.get("name", it["id"])
         data = descargar_archivo(api_key, it["id"], it.get("resourceKey"))
+        _validar_contenido(nombre, data)
         return DriveFile(
-            it.get("name", it["id"]),
+            nombre,
             data,
             carpeta=it.get("carpeta", ""),
             file_id=it["id"],
