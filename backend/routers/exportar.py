@@ -208,6 +208,35 @@ def _row_retencion(r: dict) -> dict:
     }
 
 
+# ─── Percepciones recibidas — Anexo 8 (A-I, 9 cols) ───────────────────────
+# El declarante es el SUJETO PERCIBIDO (comprador): el proveedor, como
+# agente de percepción, le cobró un 1% adicional de IVA. Mismas columnas
+# que Retenciones (Anexo 7), solo cambia el nombre de la casilla del monto.
+
+_TIPOS_PERCEPCION = {"03", "05", "06", "12"}
+
+_COLS_PERCEPCION = [
+    "A. NIT Agente",        "B. Fecha Emisión",      "C. Tipo Documento",
+    "D. Serie Documento",   "E. Num Documento",
+    "F. Monto Sujeto",      "G. Monto Percepción 1%",
+    "H. DUI Agente",        "I. Num Anexo",
+]
+_ANCHOS_PERCEPCION = [16,12,3,40,36,14,14,12,3]
+
+def _row_percepcion(r: dict) -> dict:
+    return {
+        "A. NIT Agente":          _s(r.get("nit_prov")),
+        "B. Fecha Emisión":       _s(r.get("fecha")),
+        "C. Tipo Documento":      _s(r.get("tipo")),
+        "D. Serie Documento":     _s(r.get("sello")),
+        "E. Num Documento":       _clean(r.get("gen")),
+        "F. Monto Sujeto":        _f(r.get("gra")),
+        "G. Monto Percepción 1%": _f(r.get("perc")),
+        "H. DUI Agente":          _s(r.get("dui_prov")),
+        "I. Num Anexo":           "8",
+    }
+
+
 # ─── Sujetos Excluidos — Anexo 5 (A-M, 13 cols) ───────────────────────────
 
 _COLS_SUJETOS = [
@@ -304,6 +333,7 @@ _ANEXO_NUM = {
     "Compras_F07":             3,
     "SujetosExcluidos_Anexo5": 5,
     "Retenciones_Anexo7":      7,
+    "Percepciones_Anexo8":     8,
 }
 
 def _fila_a_texto(fila: dict) -> list[str]:
@@ -406,10 +436,17 @@ async def exportar_excel(body: ExportarRequest):
         sheets["Ventas_Consumidor"]     = (_COLS_CONSUMIDOR, consumidor,_ANCHOS_CONSUMIDOR, 11, 20)
 
     elif body.tipo == "compras":
+        regs_c = [r for r in body.registros if _tiene_datos(r)]
         filas = [_row_compras(r, body.tipo_op, body.clasif, body.sector,
                               body.tipo_cg, body.periodo_feb2024)
-                 for r in body.registros if _tiene_datos(r)]
+                 for r in regs_c]
         sheets["Compras_F07"] = (_COLS_COMPRAS_F07, filas, _ANCHOS_COMPRAS, 7, 15)
+        # Anexo 8 aparte: mismos documentos, solo los que traen percepción de
+        # IVA (proveedor actuando como agente de percepción) — antes no se
+        # podía exportar en absoluto pese a que la pestaña ya los mostraba.
+        percepciones = [_row_percepcion(r) for r in regs_c
+                        if _f(r.get("perc")) > 0 and _s(r.get("tipo")) in _TIPOS_PERCEPCION]
+        sheets["Percepciones_Anexo8"] = (_COLS_PERCEPCION, percepciones, _ANCHOS_PERCEPCION, 6, 7)
 
     elif body.tipo == "retenciones":
         filas = [_row_retencion(r) for r in body.registros if _tiene_datos(r, ("fecha", "tipo", "gen"))]
