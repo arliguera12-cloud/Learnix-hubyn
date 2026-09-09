@@ -99,12 +99,16 @@ def ids_pareados(texto: str) -> dict[str, dict[str, str]]:
 
 # "Tipo de doc. de identificación: NIT" + "N° de doc. identificación: valor"
 # — formato del receptor sin NRC (persona natural). Ver docstring del módulo.
+# El comprobante de retención (DTE-07) usa una forma más corta del mismo
+# patrón — "Tipo Documento NIT" / "No. Documento <valor>", sin "de
+# identificación" y sin ":" siempre presente — de ahí que ambas partes sean
+# opcionales acá en vez de vivir en un segundo par de regex.
 _TIPO_DOC = re.compile(
-    rf"Tipo{_H}+de{_H}+doc(?:umento)?\.?{_H}+de{_H}+identificaci[oó]n{_H}*:{_H}*(NIT|NRC|DUI)",
+    rf"Tipo{_H}+(?:de{_H}+)?doc(?:umento)?\.?(?:{_H}+de{_H}+identificaci[oó]n)?{_H}*:?{_H}*(NIT|NRC|DUI)\b",
     re.I,
 )
 _NUM_DOC = re.compile(
-    rf"N[°ºo]\.?{_H}+de{_H}+doc(?:umento)?\.?{_H}*identificaci[oó]n{_H}*:{_H}*([0-9][0-9\-\s]*[0-9])",
+    rf"N(?:o\.?|[°º]){_H}+(?:de{_H}+)?doc(?:umento)?\.?(?:{_H}*identificaci[oó]n)?{_H}*:?{_H}*([0-9][0-9\-\s]*[0-9])",
     re.I,
 )
 
