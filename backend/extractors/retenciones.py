@@ -166,22 +166,29 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
 
             # Ground truth de Hacienda cuando está disponible — ver docstring
             # de verificar_cliente_en_consulta_mh (utils/mh_consulta.py).
+            #
+            # El declarante es el SUJETO RETENIDO, no quien emite el DTE-07:
+            # el AGENTE DE RETENCIÓN (el cliente/comprador que retuvo el 1%)
+            # es quien emite el comprobante — ver anexo_07_casilla_162_
+            # retencion_1pct.json::instrucciones_llenado.contexto. Pedir
+            # "emisor" acá rechazaba en masa comprobantes legítimos del
+            # declarante (que sí figuran, correctamente, como receptor).
             _qr_temprano, _consulta_mh_temprano = _qr_future.result()
-            _resultado_mh = verificar_cliente_en_consulta_mh(_consulta_mh_temprano, cliente_activo, "emisor")
+            _resultado_mh = verificar_cliente_en_consulta_mh(_consulta_mh_temprano, cliente_activo, "receptor")
             _aparece, _motivo = (
                 _resultado_mh if _resultado_mh is not None
-                else verificar_cliente_en_documento(texto_completo, cliente_activo, "emisor")
+                else verificar_cliente_en_documento(texto_completo, cliente_activo, "receptor")
             )
             if not _aparece:
                 nombre_cli = safe_str(cliente_activo.get('nombre', '')).strip() or "el cliente seleccionado"
                 if _motivo.startswith("aparece como"):
                     return {"error": (
-                        f"{nombre_cli} {_motivo} de este comprobante de retención — el agente "
-                        "que retiene (quien lo emite) parece ser otro. Revisá que subiste el "
-                        "archivo del cliente correcto."
+                        f"{nombre_cli} {_motivo} de este comprobante de retención — el sujeto "
+                        "retenido (a quien se lo emitieron) parece ser otro. Revisá que subiste "
+                        "el archivo del cliente correcto."
                     )}
                 return {"error": (
-                    f"Este documento no parece corresponder a {nombre_cli} como emisor "
+                    f"Este documento no parece corresponder a {nombre_cli} como sujeto retenido "
                     "(se buscó por NRC, NIT, DUI y nombre). Revisá que subiste el archivo "
                     "del cliente correcto."
                 )}
