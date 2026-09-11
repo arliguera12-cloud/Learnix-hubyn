@@ -431,13 +431,18 @@ export default function Ventas() {
                     <table className="w-full text-xs">
                       <thead>
                         <tr>
-                          {['Fecha','Tipo','N° Control','Sello','UUID','Exentas','Gravadas','Total','Estatus'].map(h => (
+                          {['Fecha','Tipo','N° Control','Sello','UUID','Exentas','Gravadas','Exportación','Total','Estatus'].map(h => (
                             <th key={h} className="table-head text-left whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {consumidor.map((r, i) => (
+                        {consumidor.map((r, i) => {
+                          const expo = parseFloat(r.expo_ca || 0) + parseFloat(r.expo_fuera_ca || 0) + parseFloat(r.expo_servicios || 0)
+                          const expoLabel = parseFloat(r.expo_servicios || 0) > 0 ? 'Servicios'
+                            : parseFloat(r.expo_ca || 0) > 0 ? 'Dentro CA'
+                            : parseFloat(r.expo_fuera_ca || 0) > 0 ? 'Fuera CA' : ''
+                          return (
                           <tr key={i} className="hover:bg-surface-700/40 transition-colors">
                             <td className="table-cell">{r.fecha || '—'}</td>
                             <td className="table-cell font-mono">{r.tipo || '—'}</td>
@@ -446,10 +451,14 @@ export default function Ventas() {
                             <td className="table-cell font-mono text-slate-500 max-w-[60px] truncate" title={r.gen}>{r.gen || '—'}</td>
                             <td className="table-cell text-right font-mono">{r.exentas != null ? `$${fmt(r.exentas)}` : '—'}</td>
                             <td className="table-cell text-right font-mono text-emerald-400">{r.gravadas != null ? `$${fmt(r.gravadas)}` : '—'}</td>
+                            <td className="table-cell text-right font-mono text-sky-400">
+                              {expo > 0 ? <>${fmt(expo)} <span className="text-slate-500">({expoLabel})</span></> : '—'}
+                            </td>
                             <td className="table-cell text-right font-mono text-white">{r.total != null ? `$${fmt(r.total)}` : '—'}</td>
                             <td className="table-cell"><EstadoBadge estado={r.estado} /></td>
                           </tr>
-                        ))}
+                          )
+                        })}
                       </tbody>
                     </table>
                     {consumidor.length === 0 && (
