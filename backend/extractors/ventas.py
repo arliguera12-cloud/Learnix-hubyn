@@ -40,6 +40,34 @@ MAX_VALORES_LOOP = MAX_VALORES_LOOP_VENTAS
 import logging
 _log = logging.getLogger(__name__)
 
+# Países que Hacienda considera "área centroamericana" para el Anexo 2 del
+# F-07 (columnas O/P) — ver Manual de Usuario Anexos F-07, cols. O-Q.
+_PAISES_CENTROAMERICA = {
+    "GUATEMALA", "HONDURAS", "NICARAGUA", "COSTA RICA", "PANAMA", "PANAMÁ", "BELICE",
+}
+
+
+def _clasificar_exportacion(texto: str) -> str:
+    """
+    A qué columna del Anexo 2 pertenece una Factura de Exportación (DTE-11):
+    "ca" (col. O, dentro del área centroamericana), "fuera_ca" (col. P) o
+    "servicios" (col. Q). Nunca a "Ventas Gravadas Locales" (col. N) — esa es
+    para ventas dentro de El Salvador, y un DTE-11 nunca lo es.
+
+    El PDF de una exportación de bienes trae un país de destino explícito;
+    una de servicios normalmente no. Sin ese dato no hay forma de distinguir
+    bienes de servicios por texto, así que ante la duda se asume servicios
+    — es el caso mayoritario en la práctica.
+    """
+    t = (texto or "").upper()
+    m_pais = re.search(r"PA[IÍ]S(?:\s+DE)?\s*(?:DESTINO|IMPORTADOR)?\s*:?\s*([A-ZÀ-Ú\s]{4,30})", t)
+    if m_pais:
+        pais = m_pais.group(1).strip()
+        if any(p in pais for p in _PAISES_CENTROAMERICA):
+            return "ca"
+        return "fuera_ca"
+    return "servicios"
+
 PALABRAS_BASURA_NOMBRE = [
     "DOCUMENTO", "TRIBUTARIO", "ELECTRONICO", "ELECTRÓNICO",
     "REPRESENTACIÓN", "REPRESENTACION", "EMISOR", "FACTURA",
@@ -1005,10 +1033,27 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 if _corr_dict.get("dui_cli"):
                     dui_cli = _corr_dict["dui_cli"]
 
+            # Factura de Exportación (DTE-11): el monto nunca va en "Ventas
+            # Gravadas Locales" (col. N del Anexo 2) — esa columna es para
+            # ventas dentro de El Salvador. Se reclasifica a la columna de
+            # exportación que corresponda (ver _clasificar_exportacion) y se
+            # saca de "gravadas" para que no se duplique/declare mal.
+            expo_ca = expo_fuera_ca = expo_servicios = 0.0
+            _gravadas_para_confianza = gravadas
+            if tipo == "11" and gravadas > 0:
+                destino = _clasificar_exportacion(texto_completo)
+                if destino == "ca":
+                    expo_ca = gravadas
+                elif destino == "fuera_ca":
+                    expo_fuera_ca = gravadas
+                else:
+                    expo_servicios = gravadas
+                gravadas = 0.0
+
             _campos_finales = {
                 "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
-                "nom_cli": nom_cli, "gravadas": round(gravadas, 2), "debito": round(debito, 2),
+                "nom_cli": nom_cli, "gravadas": round(_gravadas_para_confianza, 2), "debito": round(debito, 2),
                 "total": round(total, 2), "exentas": round(exentas, 2), "no_sujetas": round(no_sujetas, 2),
                 "perc": round(perc, 2),
             }
@@ -1040,6 +1085,11 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "exentas"       : round(exentas, 2),
                 "no_sujetas"    : round(no_sujetas, 2),
                 "gravadas"      : round(gravadas, 2),
+                # Exportación (solo DTE-11 — ver reclasificación arriba):
+                # una de las tres es la que sale con monto, nunca "gravadas".
+                "expo_ca"       : round(expo_ca, 2),
+                "expo_fuera_ca" : round(expo_fuera_ca, 2),
+                "expo_servicios": round(expo_servicios, 2),
                 "debito"        : round(debito, 2),
                 "terceros"      : round(terceros, 2),
                 "deb_terc"      : round(deb_terc, 2),
