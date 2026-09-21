@@ -344,17 +344,34 @@ async def _iniciar_lote_job(
     # Los archivos se leen ACÁ, todavía con la conexión abierta — un UploadFile
     # deja de ser válido apenas la request termina, así que hay que sacarle
     # los bytes antes de agendar el trabajo de background.
+    #
+    # Un archivo inválido (p. ej. un .pdf corrupto o truncado) NO debe tirar
+    # abajo la tanda entera: antes, _read_upload_bytes tiraba HTTPException
+    # acá mismo y esa excepción escapaba de la request completa — ni el job
+    # se llegaba a crear, así que los otros N-1 archivos válidos de esa
+    # tanda (y, del lado del frontend, todas las tandas siguientes: ver
+    # subirLoteEnTandas en frontend/src/utils/dte.jsx) se perdían sin
+    # procesar aunque no tuvieran nada malo. Ahora el archivo que falla la
+    # validación queda registrado como error del job (igual que un error de
+    # extracción) y el resto de la tanda sigue su curso normal.
     archivos: list[tuple[str, bytes, str]] = []
+    errores_iniciales: list[dict] = []
     for f in files:
-        content, ext = _read_upload_bytes(f, permitir_json=permitir_json)
-        archivos.append((f.filename, content, ext))
+        try:
+            content, ext = _read_upload_bytes(f, permitir_json=permitir_json)
+            archivos.append((f.filename, content, ext))
+        except HTTPException as e:
+            errores_iniciales.append({"filename": f.filename, "error": e.detail})
 
-    job = jobs_store.crear_job(len(archivos), organizacion_id)
+    job = jobs_store.crear_job(len(files), organizacion_id)
     job_id = job["job_id"]
+    for err in errores_iniciales:
+        jobs_store.actualizar_progreso(job_id, resultado=None, error=err)
     # Se respalda ACÁ (con la conexión todavía abierta) para que el job ya
     # exista en Supabase antes de responder — si el contenedor se reinicia
     # apenas después de crear el job (p. ej. un redeploy que arranca justo
     # en este instante), el primer polling del frontend igual lo encuentra.
+    job = jobs_store.obtener_job(job_id, organizacion_id) or job
     await run_in_threadpool(jobs_store.guardar_snapshot, job)
     background_tasks.add_task(
         _ejecutar_lote_job, job_id, archivos, extractor_fn, json_fn, tipo, cliente, declarante_id,

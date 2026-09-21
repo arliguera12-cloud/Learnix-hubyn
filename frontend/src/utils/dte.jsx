@@ -318,12 +318,24 @@ export async function subirLoteEnTandas(files, loteApiFn, declaranteId, nombre, 
 
   for (let i = 0; i < files.length; i += TAMANO_TANDA) {
     const tanda = files.slice(i, i + TAMANO_TANDA)
-    const { data: inicio } = await loteApiFn(tanda, declaranteId, nombre, nrc, dui)
-    const job = await _esperarJob(inicio.job_id, (procesadosTanda) => {
-      onProgreso?.(procesados + procesadosTanda, files.length, tandaActual + 1, totalTandas)
-    })
-    resultados.push(...(job.resultados ?? []))
-    errores.push(...(job.errores ?? []))
+    // Una tanda puede fallar entera por algo que no es culpa de sus archivos
+    // (error de red, el backend caído un instante, etc.) — sin este
+    // try/catch esa excepción escapaba del loop entero y se perdían tanto
+    // los resultados ya juntados de las tandas anteriores como todas las
+    // tandas siguientes, que nunca llegaban a subirse. Ahora esa tanda se
+    // reporta como error por archivo y el resto sigue.
+    try {
+      const { data: inicio } = await loteApiFn(tanda, declaranteId, nombre, nrc, dui)
+      const job = await _esperarJob(inicio.job_id, (procesadosTanda) => {
+        onProgreso?.(procesados + procesadosTanda, files.length, tandaActual + 1, totalTandas)
+      })
+      resultados.push(...(job.resultados ?? []))
+      errores.push(...(job.errores ?? []))
+    } catch (err) {
+      const detail = err.response?.data?.detail
+      const mensaje = typeof detail === 'string' ? detail : (detail ? JSON.stringify(detail) : err.message)
+      errores.push(...tanda.map(f => ({ filename: f.name, error: mensaje })))
+    }
     procesados += tanda.length
     tandaActual += 1
     onProgreso?.(procesados, files.length, tandaActual, totalTandas)
