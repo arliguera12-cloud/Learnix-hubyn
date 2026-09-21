@@ -3,9 +3,9 @@ import PdfUploader from '../components/PdfUploader'
 import ResultadosTabla from '../components/ResultadosTabla'
 import { procesarCompras, procesarComprasLote, exportarExcelCompras, guardarResultados, actualizarResultado, nombreDesdeRespuesta } from '../services/api'
 import {
-  fmt, descargarBlob, detalleErrorExport, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados, avisoConfianza,
-  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen, registroCorregido, adjuntarArchivosLocales,
-  SearchBar, filtrarPorTexto, ErrorBox, AvisoBox,
+  fmt, descargarBlob, detalleErrorExport, EstadoBadge, esAlerta, estadoTexto, nivelEstado, fusionarSinDuplicados, avisoDuplicados, avisoConfianza,
+  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen, resumenFuentesTexto, registroCorregido, adjuntarArchivosLocales,
+  SearchBar, filtrarPorTexto, ErrorBox, AvisoBox, exportarTablaXlsx,
 } from '../utils/dte'
 import { IconCompras, IconExportar, IconArchivo, IconCheck } from '../components/Icons'
 
@@ -161,6 +161,31 @@ export default function Compras() {
     } finally {
       setExportando(null)
     }
+  }
+
+  // Auditoría completa exporta sus propias columnas (UUID, sello, fuente,
+  // archivo…) — no tienen equivalente en el Anexo 3 oficial que arma
+  // handleExportar, así que se arma un .xlsx aparte con lo que ya está en
+  // pantalla (ver exportarTablaXlsx en utils/dte.jsx).
+  const HEADERS_AUDITORIA = [
+    'Fecha', 'Tipo', 'Nombre Proveedor', 'NIT/NRC', 'DUI', 'Exentas', 'Gravadas', 'IVA',
+    'Ret.', 'Perc.', 'Total', 'FOVIAL', 'COTRANS', 'Sello', 'UUID', 'N° Control',
+    'Estatus', 'Fuente', 'Archivo',
+  ]
+
+  function handleExportarAuditoria() {
+    const filas = resultadosFiltrados.map(r => {
+      const d = r.registro || {}
+      return [
+        d.fecha || '', d.tipo || '', d.nom_prov || '', d.nit_prov || '', d.dui_prov || '',
+        d.exe != null ? Number(d.exe) : '', d.gra != null ? Number(d.gra) : '', d.iva != null ? Number(d.iva) : '',
+        d.ret != null ? Number(d.ret) : '', d.perc != null ? Number(d.perc) : '', d.tot != null ? Number(d.tot) : '',
+        d.fovial != null ? Number(d.fovial) : '', d.cotrans != null ? Number(d.cotrans) : '',
+        d.sello || '', d.gen || '', d.num_control_raw || d.num_control || '',
+        estadoTexto(d.estado), resumenFuentesTexto(d.fuentes), r.filename || '',
+      ]
+    })
+    exportarTablaXlsx(HEADERS_AUDITORIA, filas, `Auditoria_Compras_${declaranteId || 'lote'}.xlsx`)
   }
 
   // ── tabs ──────────────────────────────────────────────────────────────────
@@ -360,7 +385,19 @@ export default function Compras() {
 
             {/* Tab 1 — Auditoría Completa */}
             {tab === 1 && (
-              <div className="overflow-x-auto">
+              <div className="space-y-3">
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleExportarAuditoria}
+                    disabled={!resultadosFiltrados.length}
+                    className="btn-primary flex items-center gap-2 px-5 py-2"
+                  >
+                    <IconExportar className="w-4 h-4" />
+                    Descargar Excel
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr>
@@ -398,6 +435,7 @@ export default function Compras() {
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
 

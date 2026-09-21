@@ -3,9 +3,9 @@ import PdfUploader from '../components/PdfUploader'
 import ResultadosTabla from '../components/ResultadosTabla'
 import { procesarVentas, procesarVentasLote, exportarExcelVentas, guardarResultados, actualizarResultado, nombreDesdeRespuesta } from '../services/api'
 import {
-  fmt, descargarBlob, detalleErrorExport, EstadoBadge, esAlerta, nivelEstado, fusionarSinDuplicados, avisoDuplicados, avisoConfianza,
-  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen, registroCorregido, adjuntarArchivosLocales,
-  SearchBar, filtrarPorTexto, ErrorBox, AvisoBox,
+  fmt, descargarBlob, detalleErrorExport, EstadoBadge, esAlerta, estadoTexto, nivelEstado, fusionarSinDuplicados, avisoDuplicados, avisoConfianza,
+  usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, FuenteResumen, resumenFuentesTexto, registroCorregido, adjuntarArchivosLocales,
+  SearchBar, filtrarPorTexto, ErrorBox, AvisoBox, exportarTablaXlsx,
 } from '../utils/dte'
 import { IconVentas, IconExportar, IconArchivo, IconCheck } from '../components/Icons'
 
@@ -187,6 +187,29 @@ export default function Ventas() {
     } finally {
       setExportando(null)
     }
+  }
+
+  // Auditoría completa exporta sus propias columnas (UUID, N° control,
+  // fuente, archivo…) — no tienen equivalente en los Anexos 1/2 oficiales
+  // que arma handleExportar, así que se arma un .xlsx aparte con lo que ya
+  // está en pantalla (ver exportarTablaXlsx en utils/dte.jsx).
+  const HEADERS_AUDITORIA = [
+    'Fecha', 'Tipo', 'Anexo', 'Cliente/Nombre', 'NIT/NRC', 'DUI', 'N° Control',
+    'Exentas', 'No Suj.', 'Gravadas', 'Débito', 'Total', 'Estatus', 'Fuente', 'Archivo',
+  ]
+
+  function handleExportarAuditoria() {
+    const filas = resultadosFiltrados.map(r => {
+      const d = r.registro || {}
+      const anexo = TIPOS_CONTRIB.has(String(d.tipo)) ? 'Anexo 1' : 'Anexo 2'
+      return [
+        d.fecha || '', d.tipo || '', anexo, d.nom_cli || '', d.nit_cli || '', d.dui_cli || '', d.num_control || '',
+        d.exentas != null ? Number(d.exentas) : '', d.no_sujetas != null ? Number(d.no_sujetas) : '',
+        d.gravadas != null ? Number(d.gravadas) : '', d.debito != null ? Number(d.debito) : '',
+        d.total != null ? Number(d.total) : '', estadoTexto(d.estado), resumenFuentesTexto(d.fuentes), r.filename || '',
+      ]
+    })
+    exportarTablaXlsx(HEADERS_AUDITORIA, filas, `Auditoria_Ventas_${declaranteId || 'lote'}.xlsx`)
   }
 
   // ── tabs ──────────────────────────────────────────────────────────────────
@@ -497,7 +520,19 @@ export default function Ventas() {
 
             {/* Tab 2 — Auditoría Completa */}
             {tab === 2 && (
-              <div className="overflow-x-auto">
+              <div className="space-y-3">
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleExportarAuditoria}
+                    disabled={!resultadosFiltrados.length}
+                    className="btn-primary flex items-center gap-2 px-5 py-2"
+                  >
+                    <IconExportar className="w-4 h-4" />
+                    Descargar Excel
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr>
@@ -536,6 +571,7 @@ export default function Ventas() {
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
 
