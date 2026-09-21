@@ -7,6 +7,7 @@
  * copia de `fmt`/`descargarBlob`).
  */
 import { useRef, useState } from 'react'
+import JSZip from 'jszip'
 import { IconCheck, IconAlerta, IconBuscar } from '../components/Icons'
 import { obtenerEstadoLote } from '../services/api'
 
@@ -390,6 +391,13 @@ export function FuenteResumen({ fuentes }) {
   )
 }
 
+/** Misma info que <FuenteResumen>, en texto plano — para columnas de Excel. */
+export function resumenFuentesTexto(fuentes) {
+  if (!fuentes) return ''
+  const distintas = [...new Set(Object.values(fuentes))]
+  return distintas.map(f => (FUENTE_CAMPO_ESTILO[f] || { label: f }).label).join(', ')
+}
+
 /**
  * Filtra una lista de registros por texto libre sobre un conjunto de campos
  * (nombre/razón social, NIT/NRC, DUI, N° control, código de generación…).
@@ -438,6 +446,110 @@ export function descargarBlob(blobData, nombre) {
   a.download = nombre
   a.click()
   URL.revokeObjectURL(url)
+}
+
+// ── Excel (.xlsx) client-side, para tablas que no tienen equivalente en el
+// formato oficial de los Anexos (ver backend/routers/exportar.py) — como
+// "Auditoría completa", que trae columnas propias (UUID, sello, fuente,
+// archivo…) para revisión interna, no para subir a Hacienda. Se arma acá
+// mismo en vez de ir al backend porque los datos ya están en memoria (son
+// los mismos que se ven en la tabla) y un .xlsx real es solo un .zip con
+// unos XML adentro — jszip ya es una dependencia del proyecto (ver
+// components/ImportCenter.jsx).
+
+function _colLetra(n) {
+  let s = ''
+  while (n > 0) {
+    const rem = (n - 1) % 26
+    s = String.fromCharCode(65 + rem) + s
+    n = Math.floor((n - 1) / 26)
+  }
+  return s
+}
+
+function _xmlEscape(v) {
+  return String(v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+}
+
+function _filaXml(valores, rowNum, esEncabezado) {
+  const celdas = valores.map((v, i) => {
+    const ref = `${_colLetra(i + 1)}${rowNum}`
+    if (v == null || v === '') return ''
+    const sAttr = esEncabezado ? ' s="1"' : ''
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      return `<c r="${ref}"${sAttr}><v>${v}</v></c>`
+    }
+    return `<c r="${ref}"${sAttr} t="inlineStr"><is><t xml:space="preserve">${_xmlEscape(v)}</t></is></c>`
+  }).join('')
+  return `<row r="${rowNum}">${celdas}</row>`
+}
+
+/** Arma un .xlsx real (un sheet, encabezado en negrita) a partir de
+ * `headers` (array de strings) y `filas` (array de arrays, mismo largo que
+ * headers — números para columnas monetarias, strings para el resto). */
+async function _construirXlsxBlob(headers, filas) {
+  const filasXml = [
+    _filaXml(headers, 1, true),
+    ...filas.map((f, i) => _filaXml(f, i + 2, false)),
+  ].join('')
+
+  const zip = new JSZip()
+  zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`)
+  zip.folder('_rels').file('.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`)
+  const xl = zip.folder('xl')
+  xl.file('workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Auditoria" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`)
+  xl.folder('_rels').file('workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`)
+  xl.file('styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2">
+    <font><sz val="10"/><name val="Calibri"/></font>
+    <font><sz val="10"/><name val="Calibri"/><b/><color rgb="FFFFFFFF"/></font>
+  </fonts>
+  <fills count="2">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF1C2333"/><bgColor indexed="64"/></patternFill></fill>
+  </fills>
+  <borders count="1"><border/></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="1" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
+  </cellXfs>
+</styleSheet>`)
+  xl.folder('worksheets').file('sheet1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>${filasXml}</sheetData>
+</worksheet>`)
+
+  return zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+}
+
+/** Genera y descarga un .xlsx con `headers`/`filas` bajo `nombreArchivo`. */
+export async function exportarTablaXlsx(headers, filas, nombreArchivo) {
+  const blob = await _construirXlsxBlob(headers, filas)
+  descargarBlob(blob, nombreArchivo)
 }
 
 /**
@@ -671,6 +783,12 @@ export function registroCorregido(registroBase, cambios) {
 }
 
 /** Insignia de estado para las tablas de resultados. */
+/** Misma etiqueta que <EstadoBadge>, en texto plano — para columnas de Excel. */
+export function estadoTexto(estado) {
+  const nivel = nivelEstado(estado)
+  return nivel ? ETIQUETA[nivel] : (estado || '')
+}
+
 export function EstadoBadge({ estado }) {
   const nivel = nivelEstado(estado)
   if (!nivel) return null
