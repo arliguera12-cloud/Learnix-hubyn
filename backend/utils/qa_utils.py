@@ -621,7 +621,7 @@ def razones_revisar_compra(row) -> str:
 
 _CAMPOS_REQUERIDOS = {
     "ventas":            ["num_control", "gen", "sello", "fecha", "nom_cli", "gravadas", "total"],
-    "compras":           ["num_control", "gen", "sello", "fecha", "nom_prov", "gra", "tot"],
+    "compras":           ["num_control", "gen", "sello", "fecha", "nom_prov", "nit_prov", "gra", "tot"],
     "retenciones":       ["nit_prov", "fecha", "sello", "gen", "base", "ret"],
     "sujetos_excluidos": ["id_sujeto", "nom_sujeto", "fecha", "sello", "gen", "base", "ret"],
 }

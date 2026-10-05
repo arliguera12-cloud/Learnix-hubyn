@@ -95,6 +95,25 @@ caso("prefijo sin correlativo cerca",
      buscar_numero_control("DTE-03-S001P005-" + "x" * 400 + "000000000008829"),
      ("", ""))
 
+# ── Regresión de la corrida real de COMPRAS JONATHAN RUIZ (oct-2026) ──────────
+from utils.ai_utils import es_nombre_sospechoso  # noqa: E402
+from utils.dte_layout import verificar_cliente_en_documento  # noqa: E402
+
+for basura in ("FORMA DE PAGO: EFECTIVO", "FONDO DE", "MÓDELO DE FACTURACIÓN",
+               "ID CONTROL INTERNO 112623", "S.A DE C.V", "VENDEDOR ALEXA 040"):
+    caso(f"nombre basura: {basura}", es_nombre_sospechoso(basura), True)
+for bueno in ("REPUESTOS MANCIA, S.A. DE C.V", "FREUND, LTDA", "JULIO CÉSAR JOVEL SÁNCHEZ"):
+    caso(f"nombre válido: {bueno}", es_nombre_sospechoso(bueno), False)
+
+_CLI = {"nit": "05020905931015", "nrc": "2774784", "dui": "", "nombre": "JONATHAN GUILLERMO RUIZ HERNANDEZ"}
+caso("texto sin recuadro de receptor no se rechaza",
+     verificar_cliente_en_documento(
+         "DTE-03-S005P001-000000000012400 Transportes Pesados 06141008901028 306681 " * 3, _CLI, "receptor"),
+     (True, ""))
+caso("cliente sin identificadores no se rechaza",
+     verificar_cliente_en_documento("RECEPTOR " + "x" * 40, {"nit": "", "nombre": ""}, "receptor"),
+     (True, ""))
+
 print()
 print("TODOS LOS CASOS PASAN" if not fallos else "FALLOS:\n  " + "\n  ".join(fallos))
 sys.exit(1 if fallos else 0)

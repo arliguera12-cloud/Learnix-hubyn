@@ -145,7 +145,8 @@ NOMBRES_INVALIDOS = {
 CORTE_NOMBRE = re.compile(
     r"\s*(?:NIT|NRC|DUI|GIRO|ACTIVIDAD|DIRECCI[OÓ]N|CORREO|TEL[EÉ]F|"
     r"TIPO\s+ESTAB|MUNICIPIO|DEPARTAMENTO|DISTRITO|DEPTO|NUMERO\s+DE\s+CONTROL|"
-    r"MODELO\s+(?:DE|FACTURACI)|TIPO\s+(?:DE\s+TRANS|TRANSMISI)|"
+    r"M[OÓ]DELO\s+(?:DE|FACTURACI)|TIPO\s+(?:DE\s+TRANS|TRANSMISI)|"
+    r"FECHA\s+Y\s+HORA|C[OÓ]DIGO\s+DE\s+GENERACI|FORMA\s+DE\s+PAGO|"
     r"CONDICI[OÓ]N|SUCURSAL|N\.?\s*I\.?\s*T\.?\s*[:\s]|"
     r"N\.?\s*R\.?\s*C\.?\s*[:\s]|N[UÚ]MERO\s+DE|REGISTRO|PROCESAMIENTO|"
     r"\d{4}[\s\-]\d{6})"
@@ -886,6 +887,18 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 nit_prov = ""
                 nom_prov = ""
 
+            # Un nombre que es metadata o quedó cortado ("FORMA DE PAGO: EFECTIVO",
+            # "FONDO DE") se descarta: vacío dispara Visión/IA y baja la confianza,
+            # en vez de quedar "Conforme" con un proveedor falso.
+            if nom_prov and es_nombre_sospechoso(nom_prov):
+                nom_prov = ""
+            # El nombre del propio cliente (a veces invertido: "RUIZ HERNANDEZ
+            # JONATHAN GUILLERMO") no es el de su proveedor.
+            _tok_rec = set(re.findall(r"[A-ZÁÉÍÓÚÑ]{3,}", nom_receptor))
+            _tok_prov = set(re.findall(r"[A-ZÁÉÍÓÚÑ]{3,}", nom_prov.upper()))
+            if _tok_rec and _tok_prov and _tok_prov <= _tok_rec:
+                nom_prov = ""
+
             # ── Aplicar Vision con prioridad sobre regex ──────────────────────────
             if _vision_campos.get("fecha"):
                 fecha    = _vision_campos["fecha"]
@@ -1252,7 +1265,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             _campos_pre_vision = {
                 "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
-                "nom_prov": nom_prov, "gra": gra, "tot": tot,
+                "nom_prov": nom_prov, "nit_prov": nit_prov or dui_prov, "gra": gra, "tot": tot,
                 # iva/exe/ret/perc no cuentan para el % de completitud, pero hacen
                 # falta para que validar_montos_ventas concilie el total — sin
                 # ellos "total ≠ gravadas" dispara una alerta falsa y tapa el
@@ -1294,7 +1307,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             _campos_pre_ia = {
                 "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
-                "nom_prov": nom_prov, "gra": gra, "tot": tot,
+                "nom_prov": nom_prov, "nit_prov": nit_prov or dui_prov, "gra": gra, "tot": tot,
                 "iva": iva, "exe": exe, "ret": ret, "perc": perc,
             }
             _confianza_pre = calcular_confianza(_campos_pre_ia, "compras")
@@ -1337,7 +1350,7 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
             _campos_finales = {
                 "tipo": tipo,
                 "num_control": num_control, "gen": gen, "sello": sello, "fecha": fecha,
-                "nom_prov": nom_prov, "gra": round(gra, 2), "iva": round(iva, 2),
+                "nom_prov": nom_prov, "nit_prov": nit_prov or dui_prov, "gra": round(gra, 2), "iva": round(iva, 2),
                 "tot": round(tot, 2), "exe": round(exe, 2),
                 "ret": round(ret, 2), "perc": round(perc, 2),
             }
