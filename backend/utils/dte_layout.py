@@ -260,6 +260,10 @@ def verificar_cliente_en_documento(texto: str, cliente_activo: dict, rol_esperad
     def _coincide(columna: dict) -> bool:
         return any(columna.get(campo) == valor for campo, valor in identificadores.items())
 
+    # Cliente sin NRC/NIT/DUI ni nombre cargados: no hay con qué comparar.
+    if not identificadores and not _tokens_nombre(str(cliente_activo.get("nombre", "") or "")):
+        return True, ""
+
     rol_contrario = "receptor" if rol_esperado == "emisor" else "emisor"
 
     pares = ids_pareados(texto)
@@ -293,6 +297,13 @@ def verificar_cliente_en_documento(texto: str, cliente_activo: dict, rol_esperad
         texto_up = texto.upper()
         if all(re.search(rf"\b{re.escape(t)}\b", texto_up) for t in tokens):
             return True, ""
+
+    # Sin evidencia no hay rechazo: hay PDFs cuya capa de texto omite por completo
+    # el recuadro del receptor (se dibuja como vectores/imagen). Ahí "ausente"
+    # solo significa "no pude leerlo", no "es de otro cliente" — rechazar tiraba
+    # una compra válida. Se deja pasar (Visión/Hacienda la confirman después).
+    if rol_esperado == "receptor" and not re.search(r"RECEPTOR|ADQUIRIENTE", texto, re.I):
+        return True, ""
 
     return False, "ausente"
 

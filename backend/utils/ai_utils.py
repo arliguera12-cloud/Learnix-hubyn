@@ -35,7 +35,23 @@ _GROQ_MODEL        = "openai/gpt-oss-120b"
 # cliente Groq colgado esperando respuesta de un modelo mal configurado en
 # vez de fallar rápido. Revertido a qwen3.6-27b (todavía funcional hasta el
 # 14-sep-2026) hasta confirmar el ID exacto del reemplazo con calma.
-_GROQ_VISION_MODEL = "qwen/qwen3.6-27b"
+# qwen/qwen3.6-27b fue DESCOMISIONADO por Groq (14-sep-2026): desde entonces toda
+# llamada de visión falla con "model does not exist" y el pipeline cae a regex
+# sin ningún respaldo (nombres/NIT de compras mal leídos). Se deja de fijar un
+# único ID: GROQ_VISION_MODEL lo sobreescribe sin redeploy de código, y si el ID
+# deja de existir se prueba el siguiente candidato en vez de fallar el lote.
+_GROQ_VISION_CANDIDATOS = (
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+)
+
+
+def _groq_vision_modelos() -> list[str]:
+    forzado = os.environ.get("GROQ_VISION_MODEL", "").strip()
+    return ([forzado] if forzado else []) + [m for m in _GROQ_VISION_CANDIDATOS if m != forzado]
+
+
+_GROQ_VISION_MODEL = _groq_vision_modelos()[0]  # etiqueta por defecto (auditoría/UI)
 _MAX_RETRIES       = 3
 _BACKOFF_DELAYS    = [2, 4, 8]
 # Sin esto, un cliente Groq colgado (modelo mal configurado, problema de red)
@@ -183,7 +199,7 @@ _SOSPECHOSO = re.compile(
     r"""^(?:
         FECHA\s+(?:Y\s+HORA|PROCESADO|DE\s+EMISION|EMISION)|
         M[OÓ]DULO\s+DE|
-        MODELO\s+(?:DE\s+)?FACTURACI[OÓ]N|
+        M[OÓ]DELO\s+(?:DE\s+)?FACTURACI[OÓ]N|
         C[OÓ]DIGO\s+(?:DE\s+)?GENERACI[OÓ]N|
         NUMERO\s+DE\s+CONTROL|
         N[UÚ]MERO\s+DE\s+CONTROL|
@@ -222,7 +238,10 @@ _ANTIPATRONES_NOMBRE = re.compile(
     # candidato y deja este texto pegado al final de otra línea.
     r'CONSULTA\s+(?:MH|P[UÚ]BLICA)|JSON\s+Y\s+PDF|VERSI[OÓ]N\s+JSON|'
     r'MONEDA\s*:?\s*(?:USD|SVC)|ADMIN\.FACTURA\.GOB|'
-    r'PARA\s+LA\s+VENTA\s+DE\s+PRODUCTOS'
+    r'PARA\s+LA\s+VENTA\s+DE\s+PRODUCTOS|'
+    r'FORMA\s+DE\s+PAGO|CONDICI[OÓ]N\s+DE\s+(?:LA\s+)?(?:OPERACI[OÓ]N|PAGO)|'
+    r'ID\s+CONTROL|CONTROL\s+INTERNO|FECHA\s+Y\s+HORA|M[OÓ]DELO\s+(?:DE\s+)?FACTURACI[OÓ]N|'
+    r'NOMBRE\s+O\b|^VENDEDOR\b|^VENTA\s+(?:AL|DE)\b|^SERVICIOS\s+DEL\s+MINISTERIO'
     r')\b',
     re.I,
 )
@@ -255,6 +274,12 @@ def es_nombre_sospechoso(nombre: str) -> bool:
         return True
     # Contiene @ o URLs
     if re.search(r'@|https?://|www\.', n, re.I):
+        return True
+    # Cortado a medias: termina en un conector ("FONDO DE") o es solo el
+    # sufijo legal ("S.A DE C.V") — el resto del nombre quedó en otra línea.
+    if re.search(r'\b(?:DE|DEL|LA|EL|LOS|LAS|Y|E|POR|PARA)\s*,?$', n):
+        return True
+    if re.fullmatch(r'(?:S\.?\s*A\.?(?:\s*DE\s*C\.?\s*V\.?)?|S\.?\s*A\.?\s*DE\s*C\.?\s*V\.?|LTDA\.?|S\.?\s*R\.?\s*L\.?(?:\s*DE\s*C\.?\s*V\.?)?)', n):
         return True
     return False
 
@@ -1465,7 +1490,24 @@ Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional ni Markdown
 {spec['json']}"""
 
 
+_modelo_vision_usado: str = ""
+
+
 def _llamar_groq_vision(prompt: str, img_b64: str) -> dict | None:
+    """Prueba los modelos de visión de Groq en orden hasta que uno exista."""
+    global _modelo_vision_usado
+    for modelo in _groq_vision_modelos():
+        resultado = _llamar_groq_vision_modelo(prompt, img_b64, modelo)
+        if resultado is not None:
+            _modelo_vision_usado = modelo
+            return resultado
+        if not _ultimo_error_vision.startswith("Modelo de visión no disponible"):
+            return None  # falla que otro modelo no arregla (red, 401, JSON, tasa)
+        log.warning("%s — probando el siguiente modelo de visión", _ultimo_error_vision)
+    return None
+
+
+def _llamar_groq_vision_modelo(prompt: str, img_b64: str, modelo: str) -> dict | None:
     """Llama al modelo de visión de Groq con la imagen del DTE en base64."""
     global _ultimo_error_vision
     api_key = _get_api_key()
@@ -1494,7 +1536,7 @@ def _llamar_groq_vision(prompt: str, img_b64: str) -> dict | None:
                 # Llama-4 en Groq soporta JSON mode; si el endpoint lo rechaza,
                 # reintentamos sin response_format y parseamos manualmente.
                 kwargs = dict(
-                    model=_GROQ_VISION_MODEL,
+                    model=modelo,
                     messages=mensajes,
                     temperature=0.1,
                     # La familia qwen3-27b son modelos con razonamiento interno — con
@@ -1547,9 +1589,12 @@ def _llamar_groq_vision(prompt: str, img_b64: str) -> dict | None:
                     _ultimo_error_vision = "API key de Groq inválida (401)."
                     _cb_on_failure()
                     return None
-                elif "model" in msg.lower() and ("decommission" in msg.lower() or "not found" in msg.lower()):
-                    _ultimo_error_vision = f"Modelo de visión no disponible: {msg[:80]}"
-                    _cb_on_failure()
+                elif "model" in msg.lower() and any(
+                    k in msg.lower() for k in ("decommission", "not found", "does not exist", "no access")
+                ):
+                    # Modelo retirado/inexistente: no es una falla del servicio, así que
+                    # no abre el circuit breaker — el llamador prueba otro modelo.
+                    _ultimo_error_vision = f"Modelo de visión no disponible ({modelo}): {msg[:80]}"
                     return None
                 else:
                     _ultimo_error_vision = f"Error de visión: {msg[:120]}"
@@ -1680,7 +1725,7 @@ def extraer_dte_con_vision(
     if resultado is None and bool(_get_api_key()) and not _cb_is_open():
         resultado = _llamar_groq_vision(prompt, img_b64)
         if resultado is not None:
-            motor_vision = _GROQ_VISION_MODEL
+            motor_vision = _modelo_vision_usado or _GROQ_VISION_MODEL
 
     if resultado is None:
         return {}, [], {}
