@@ -42,6 +42,14 @@ def normalizar_unicode(texto: str) -> str:
     }
     for orig, repl in reemplazos.items():
         texto = texto.replace(orig, repl)
+    # Guion suave (U+00AD) y guiones tipográficos (U+2010/U+2011): algunos
+    # emisores (p. ej. UNILLANTAS) los usan en el Número de Control y en el
+    # Código de Generación — "DTE\u00ad03\u00adS019P001..." no calza con DTE-03-…
+    # y el documento entero se descartaba como "sin Número de Control".
+    texto = texto.replace("\u00ad", "-").replace("\u2010", "-").replace("\u2011", "-")
+    # Caracteres de ancho cero (invisibles) que parten números y UUID.
+    for invisible in ("\u200b", "\u200c", "\u200d", "\u2060", "\ufeff"):
+        texto = texto.replace(invisible, "")
     return texto
 
 
