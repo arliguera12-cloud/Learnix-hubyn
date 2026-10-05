@@ -1044,8 +1044,11 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
 
             # ── IVA / Crédito Fiscal ───────────────────────────────────────────────
             iva = 0.0
-            for pat in [
+            _iva_cero_explicito = False
+            for _n_pat, pat in enumerate([
                 r'[Ii]mpuesto\s+al\s+[Vv]alor\s+[Aa]gregado\s*13\s*%?\s*:?\s*\$?\s*(\d[\d,.]+)',
+                # "Impuesto al valor agregado (IVA) - 13%: $18.34" (Banco Promerica/Autofácil)
+                r'[Ii]mpuesto\s+al\s+[Vv]alor\s+[Aa]gregado\s*\(IVA\)\s*-?\s*13\s*%?\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'[Ii]mpuesto\s+al\s+[Vv]alor\s+[Aa]gregado\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'[Ii][Vv][Aa]\s*13\s*%?\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'13\s*%\s*[Ii][Vv][Aa]\s*:?\s*\$?\s*(\d[\d,.]+)',
@@ -1054,12 +1057,14 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                 r'[Ii][Vv][Aa]\s+[Dd][eé]bito\s+[Ff]iscal[^\d\n]*(\d[\d,.]+)',
                 r'[Cc]r[eé]dito\s+[Ff]iscal\s*:?\s*\$?\s*(\d[\d,.]+)',
                 r'[Dd][eé]bito\s+[Ff]iscal[^\d\n]*(\d[\d,.]+)',
-            ]:
+            ]):
                 m_iva = re.search(pat, t_clean)
                 if m_iva:
                     iva = limpiar_monto(m_iva.group(1))
                     if iva > 0:
                         break
+                    if _n_pat <= 4:
+                        _iva_cero_explicito = True  # el propio DTE imprime IVA 13% = 0.00
 
             # ── Gravadas ───────────────────────────────────────────────────────────
             gra = 0.0
@@ -1174,6 +1179,37 @@ def extraer_compra_nativo_pro(file_bytes: bytes, cliente_activo: dict, proveedor
                     ):
                         gra = base_real
                         exe = max(exe, fovial_cotrans)
+
+            # ── Ancla de IVA: el IVA 13% es la cifra más confiable del CCF ────────
+            # Los regex de gravadas toman "el primer total que calza" y en
+            # documentos con ventas exentas + gravadas (Banco Promerica,
+            # Galvanizadora, Autofácil) devolvían el subtotal COMPLETO como
+            # gravadas — IVA y exentas quedaban mal en el F-07. Si la base
+            # implícita (IVA/0.13) aparece literalmente en el documento y el
+            # resto (total − base − IVA) es exento, se corrige.
+            if tipo in ("03", "05", "06") and tot > 0:
+                _nums_doc = {
+                    round(limpiar_monto(rv), 2)
+                    for rv in re.findall(r'\d{1,3}(?:,\d{3})*\.\d{2}|\d+\.\d{2}', t_clean)
+                }
+                if iva > 0 and abs(iva - round(gra * 0.13, 2)) > 0.02:
+                    # Base gravada = el monto impreso en el documento cuyo 13% da el IVA
+                    # (±1 centavo de redondeo) — no se inventa una cifra que el PDF no trae.
+                    _cands = sorted(
+                        (n for n in _nums_doc
+                         if 0 < n <= tot and abs(round(n * 0.13, 2) - iva) <= 0.01),
+                        key=lambda n: (abs(n * 0.13 - iva), -n),
+                    )
+                    for _base in _cands:
+                        _exe_c = round(tot - _base - iva + ret - perc, 2)
+                        if 0 <= _exe_c < tot:
+                            gra = _base
+                            exe = round(max(_exe_c, fovial_cotrans), 2) + 0.0
+                            break
+                elif _iva_cero_explicito and gra > 0:
+                    # IVA 13% impreso en 0.00: el documento es 100% exento/no sujeto
+                    exe = round(tot + ret - perc, 2)
+                    gra = 0.0
 
             gra = max(gra, 0.0)
             iva = max(iva, 0.0)

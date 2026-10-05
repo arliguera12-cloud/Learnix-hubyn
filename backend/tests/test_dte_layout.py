@@ -128,6 +128,14 @@ caso("razón social envuelta en varias líneas se une completa",
 caso("encabezado DATOS EMISOR DATOS no es un nombre",
      es_nombre_sospechoso("DATOS EMISOR DATOS"), True)
 
+from utils.pdf_utils import normalizar_unicode  # noqa: E402
+
+caso("guion suave en el Número de Control (UNILLANTAS)",
+     buscar_numero_control(normalizar_unicode("Número de Control: DTE\u00ad03\u00adS019P001\u00ad000000000022144")),
+     ("DTE-03-S019P001-000000000022144", "03"))
+caso("caracteres de ancho cero se eliminan",
+     normalizar_unicode("AB\u200bCD\ufeff"), "ABCD")
+
 print()
 print("TODOS LOS CASOS PASAN" if not fallos else "FALLOS:\n  " + "\n  ".join(fallos))
 sys.exit(1 if fallos else 0)
