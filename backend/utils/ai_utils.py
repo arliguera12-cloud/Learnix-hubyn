@@ -238,10 +238,10 @@ _ANTIPATRONES_NOMBRE = re.compile(
     # candidato y deja este texto pegado al final de otra línea.
     r'CONSULTA\s+(?:MH|P[UÚ]BLICA)|JSON\s+Y\s+PDF|VERSI[OÓ]N\s+JSON|'
     r'MONEDA\s*:?\s*(?:USD|SVC)|ADMIN\.FACTURA\.GOB|'
-    r'PARA\s+LA\s+VENTA\s+DE\s+PRODUCTOS|'
+    r'^PARA\s+LA\s+VENTA\s+DE\s+PRODUCTOS|'
     r'FORMA\s+DE\s+PAGO|CONDICI[OÓ]N\s+DE\s+(?:LA\s+)?(?:OPERACI[OÓ]N|PAGO)|'
     r'ID\s+CONTROL|CONTROL\s+INTERNO|FECHA\s+Y\s+HORA|M[OÓ]DELO\s+(?:DE\s+)?FACTURACI[OÓ]N|'
-    r'NOMBRE\s+O\b|^VENDEDOR\b|^VENTA\s+(?:AL|DE)\b|^SERVICIOS\s+DEL\s+MINISTERIO'
+    r'DATOS\s+(?:DEL\s+)?(?:EMISOR|RECEPTOR)|NOMBRE\s+O\b|^VENDEDOR\b|^VENTA\s+(?:AL|DE)\b|^SERVICIOS\s+DEL\s+MINISTERIO'
     r')\b',
     re.I,
 )

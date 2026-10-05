@@ -143,7 +143,7 @@ NOMBRES_INVALIDOS = {
 }
 
 CORTE_NOMBRE = re.compile(
-    r"\s*(?:NIT|NRC|DUI|GIRO|ACTIVIDAD|DIRECCI[OÓ]N|CORREO|TEL[EÉ]F|"
+    r"\s*(?:NIT|NRC|DUI|GIRO|ACTIVIDAD(?!ES)|DIRECCI[OÓ]N|CORREO|TEL[EÉ]F|"
     r"TIPO\s+ESTAB|MUNICIPIO|DEPARTAMENTO|DISTRITO|DEPTO|NUMERO\s+DE\s+CONTROL|"
     r"M[OÓ]DELO\s+(?:DE|FACTURACI)|TIPO\s+(?:DE\s+TRANS|TRANSMISI)|"
     r"FECHA\s+Y\s+HORA|C[OÓ]DIGO\s+DE\s+GENERACI|FORMA\s+DE\s+PAGO|"
@@ -287,7 +287,7 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
     # ── Validador ─────────────────────────────────────────────────────────────
     def valido(s: str) -> bool:
         T = safe_str(s).strip().upper()
-        if len(T) < 4 or len(T) > 90:
+        if len(T) < 4 or len(T) > 120:
             return False
         if receptor_up and (T == receptor_up or T.startswith(receptor_up[:12]) or _mismo_nombre(T, receptor_up)):
             return False
@@ -340,10 +340,20 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
             continue
         # Línea de nombres = siguiente línea no vacía
         _nom_line = ""
-        for _j in range(_i + 1, min(_i + 4, len(_lineas_vis))):
-            if _lineas_vis[_j].strip():
-                _nom_line = _lineas_vis[_j]
-                break
+        _nom_idx = _i
+        # Variante "Nombre o razon social:FONDO DE ... Nombre o razon social:RECEPTOR"
+        # (nombre en la MISMA línea de la etiqueta, una columna por etiqueta).
+        _inline = re.match(
+            r'\s*[Nn]ombre\s*(?:[Oo]|/)\s*[Rr]az[oó]n\s+[Ss]ocial\s*:\s*(\S.*?)\s+'
+            r'[Nn]ombre\s*(?:[Oo]|/)\s*[Rr]az[oó]n\s+[Ss]ocial\s*:', _ln)
+        if len(_labels) >= 2 and _inline:
+            _nom_line = _inline.group(1)
+        else:
+            for _j in range(_i + 1, min(_i + 4, len(_lineas_vis))):
+                if _lineas_vis[_j].strip():
+                    _nom_line = _lineas_vis[_j]
+                    _nom_idx = _j
+                    break
         if not _nom_line:
             continue
         # Estrategia de corte (de más a menos confiable):
@@ -352,7 +362,9 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
         # 3) Posición de la 2ª etiqueta como referencia →  si cae en espacio
         # 4) Tomar la línea completa (1 sola columna)
         _izq = _nom_line  # default: una sola columna
-        if len(_labels) >= 2:
+        if _inline and len(_labels) >= 2:
+            _izq = _nom_line  # ya viene recortada a la columna izquierda
+        elif len(_labels) >= 2:
             _gap = re.search(r'\S(\s{3,})\S', _nom_line)
             if _gap:
                 _izq = _nom_line[:_gap.start() + 1]
@@ -375,7 +387,26 @@ def extraer_nombre_emisor(texto: str, nit_prov: str, receptor_nombre: str) -> st
             _gap = re.search(r'\S(\s{3,})\S', _nom_line)
             if _gap:
                 _izq = _nom_line[:_gap.start() + 1]
-        _cand = limpiar(_izq)
+        # Razón social larga envuelta en varias líneas ("FONDO DE ACTIVIDADES
+        # ESPECIALES" / "PARA LA VENTA DE PRODUCTOS Y" / "SERVICIOS DEL ..."):
+        # se une la continuación solo si la 1ª línea termina en conector o la
+        # siguiente arranca con uno — así no se pega la dirección en MAYÚSCULAS.
+        _CONECTOR = r'(?:DE|DEL|LA|EL|LOS|LAS|Y|E|POR|PARA|CAPITAL)'
+        _izq_unida = _izq
+        _k = _nom_idx + 1
+        while _k < len(_lineas_vis) and _k <= _nom_idx + 4:
+            _sig = _lineas_vis[_k].strip()
+            if (not _sig or ':' in _sig or re.search(r'\d', _sig)
+                    or not re.fullmatch(r"[A-ZÁÉÍÓÚÑ ,.&()\-]{3,60}", _sig)):
+                break
+            if _k == _nom_idx + 1 and not (
+                re.search(rf'\b{_CONECTOR}\s*$', _izq_unida.strip())
+                or re.match(rf'{_CONECTOR}\b', _sig)
+            ):
+                break
+            _izq_unida = f"{_izq_unida.strip()} {_sig}"
+            _k += 1
+        _cand = limpiar(_izq_unida)
         if valido(_cand) and len(_cand) >= 4:
             _log.debug("extraer_nombre_emisor: estrategia=-2 (columna izq) → %s", _cand)
             return _cand

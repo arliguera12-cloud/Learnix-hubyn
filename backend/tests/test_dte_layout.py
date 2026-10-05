@@ -114,6 +114,20 @@ caso("cliente sin identificadores no se rechaza",
      verificar_cliente_en_documento("RECEPTOR " + "x" * 40, {"nit": "", "nombre": ""}, "receptor"),
      (True, ""))
 
+from extractors.compras import extraer_nombre_emisor  # noqa: E402
+
+_TEXTO_FONDO = (
+    "EMISOR RECEPTOR\n"
+    "Nombre o razon social:FONDO DE ACTIVIDADES ESPECIALES Nombre o razon social:JONATHAN GUILLERMO RUIZ HERNANDEZ\n"
+    "PARA LA VENTA DE PRODUCTOS Y\nSERVICIOS DEL MINISTERIO DE OBRAS\nPUBLICAS Y DE TRANSPORTE\n"
+    "NIT:04810693-9\nNIT: 06141708001052\nNRC: 1252622 NRC:277478-4\n"
+)
+caso("razón social envuelta en varias líneas se une completa",
+     extraer_nombre_emisor(_TEXTO_FONDO, "06141708001052", "JONATHAN GUILLERMO RUIZ HERNANDEZ"),
+     "FONDO DE ACTIVIDADES ESPECIALES PARA LA VENTA DE PRODUCTOS Y SERVICIOS DEL MINISTERIO DE OBRAS PUBLICAS Y DE TRANSPORTE")
+caso("encabezado DATOS EMISOR DATOS no es un nombre",
+     es_nombre_sospechoso("DATOS EMISOR DATOS"), True)
+
 print()
 print("TODOS LOS CASOS PASAN" if not fallos else "FALLOS:\n  " + "\n  ".join(fallos))
 sys.exit(1 if fallos else 0)
