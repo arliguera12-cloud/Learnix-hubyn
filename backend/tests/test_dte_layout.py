@@ -101,9 +101,9 @@ from utils.dte_layout import verificar_cliente_en_documento  # noqa: E402
 
 for basura in ("FORMA DE PAGO: EFECTIVO", "FONDO DE", "MÓDELO DE FACTURACIÓN",
                "ID CONTROL INTERNO 112623", "S.A DE C.V", "VENDEDOR ALEXA 040"):
-    caso(f"nombre basura: {basura}", lambda b=basura: es_nombre_sospechoso(b), True)
+    caso(f"nombre basura: {basura}", es_nombre_sospechoso(basura), True)
 for bueno in ("REPUESTOS MANCIA, S.A. DE C.V", "FREUND, LTDA", "JULIO CÉSAR JOVEL SÁNCHEZ"):
-    caso(f"nombre válido: {bueno}", lambda b=bueno: es_nombre_sospechoso(b), False)
+    caso(f"nombre válido: {bueno}", es_nombre_sospechoso(bueno), False)
 
 _CLI = {"nit": "05020905931015", "nrc": "2774784", "dui": "", "nombre": "JONATHAN GUILLERMO RUIZ HERNANDEZ"}
 caso("texto sin recuadro de receptor no se rechaza",
