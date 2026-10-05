@@ -18,7 +18,7 @@ const NAV = [
   { to: '/proveedores',       Icon: IconProveedores,  label: 'Proveedores',       group: 'Directorios' },
 ]
 
-export default function Sidebar() {
+export default function Sidebar({ abierto = false }) {
   const navigate = useNavigate()
 
   async function handleLogout() {
@@ -39,7 +39,10 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="fixed inset-y-0 left-0 w-64 bg-panel border-r border-hairline flex flex-col z-30">
+    <aside
+      className={`fixed inset-y-0 left-0 w-64 bg-panel border-r border-hairline flex flex-col z-40
+                  transition-transform duration-200 lg:translate-x-0 ${abierto ? 'translate-x-0' : '-translate-x-full'}`}
+    >
       {/* Logo */}
       <div className="px-6 py-6 border-b border-hairline">
         <div className="flex items-baseline gap-2.5">
