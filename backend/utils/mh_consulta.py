@@ -15,9 +15,9 @@ totalExenta, totalPagar aparecen con el mismo nombre en el `resumen`).
 
 Uso responsable: se llama una sola vez por documento que el usuario ya
 subió. Un lote procesa varios documentos en paralelo (hasta 10 por tanda),
-así que sin control esto sí podía volverse una ráfaga de N consultas
-simultáneas — se limita a _MAX_CONCURRENTES en vuelo a la vez (ver abajo)
-para no parecer scraping automatizado ante Hacienda. Si el servicio no
+así que sin control saturaría el cupo que Hacienda da a nuestra IP — las
+consultas se espacian a una cada _INTERVALO_S segundos para toda la
+instancia (ver "Ritmo de consultas" abajo). Si el servicio no
 responde, cambia de forma, da 429 (tope de tasa) o el documento no existe,
 se degrada en silencio al pipeline normal (regex + Vision + IA) — nunca
 bloquea ni retrasa la extracción más que el timeout configurado. Los
@@ -38,6 +38,7 @@ es exactamente el escenario a cubrir.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 import time
@@ -53,33 +54,60 @@ _TIMEOUT = 4  # segundos — reducido de 8: un dato opcional no debería poder
 _UUID_RE  = re.compile(r'^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$')
 _FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
-# ── Throttle de concurrencia ────────────────────────────────────────────────
-# Cada extractor (ventas/compras/retenciones/sujetos_excluidos) llama a esta
-# consulta desde un hilo aparte por documento, y un lote se procesa con
-# asyncio.gather sobre toda una tanda (TAMANO_TANDA=10 en el frontend) —
-# eso significa hasta 10 llamadas a admin.factura.gob.sv EN PARALELO desde
-# la misma instancia de Railway.
+# ── Ritmo de consultas ──────────────────────────────────────────────────────
+# Hacienda aplica un tope de tasa a la IP que consulta: pasan ~15 consultas
+# seguidas y después responde 429 durante ~5 minutos. Lo que decide si se llega
+# al tope es el RITMO (consultas por minuto), no la concurrencia.
 #
-# Se probó bajar esto a 2 (y agregar jitter + reintento de 429, ver historial
-# git) asumiendo que el problema era una ráfaga de peticiones simultáneas.
-# Con logs reales de DOS lotes de 96 PDFs (uno con concurrencia=5, otro con
-# concurrencia=2) el resultado fue IDÉNTICO en ambos: exactamente 15
-# documentos pasan por Hacienda, siempre los primeros ~8s del lote, y después
-# un tope de tasa que no se recupera ni con jitter ni con el reintento de
-# 2.5s (0 de 26 reintentos recuperados entre las dos corridas) — el circuito
-# se abre y bloquea el resto por minutos. Bajar la concurrencia no cambió el
-# número de documentos que pasan ni cuándo se corta, solo hizo el lote más
-# lento sin ganar nada a cambio.
+# Evidencia (9-oct-2026, 51 consultas reales de un mismo lote, hechas desde un
+# navegador, una a la vez):
+#   · Con ~1 s de pausa entre consultas pasaron 15, 15 y 14, y cada grupo fue
+#     seguido de ~5 min de 429 (3 documentos × 6 reintentos con espera
+#     creciente, ~105 s cada uno).
+#   · Con 4 s entre consultas pasaron 51 de 51, sin un solo 429.
+# Eso explica los lotes de 96 PDFs ya registrados: con concurrencia 5 o con 2
+# pasaban siempre ~15 en los primeros segundos, porque ambas configuraciones
+# superan el ritmo por igual — bajar la concurrencia no cambiaba nada. Lo que
+# no se había probado era el espaciado entre consultas.
 #
-# Conclusión: no es un problema de ráfaga/concurrencia de nuestro lado — es
-# un CUPO FIJO que Hacienda aplica a nuestra IP de Railway (~15 consultas
-# antes de bloquear por varios minutos), invariante a qué tan espaciadas
-# vayan las peticiones. Contra un cupo fijo, la concurrencia solo determina
-# qué tan rápido se llega al tope — más concurrencia = se llega más rápido
-# y el resto del lote cae a Regex/Visión antes, sin ningún costo adicional.
-# Por eso se mantiene alta en vez de limitarla.
-_MAX_CONCURRENTES = 5
-_semaforo = threading.Semaphore(_MAX_CONCURRENTES)
+# Por eso: una consulta cada _INTERVALO_S, global a la instancia. Un documento
+# espera su turno hasta _ESPERA_MAX_S; si la fila ya es más larga, se omite la
+# consulta y el documento sigue con regex/Visión/IA, igual que si Hacienda no
+# hubiera respondido.
+#
+# Ojo: la evidencia es de una IP residencial. En Railway hay que confirmarlo en
+# los logs ("Consulta pública MH ... OK" vs "TOPE de tasa") y, si hace falta,
+# ajustar con las variables de entorno sin tocar código.
+def _leer_float(nombre: str, defecto: float) -> float:
+    try:
+        return float(os.getenv(nombre, defecto))
+    except ValueError:
+        return defecto
+
+
+_INTERVALO_S    = _leer_float("MH_CONSULTA_INTERVALO_S", 5.0)    # 12 por minuto
+_ESPERA_MAX_S   = _leer_float("MH_CONSULTA_ESPERA_MAX_S", 12.0)  # ~3 documentos en fila
+_COOLDOWN_429_S = _leer_float("MH_CONSULTA_COOLDOWN_429_S", 300.0)
+
+# Los tests reemplazan estos dos por un reloj falso.
+_ahora, _dormir = time.monotonic, time.sleep
+
+_ritmo_lock = threading.Lock()
+_proximo_turno = 0.0
+
+
+def _reservar_turno() -> float | None:
+    """Segundos a esperar para consultar a Hacienda, o None (sin reservar nada)
+    si la fila ya supera _ESPERA_MAX_S."""
+    global _proximo_turno
+    with _ritmo_lock:
+        ahora = _ahora()
+        turno = max(ahora, _proximo_turno)
+        if turno - ahora > _ESPERA_MAX_S:
+            return None
+        _proximo_turno = turno + _INTERVALO_S
+        return turno - ahora
+
 
 # ── Circuit breaker ──────────────────────────────────────────────────────
 _FALLOS_CONSECUTIVOS_MAX = 4
@@ -92,7 +120,7 @@ _circuito_abierto_hasta = 0.0
 
 def _circuito_abierto() -> bool:
     with _estado_lock:
-        return time.monotonic() < _circuito_abierto_hasta
+        return _ahora() < _circuito_abierto_hasta
 
 
 def _registrar_resultado(ok: bool) -> None:
@@ -106,13 +134,28 @@ def _registrar_resultado(ok: bool) -> None:
             _circuito_abierto_hasta = 0.0
             return
         _fallos_consecutivos += 1
-        if _fallos_consecutivos >= _FALLOS_CONSECUTIVOS_MAX and time.monotonic() >= _circuito_abierto_hasta:
-            _circuito_abierto_hasta = time.monotonic() + _CIRCUITO_COOLDOWN
+        if _fallos_consecutivos >= _FALLOS_CONSECUTIVOS_MAX and _ahora() >= _circuito_abierto_hasta:
+            _circuito_abierto_hasta = _ahora() + _CIRCUITO_COOLDOWN
             log.warning(
                 "Consulta pública MH: circuito ABIERTO tras %d fallos seguidos — "
                 "se omite esta consulta por %ds (Hacienda parece caída/degradada)",
                 _fallos_consecutivos, _CIRCUITO_COOLDOWN,
             )
+
+
+def _abrir_circuito_por_tope(retry_after: str | None) -> None:
+    """Un 429 es el tope de tasa de Hacienda dicho explícitamente: no hace falta
+    esperar varios fallos para abrir el circuito, y el bloqueo dura minutos
+    (~5 en lo observado), así que se respeta Retry-After si viene y, si no,
+    _COOLDOWN_429_S. Seguir insistiendo no lo acorta."""
+    global _circuito_abierto_hasta
+    try:
+        espera = min(float(retry_after), 900.0) if retry_after else _COOLDOWN_429_S
+    except ValueError:  # Retry-After también puede venir como fecha HTTP
+        espera = _COOLDOWN_429_S
+    with _estado_lock:
+        _circuito_abierto_hasta = max(_circuito_abierto_hasta, _ahora() + espera)
+    log.warning("Consulta pública MH: circuito ABIERTO por tope de tasa (429) — se omite por %.0fs", espera)
 
 
 # Hacienda usa varios textos distintos para "documento aceptado" según el
@@ -237,70 +280,70 @@ def consultar_dte_publico(codigo_generacion: str, fecha_emi_iso: str, ambiente: 
         log.info("Consulta pública MH: circuito abierto (Hacienda caída/degradada) — se omite %s sin intentar", cod)
         return None
 
-    t0 = time.monotonic()
-    with _semaforo:
-        espera = round(time.monotonic() - t0, 2)
-        if espera > 0.5:
-            log.info("Consulta pública MH %s esperó %.2fs por el cupo de concurrencia (%d simultáneas máx)", cod, espera, _MAX_CONCURRENTES)
+    espera = _reservar_turno()
+    if espera is None:
+        log.info("Consulta pública MH: fila de espera > %.0fs — se omite %s (sigue con regex/Visión)", _ESPERA_MAX_S, cod)
+        return None
+    if espera > 0:
+        log.info("Consulta pública MH %s espera %.1fs su turno (1 consulta cada %.1fs)", cod, espera, _INTERVALO_S)
+        _dormir(espera)
+        if _circuito_abierto():  # Hacienda puso tope mientras este documento esperaba
+            log.info("Consulta pública MH: circuito abierto mientras esperaba — se omite %s", cod)
+            return None
 
-        t1 = time.monotonic()
-        try:
-            resp = requests.get(
-                _URL,
-                params={"codigoGeneracion": cod, "fechaEmi": fecha, "ambiente": ambiente},
-                timeout=_TIMEOUT,
+    t1 = time.monotonic()
+    try:
+        resp = requests.get(
+            _URL,
+            params={"codigoGeneracion": cod, "fechaEmi": fecha, "ambiente": ambiente},
+            timeout=_TIMEOUT,
+        )
+        elapsed = round(time.monotonic() - t1, 2)
+        if resp.status_code == 429:
+            log.warning("Consulta pública MH: TOPE de tasa (429) para %s tras %.2fs — Retry-After=%s", cod, elapsed, resp.headers.get("Retry-After"))
+            _abrir_circuito_por_tope(resp.headers.get("Retry-After"))
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("action") == "OK" and isinstance(data.get("documento"), dict):
+            log.info("Consulta pública MH OK para %s (estado=%s, %.2fs)", cod, data.get("estadoDoc"), elapsed)
+            _registrar_resultado(True)
+            return data
+        # Hacienda respondió (no es una caída del servicio), pero con
+        # action != "OK" — puede ser simplemente que el documento no
+        # existe/no se encontró, O puede traer un estadoDoc real y
+        # valioso (p. ej. "Rechazado": el documento se transmitió pero
+        # Hacienda lo rechazó por no cumplir estructura/parámetros —
+        # confirmado con un caso real: action="ERROR" pero
+        # estadoDoc="Rechazado" con descripcionEstado explicando el
+        # motivo). Descartar esto en silencio escondía justo la
+        # información que un usuario iría a buscar manualmente
+        # escaneando el QR — se devuelve igual para que el extractor
+        # pueda marcarlo como alerta en vez de tratarlo como "no
+        # encontrado, seguir con regex/Visión sin más".
+        _estado_doc = str(data.get("estadoDoc") or "").strip()
+        if _estado_doc:
+            log.warning(
+                "Consulta pública MH: %s tiene estadoDoc=%r (%s) — %.2fs",
+                cod, _estado_doc, data.get("descripcionEstado") or "sin detalle", elapsed,
             )
-            elapsed = round(time.monotonic() - t1, 2)
-            if resp.status_code == 429:
-                # Se probó reintentar una vez tras 2.5s (ver historial git) —
-                # 0 de 26 reintentos se recuperaron en dos lotes reales de
-                # prueba. El bloqueo de Hacienda no es una ráfaga de un
-                # instante que un reintento corto pueda esquivar, así que se
-                # falla directo — reintentar solo agregaba tiempo muerto.
-                log.warning("Consulta pública MH: TOPE de tasa (429) para %s tras %.2fs — Retry-After=%s", cod, elapsed, resp.headers.get("Retry-After"))
-                _registrar_resultado(False)
-                return None
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get("action") == "OK" and isinstance(data.get("documento"), dict):
-                log.info("Consulta pública MH OK para %s (estado=%s, %.2fs)", cod, data.get("estadoDoc"), elapsed)
-                _registrar_resultado(True)
-                return data
-            # Hacienda respondió (no es una caída del servicio), pero con
-            # action != "OK" — puede ser simplemente que el documento no
-            # existe/no se encontró, O puede traer un estadoDoc real y
-            # valioso (p. ej. "Rechazado": el documento se transmitió pero
-            # Hacienda lo rechazó por no cumplir estructura/parámetros —
-            # confirmado con un caso real: action="ERROR" pero
-            # estadoDoc="Rechazado" con descripcionEstado explicando el
-            # motivo). Descartar esto en silencio escondía justo la
-            # información que un usuario iría a buscar manualmente
-            # escaneando el QR — se devuelve igual para que el extractor
-            # pueda marcarlo como alerta en vez de tratarlo como "no
-            # encontrado, seguir con regex/Visión sin más".
-            _estado_doc = str(data.get("estadoDoc") or "").strip()
-            if _estado_doc:
-                log.warning(
-                    "Consulta pública MH: %s tiene estadoDoc=%r (%s) — %.2fs",
-                    cod, _estado_doc, data.get("descripcionEstado") or "sin detalle", elapsed,
-                )
-                _registrar_resultado(True)
-                return data
-            log.info("Consulta pública MH: %s respondió sin documento válido (action=%r, %.2fs)", cod, data.get("action"), elapsed)
-            _registrar_resultado(True)  # el servicio respondió bien, solo no hay documento — no es una caída
-            return None
-        except requests.exceptions.Timeout:
-            elapsed = round(time.monotonic() - t1, 2)
-            log.warning("Consulta pública MH: TIMEOUT para %s tras %.2fs (límite %ds)", cod, elapsed, _TIMEOUT)
-            _registrar_resultado(False)
-            return None
-        except requests.exceptions.HTTPError as exc:
-            elapsed = round(time.monotonic() - t1, 2)
-            log.warning("Consulta pública MH: HTTP %s para %s tras %.2fs", getattr(exc.response, "status_code", "?"), cod, elapsed)
-            _registrar_resultado(False)
-            return None
-        except Exception as exc:
-            elapsed = round(time.monotonic() - t1, 2)
-            log.warning("Consulta pública MH falló para %s tras %.2fs: %s", cod, elapsed, exc)
-            _registrar_resultado(False)
-            return None
+            _registrar_resultado(True)
+            return data
+        log.info("Consulta pública MH: %s respondió sin documento válido (action=%r, %.2fs)", cod, data.get("action"), elapsed)
+        _registrar_resultado(True)  # el servicio respondió bien, solo no hay documento — no es una caída
+        return None
+    except requests.exceptions.Timeout:
+        elapsed = round(time.monotonic() - t1, 2)
+        log.warning("Consulta pública MH: TIMEOUT para %s tras %.2fs (límite %ds)", cod, elapsed, _TIMEOUT)
+        _registrar_resultado(False)
+        return None
+    except requests.exceptions.HTTPError as exc:
+        elapsed = round(time.monotonic() - t1, 2)
+        log.warning("Consulta pública MH: HTTP %s para %s tras %.2fs", getattr(exc.response, "status_code", "?"), cod, elapsed)
+        _registrar_resultado(False)
+        return None
+    except Exception as exc:
+        elapsed = round(time.monotonic() - t1, 2)
+        log.warning("Consulta pública MH falló para %s tras %.2fs: %s", cod, elapsed, exc)
+        _registrar_resultado(False)
+        return None
