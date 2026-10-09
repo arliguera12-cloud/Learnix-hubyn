@@ -40,5 +40,12 @@ Registro: `logs\mh_worker.log`. Para quitarlo: `desinstalar.bat` (como administr
   (o `schtasks /End` y `/Run` sobre `LearnixMHWorker`).
 - Limpieza ocasional de la cola: `DELETE FROM mh_consulta_cola WHERE actualizado_en < NOW() - INTERVAL '30 days';`
 
+## Margen frente al límite de solicitudes
+El backend limita a 30 solicitudes/min por IP. En reposo el worker hace ~13-15/min
+(un `reclamar` cada `MH_WORKER_ESPERA_S`, 4 s por defecto); trabajando, ~18/min
+(`reclamar` pide hasta 3 trabajos por llamada, y por cada consulta manda un
+`resultado`). Si quieres más holgura, pon `MH_WORKER_ESPERA_S=6` en `worker.env`
+(~10/min en reposo); es opcional.
+
 ## Pruebas
 `python test_mh_worker.py` (sin red). Backend: `python backend/tests/test_mh_relay.py`.
