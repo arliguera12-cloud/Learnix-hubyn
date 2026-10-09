@@ -255,6 +255,30 @@ def estado_doc_alerta(consulta_mh: dict | None) -> str | None:
     return f"documento {estado.upper()} ante Hacienda" + (f" — {detalle}" if detalle else "")
 
 
+def marca_mh(qr: dict | None, consulta_mh: dict | None) -> dict:
+    """
+    Estado de verificación para el `registro`, solo con el relay activo (en
+    modo directo devuelve `{}` y el registro no cambia):
+    · Hacienda respondió → mh_estado="verificado" (+ mh_estadoDoc y mh_alerta).
+    · Aún no respondió (cola con MH_RELAY_ESPERA_S=0, worker lento o apagado)
+      → mh_pendiente=True con mh_gen/mh_fecha_qr: el frontend sondea
+      POST /procesar/verificacion-mh con ellos y completa estado y alerta.
+    """
+    if not mh_relay.modo_relay():
+        return {}
+    if consulta_mh:
+        return {
+            "mh_estado": "verificado",
+            "mh_estadoDoc": str(consulta_mh.get("estadoDoc") or "") or None,
+            "mh_alerta": estado_doc_alerta(consulta_mh),
+        }
+    gen = str((qr or {}).get("codigo_generacion") or "").upper()
+    fecha = str((qr or {}).get("fecha_qr") or "").strip()
+    if not (_UUID_RE.match(gen) and _FECHA_RE.match(fecha)):
+        return {}
+    return {"mh_estado": "pendiente", "mh_pendiente": True, "mh_gen": gen, "mh_fecha_qr": fecha}
+
+
 def consultar_dte_publico(codigo_generacion: str, fecha_emi_iso: str, ambiente: str = "01") -> dict | None:
     """
     Consulta el DTE en el portal público del MH.

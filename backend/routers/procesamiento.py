@@ -7,8 +7,8 @@ listos para guardarse en Supabase.
 import asyncio
 import io
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
-from pydantic import ValidationError
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, ValidationError
 from starlette.concurrency import run_in_threadpool
 from typing import List
 
@@ -20,7 +20,8 @@ from schemas.procesamiento import DeclaranteFields
 from utils.concurrent_processor import procesar_json_nativo_ventas, procesar_json_nativo_compras
 from utils.dte_json import cargar_json as _cargar_json_dte
 from utils.org_context import get_current_org
-from utils import jobs as jobs_store
+from utils import jobs as jobs_store, mh_relay
+from utils.mh_consulta import _FECHA_RE, _UUID_RE, estado_doc_alerta
 
 router = APIRouter(dependencies=[Depends(get_current_org)])
 
@@ -459,6 +460,41 @@ async def obtener_estado_lote(job_id: str, org: dict = Depends(get_current_org))
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado o expirado")
     return job
+
+
+class DocumentoMH(BaseModel):
+    codigo_generacion: str
+    fecha_emi: str  # YYYY-MM-DD (la del QR, `mh_fecha_qr` del registro)
+
+
+@router.post("/verificacion-mh")
+async def verificacion_mh(
+    documentos: List[DocumentoMH] = Body(..., min_length=1, max_length=100),
+    org: dict = Depends(get_current_org),
+):
+    """
+    Estado de verificación en Hacienda de documentos ya procesados cuya consulta
+    quedó en la cola del relay (registro.mh_pendiente). El frontend sondea acá
+    hasta que no queden pendientes. Solo lee: no encola ni consulta a Hacienda,
+    y los datos son públicos de Hacienda, así que no se filtra por organización.
+
+    Devuelve por código {estado: pendiente|verificado|no_encontrado|error,
+    estadoDoc, alerta} y `worker_activo` (para distinguir "aún en cola" de
+    "nadie está verificando").
+    """
+    pares = []
+    for d in documentos:
+        cod, fecha = d.codigo_generacion.strip().upper(), d.fecha_emi.strip()
+        if not _UUID_RE.match(cod) or not _FECHA_RE.match(fecha):
+            raise HTTPException(status_code=422, detail="codigo_generacion o fecha_emi con formato inválido")
+        pares.append((cod, fecha))
+    try:
+        estados = await run_in_threadpool(mh_relay.leer_estados, pares)
+    except Exception:
+        raise HTTPException(status_code=503, detail="No se pudo leer el estado de verificación")
+    for e in estados.values():
+        e["alerta"] = estado_doc_alerta({"estadoDoc": e["estadoDoc"], "descripcionEstado": e.pop("descripcionEstado")})
+    return {"worker_activo": mh_relay.worker_vivo(), "documentos": estados}
 
 
 # ---------------------------------------------------------------------------

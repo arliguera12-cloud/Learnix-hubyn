@@ -21,7 +21,7 @@ from utils.ai_utils import (
 )
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible, vision_ultimo_error
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
-from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta, verificar_cliente_en_consulta_mh
+from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta, marca_mh, verificar_cliente_en_consulta_mh
 from utils.qa_utils import calcular_confianza
 from utils.dte_layout import ids_pareados, identificadores_emisor, buscar_numero_control, verificar_cliente_en_documento
 from utils.constants import (
@@ -1077,6 +1077,7 @@ def extraer_venta_nativo_pro(file_bytes: bytes, cliente_activo: dict, clientes_d
                 "num_control_raw": ctrl,          # Con guiones (para mostrar)
                 "sello"         : sello,
                 "gen"           : gen,            # Con guiones (UUID)
+                **marca_mh(_qr, _consulta_mh),  # verificación en segundo plano (ver utils/mh_consulta.py)
                 "gen_sin_guiones": gen_sin_guiones, # Sin guiones
                 "nit_cli"       : nit_cli,        # Vacío si consumidor con DUI
                 "dui_cli"       : dui_cli,

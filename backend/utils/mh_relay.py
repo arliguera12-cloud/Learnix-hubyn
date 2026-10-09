@@ -126,6 +126,35 @@ def _db_actualizar(cod: str, fecha: str, ambiente: str, cambios: dict) -> None:
     )
 
 
+def _db_estados(codigos: list[str]) -> list[dict]:
+    # Se piden solo estadoDoc/descripcionEstado del JSON: el resultado completo pesa varios KB por fila.
+    return (
+        _db().table("mh_consulta_cola")
+        .select("codigo_generacion,fecha_emi,estado,estadoDoc:resultado->>estadoDoc,descripcionEstado:resultado->>descripcionEstado")
+        .in_("codigo_generacion", codigos).eq("ambiente", "01")
+        .execute().data or []
+    )
+
+
+_ESTADO_PUBLICO = {"ok": "verificado", "no_encontrado": "no_encontrado", "error": "error"}
+
+
+def leer_estados(documentos: list[tuple[str, str]]) -> dict[str, dict]:
+    """Estado de verificación por código para [(codigo_generacion, fecha_emi)].
+    Solo lectura de datos públicos de Hacienda; lo que no está en la cola (o
+    sigue pendiente/procesando) figura como "pendiente". Lanza si la base falla."""
+    pedidos = {cod: fecha for cod, fecha in documentos}
+    salida = {cod: {"estado": "pendiente", "estadoDoc": None, "descripcionEstado": None} for cod in pedidos}
+    for f in _db_estados(list(pedidos)):
+        cod = f["codigo_generacion"]
+        if cod in pedidos and str(f["fecha_emi"]) == pedidos[cod]:
+            salida[cod] = {
+                "estado": _ESTADO_PUBLICO.get(f["estado"], "pendiente"),
+                "estadoDoc": f.get("estadoDoc"), "descripcionEstado": f.get("descripcionEstado"),
+            }
+    return salida
+
+
 # ── Interpretación de la respuesta de Hacienda ──────────────────────────────
 def _aceptar(data) -> dict | None:
     """Misma regla que utils/mh_consulta.consultar_dte_publico: se devuelve el

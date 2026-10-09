@@ -6,10 +6,10 @@
  * `estado` habría que hacerla dos veces (y ExtractorPage tenía una tercera
  * copia de `fmt`/`descargarBlob`).
  */
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import JSZip from 'jszip'
 import { IconCheck, IconAlerta, IconBuscar } from '../components/Icons'
-import { obtenerEstadoLote } from '../services/api'
+import { obtenerEstadoLote, verificacionMH, actualizarResultado } from '../services/api'
 
 /**
  * Caja de error para lotes con fallos por documento.
@@ -802,4 +802,112 @@ export function EstadoBadge({ estado }) {
       {ETIQUETA[nivel]}
     </span>
   )
+}
+
+// ─── Verificación en Hacienda en segundo plano ─────────────────────────────
+
+const MH_SONDEO_MS = 5000
+const MH_TOPE_MS   = 5 * 60 * 1000
+
+/**
+ * Completa el estado de verificación de los documentos que quedaron
+ * `mh_pendiente` (la consulta a Hacienda iba en cola cuando se extrajeron).
+ * Sondea cada ~5 s mientras haya pendientes, con tope de ~5 min por documento.
+ *
+ * Al llegar la respuesta se actualiza el `registro` de la fila (la misma
+ * referencia, como ya se hace con `dbId`: guardarResultados puede estar aún en
+ * vuelo y reemplazar el objeto le haría perder el id) y, si Hacienda lo reporta
+ * Rechazado/Invalidado, se suma la alerta a estado, detalle_confianza y
+ * correcciones_ia — así el aviso agregado, el guardado y la exportación la
+ * incluyen aunque haya llegado después de la extracción.
+ */
+export function useVerificacionMH(tipo, resultados, setResultados) {
+  const vistos = useRef(new Map())        // mh_gen → primera vez que se vio pendiente
+  const cerrados = useRef(new Set())      // mh_gen que pasaron el tope: ya no se sondean
+  const porGuardar = useRef(new Set())    // mh_gen actualizados que aún no tienen dbId
+  const ultimo = useRef(resultados)       // el sondeo lee las filas vigentes, no las del cierre del efecto
+  ultimo.current = resultados
+
+  const pendientes = resultados.filter(r => r.registro?.mh_pendiente && r.registro.mh_gen && r.registro.mh_fecha_qr)
+  const claves = pendientes.map(r => r.registro.mh_gen).join(',')
+
+  useEffect(() => {
+    if (!claves) return undefined
+    let cancelado = false
+    let id = null
+
+    async function sondear() {
+      const ahora = Date.now()
+      const vivos = ultimo.current.filter(r => {
+        const g = r.registro?.mh_gen
+        if (!r.registro?.mh_pendiente || !g || !r.registro.mh_fecha_qr || cerrados.current.has(g)) return false
+        if (!vistos.current.has(g)) vistos.current.set(g, ahora)
+        return true
+      })
+      if (!vivos.length) { clearInterval(id); return }
+      try {
+        const { data } = await verificacionMH(
+          [...new Map(vivos.map(r => [r.registro.mh_gen, { codigo_generacion: r.registro.mh_gen, fecha_emi: r.registro.mh_fecha_qr }])).values()].slice(0, 100),
+        )
+        if (cancelado) return
+        let cambio = false
+        for (const r of vivos) {
+          const g = r.registro.mh_gen
+          const v = data.documentos?.[g]
+          if (v && v.estado !== 'pendiente') {
+            aplicarVerificacion(r, v)
+            porGuardar.current.add(g)
+            cambio = true
+          } else if (ahora - vistos.current.get(g) >= MH_TOPE_MS) {
+            // Tope: sin worker se dice claro en vez de quedar "pendiente" para siempre.
+            cerrados.current.add(g)
+            if (!data.worker_activo) { r.registro = { ...r.registro, mh_estado: 'sin_respuesta' }; cambio = true }
+          }
+        }
+        if (cambio) setResultados(prev => [...prev])
+      } catch { /* sin red o 5xx: se reintenta en el próximo ciclo */ }
+    }
+
+    id = setInterval(sondear, MH_SONDEO_MS)
+    sondear()
+    return () => { cancelado = true; clearInterval(id) }
+  // Las filas se leen por `ultimo`; reiniciar el sondeo con cada cambio de fila lo dispararía en bucle.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claves])
+
+  // Persiste lo completado tan pronto la fila tiene dbId (puede llegar después que la respuesta).
+  useEffect(() => {
+    for (const r of resultados) {
+      const g = r.registro?.mh_gen
+      if (g && r.dbId && porGuardar.current.delete(g)) actualizarResultado(tipo, r.dbId, r.registro)
+    }
+  }, [resultados, tipo])
+}
+
+/** Aplica la respuesta de /procesar/verificacion-mh a una fila (muta r, ver useVerificacionMH). */
+export function aplicarVerificacion(r, v) {
+  const reg = { ...r.registro, mh_pendiente: false, mh_estado: v.estado, mh_estadoDoc: v.estadoDoc || null }
+  if (v.alerta) {
+    reg.mh_alerta = v.alerta
+    if (nivelEstado(reg.estado) === 'ok' || !reg.estado) reg.estado = 'REVISAR'
+    if (!String(reg.detalle_confianza || '').includes(v.alerta)) {
+      reg.detalle_confianza = `Hacienda: ${v.alerta}. ${reg.detalle_confianza || ''}`.trim()
+    }
+    const nota = `Hacienda: ${v.alerta}`
+    if (!(r.correcciones_ia || []).includes(nota)) r.correcciones_ia = [...(r.correcciones_ia || []), nota]
+  }
+  r.registro = reg
+}
+
+/** Insignia de verificación en Hacienda ("verificado ✓" / "pendiente" / "⚠ rechazado"). */
+export function MhBadge({ registro }) {
+  if (!registro) return null
+  const { mh_estado: e, mh_alerta: alerta, mh_estadoDoc: doc } = registro
+  if (alerta) return <span className="badge-err text-xs" title={alerta}>⚠ Hacienda: {doc || 'con problema'}</span>
+  if (e === 'verificado') return <span className="badge-ok text-xs" title={doc || ''}>Verificado ✓</span>
+  if (e === 'sin_respuesta') return <span className="badge-warn text-xs" title="El verificador no está activo; se verificará cuando vuelva.">Pendiente, sin respuesta del verificador</span>
+  if (e === 'no_encontrado') return <span className="badge-warn text-xs">No encontrado en Hacienda</span>
+  if (e === 'error') return <span className="badge-warn text-xs">Verificación fallida</span>
+  if (registro.mh_pendiente) return <span className="badge-warn text-xs">Pendiente</span>
+  return null
 }
