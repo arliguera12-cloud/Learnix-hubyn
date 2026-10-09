@@ -1,0 +1,4 @@
+worker.env
+logs/
+python_ruta.txt
+__pycache__/
