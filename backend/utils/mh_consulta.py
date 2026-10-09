@@ -88,6 +88,7 @@ def _leer_float(nombre: str, defecto: float) -> float:
 _INTERVALO_S    = _leer_float("MH_CONSULTA_INTERVALO_S", 5.0)    # 12 por minuto
 _ESPERA_MAX_S   = _leer_float("MH_CONSULTA_ESPERA_MAX_S", 12.0)  # ~3 documentos en fila
 _COOLDOWN_429_S = _leer_float("MH_CONSULTA_COOLDOWN_429_S", 300.0)
+_COOLDOWN_403_S = _leer_float("MH_CONSULTA_COOLDOWN_403_S", 600.0)
 
 # Los tests reemplazan estos dos por un reloj falso.
 _ahora, _dormir = time.monotonic, time.sleep
@@ -302,6 +303,21 @@ def consultar_dte_publico(codigo_generacion: str, fecha_emi_iso: str, ambiente: 
         if resp.status_code == 429:
             log.warning("Consulta pública MH: TOPE de tasa (429) para %s tras %.2fs — Retry-After=%s", cod, elapsed, resp.headers.get("Retry-After"))
             _abrir_circuito_por_tope(resp.headers.get("Retry-After"))
+            return None
+        if resp.status_code != 200:
+            # raise_for_status esconde el cuerpo y las cabeceras, que son lo que
+            # explica un bloqueo (WAF, IP de datacenter, etc.).
+            log.warning(
+                "Consulta pública MH: HTTP %s para %s — server=%r via=%r content-type=%r cuerpo=%r",
+                resp.status_code, cod, resp.headers.get("server"), resp.headers.get("via"),
+                resp.headers.get("content-type"), (resp.text or "")[:300],
+            )
+        if resp.status_code == 403:
+            # Bloqueo, no caída: reintentar cada turno solo gasta ritmo en consultas condenadas.
+            with _estado_lock:
+                global _circuito_abierto_hasta
+                _circuito_abierto_hasta = max(_circuito_abierto_hasta, _ahora() + _COOLDOWN_403_S)
+            log.warning("Consulta pública MH: circuito ABIERTO, bloqueado (403) — se omite por %.0fs", _COOLDOWN_403_S)
             return None
         resp.raise_for_status()
         data = resp.json()

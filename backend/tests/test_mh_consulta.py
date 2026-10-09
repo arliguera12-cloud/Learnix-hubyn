@@ -164,6 +164,22 @@ def _cuatro_timeouts():
 
 caso("4 timeouts seguidos abren el circuito (el 5º y 6º no consultan)", _cuatro_timeouts, 4)
 
+def _bloqueo_403(avance):
+    """Tras un 403, ¿se vuelve a consultar `avance` segundos después?"""
+    reloj = escenario(intervalo=0.0)
+    mh._COOLDOWN_403_S = 600.0
+    r403 = resp(403, headers={"server": "cloudflare", "content-type": "text/html"})
+    r403.text = "<html>Access denied</html>"
+    with patch.object(mh.requests, "get", side_effect=[r403, resp(cuerpo=DOC_OK)]) as get:
+        mh.consultar_dte_publico(COD, FECHA)
+        reloj.t += avance
+        mh.consultar_dte_publico(COD, FECHA)
+        return get.call_count
+
+
+caso("403 abre el circuito: a los 590 s sigue sin consultar", lambda: _bloqueo_403(590), 1)
+caso("403: a los 610 s vuelve a consultar", lambda: _bloqueo_403(610), 2)
+
 mh._ahora, mh._dormir = _ahora_real, _dormir_real
 print()
 print("TODOS LOS CASOS PASAN" if not fallos else f"FALLOS: {fallos}")
