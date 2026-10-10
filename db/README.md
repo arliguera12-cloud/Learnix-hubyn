@@ -14,6 +14,7 @@ Scripts SQL para provisionar el esquema en **Supabase → SQL Editor**.
 8. `09_permisos_funciones.sql` — cierra permisos de ejecución de funciones SECURITY DEFINER que no hacían falta
 9. `10_revision_manual_update.sql` — política UPDATE sobre `db_ventas`/`db_compras`/`db_retenciones`/`db_sujetos`, para la pantalla de Revisión Manual
 10. `11_libros_legales.sql` — correlativo persistente por cliente/año sobre `db_compras`/`db_ventas`, para el Libro de Compras y los libros de Ventas (Contribuyentes / Consumidor Final)
+11. `12_mh_consulta_cola.sql` — cola de consultas a Hacienda para el modo relay (worker en un equipo con internet de El Salvador; ver `scripts/mh_worker/README.md`)
 
 `legacy/schema_v1_superseded.sql` es el schema v1.0 (single-tenant), superado por `01_schema_saas.sql`. **No ejecutar en instalaciones nuevas** — se conserva solo como referencia histórica.
 

@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from middleware.rate_limit import rate_limit_middleware
-from routers import procesamiento, exportar, importar
+from routers import procesamiento, exportar, importar, mh_relay
 
 # Sin esto, el logger raíz de Python queda en WARNING sin handler (uvicorn
 # solo configura sus propios loggers "uvicorn"/"uvicorn.error"/"uvicorn.access",
@@ -99,6 +99,7 @@ async def security_headers(request: Request, call_next):
 app.include_router(procesamiento.router, prefix="/procesar", tags=["Procesamiento DTEs"])
 app.include_router(exportar.router, prefix="/exportar", tags=["Exportación"])
 app.include_router(importar.router, prefix="/importar", tags=["Importación"])
+app.include_router(mh_relay.router, prefix="/mh-relay", tags=["Relay Hacienda"])  # solo X-Relay-Token, sin login de usuario
 
 
 @app.get("/health", tags=["Sistema"])

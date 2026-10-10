@@ -45,6 +45,8 @@ import time
 
 import requests
 
+from utils import mh_relay
+
 log = logging.getLogger(__name__)
 
 _URL = "https://admin.factura.gob.sv/prod/consultas/publica/simple/1"
@@ -276,6 +278,11 @@ def consultar_dte_publico(codigo_generacion: str, fecha_emi_iso: str, ambiente: 
     if not _UUID_RE.match(cod) or not _FECHA_RE.match(fecha):
         log.info("Consulta pública MH: codigo_generacion/fecha con formato inválido (cod=%r, fecha=%r) — se omite", cod, fecha)
         return None
+
+    # Modo relay: desde Railway Hacienda responde 403, así que la consulta la
+    # hace el worker (ver utils/mh_relay.py). El ritmo lo controla el worker.
+    if mh_relay.modo_relay():
+        return mh_relay.consultar_via_relay(cod, fecha, ambiente)
 
     if _circuito_abierto():
         log.info("Consulta pública MH: circuito abierto (Hacienda caída/degradada) — se omite %s sin intentar", cod)
