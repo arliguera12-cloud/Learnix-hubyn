@@ -806,13 +806,13 @@ export function EstadoBadge({ estado }) {
 
 // ─── Verificación en Hacienda en segundo plano ─────────────────────────────
 
-const MH_SONDEO_MS = 5000
+const MH_SONDEO_MS = 10000
 const MH_TOPE_MS   = 5 * 60 * 1000
 
 /**
  * Completa el estado de verificación de los documentos que quedaron
  * `mh_pendiente` (la consulta a Hacienda iba en cola cuando se extrajeron).
- * Sondea cada ~5 s mientras haya pendientes, con tope de ~5 min por documento.
+ * Sondea cada ~10 s mientras haya pendientes (cada pestaña cuenta contra el límite de 30/min por IP), con tope de ~5 min por documento.
  *
  * Al llegar la respuesta se actualiza el `registro` de la fila (la misma
  * referencia, como ya se hace con `dbId`: guardarResultados puede estar aún en
