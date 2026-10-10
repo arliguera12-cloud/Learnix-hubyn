@@ -19,7 +19,7 @@ from utils.pdf_utils import (
 from utils.ai_utils import gemini_disponible, procesar_dte_con_gemini
 from utils.gemini_vision import extraer_dte_con_vision, vision_disponible, vision_ultimo_error
 from utils.qr_reader import extraer_datos_qr as _extraer_qr
-from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta, verificar_cliente_en_consulta_mh
+from utils.mh_consulta import consultar_dte_publico, estado_doc_alerta, marca_mh, verificar_cliente_en_consulta_mh
 from utils.qa_utils import calcular_confianza
 from utils.dte_layout import verificar_cliente_en_documento
 
@@ -500,6 +500,7 @@ def extraer_retencion_nativa(file_bytes: bytes, cliente_activo: dict) -> dict:
             "tipo"                : tipo,
             "sello"               : sello,
             "gen"                 : gen,
+            **marca_mh(_qr, _consulta_mh),  # verificación en segundo plano (ver utils/mh_consulta.py)
             "base"                : base,
             "ret"                 : ret,
             "fuentes"             : fuentes,

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { IconExportar, IconAlerta } from './Icons'
 import { exportarExcel } from '../services/api'
-import { EstadoBadge, esAlerta, nivelEstado, CAMPOS_EDITABLES } from '../utils/dte'
+import { EstadoBadge, MhBadge, esAlerta, nivelEstado, CAMPOS_EDITABLES } from '../utils/dte'
 
 // Campos a mostrar por tipo, con etiquetas amigables
 const CAMPOS_DISPLAY = {
@@ -183,6 +183,7 @@ export default function ResultadosTabla({ data, tipo, declaranteId, index, onCor
                 <span className="text-xs text-slate-500">{registro.fecha}</span>
               )}
               <EstadoBadge estado={registro.estado} />
+              <MhBadge registro={registro} />
               {tieneIa && (
                 <span className="text-xs text-slate-400">
                   {[...new Set(correcciones_ia.map(c => parsearCorreccion(c).label))].join(' · ')}

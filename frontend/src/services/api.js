@@ -97,6 +97,14 @@ export function obtenerEstadoLote(jobId) {
   return api.get(`/procesar/lote/jobs/${jobId}`)
 }
 
+/**
+ * Estado de verificación en Hacienda de documentos cuya consulta quedó en cola
+ * (registro.mh_pendiente). `documentos`: [{codigo_generacion, fecha_emi}], máx. 100.
+ */
+export function verificacionMH(documentos) {
+  return api.post('/procesar/verificacion-mh', documentos)
+}
+
 // ─── Guardar en Supabase ───────────────────────────────────────────────────
 
 const _TABLA = {

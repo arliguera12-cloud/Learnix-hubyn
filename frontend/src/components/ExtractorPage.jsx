@@ -5,7 +5,7 @@ import { exportarExcel, guardarResultados, actualizarResultado, nombreDesdeRespu
 import {
   fmt, descargarBlob, detalleErrorExport, fusionarSinDuplicados, avisoDuplicados, avisoConfianza, nivelEstado,
   usePersistenciaExtractor, useProgresoLote, subirLoteEnTandas, TAMANO_TANDA, registroCorregido, adjuntarArchivosLocales,
-  SearchBar, filtrarPorTexto, ErrorBox, AvisoBox,
+  SearchBar, filtrarPorTexto, ErrorBox, AvisoBox, useVerificacionMH,
 } from '../utils/dte'
 import { IconExportar, IconArchivo } from './Icons'
 
@@ -46,6 +46,7 @@ function calcularTotales(tipo, resultados) {
 
 export default function ExtractorPage({ titulo, Icon, descripcion, tipo, apiFn, loteApiFn }) {
   const { resultados, setResultados, declaranteId, setDeclaranteId } = usePersistenciaExtractor(tipo)
+  useVerificacionMH(tipo, resultados, setResultados)
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState(null)
   const [exportando,   setExportando]   = useState(null) // null | 'xlsx' | 'csv'
